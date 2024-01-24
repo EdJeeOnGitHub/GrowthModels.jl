@@ -17,8 +17,7 @@ module GrowthModels
            k_steady_state_hi, k_steady_state_lo, k_star,
            production_function,
            k_dot,
-           plot_production_function,
-           V_err
+           plot_production_function
 
 
     # Types
