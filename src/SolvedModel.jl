@@ -10,12 +10,30 @@ struct SolvedModel{T<:Model}
     m::T
 end
 
+#### Model Specific Dispatch ####
+# Can probably dispatch on just model here but will see in future
+function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: SkibaModel
+    c_policy_function = cubic_spline_interpolation(
+        variables.k,
+        variables.c,
+        extrapolation_bc = Interpolations.Line()
+    );
+    kdot_function = k -> production_function(m)(k) - m.δ*k - c_policy_function(k)    
+    SolvedModel(
+        value.convergence_status,
+        [:k],
+        [:c],
+        variables,
+        production_function(m),
+        x -> c_policy_function(x),
+        kdot_function,
+        m
+    )
+end
+
 function SolvedModel(m::T, res::NamedTuple) where T <: Model
     SolvedModel(m, res.value, res.variables)
 end
-
-
-
 
 
 function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, span::Tuple)
@@ -38,6 +56,9 @@ function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, time_period::Int
     return sol
 end
 
+
+
+# Plot evolution of outcomes using ODE result and model solution
 function plot_timepath(ode_result::ODESolution, r::SolvedModel{T}; N = size(ode_result, 1)) where T <: SkibaModel
 
     kt_path = Array(ode_result)
@@ -71,23 +92,14 @@ function plot_timepath(ode_result::ODESolution, r::SolvedModel{T}; N = size(ode_
 end
 
 
-#### Model Specific Dispatch ####
-
-function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: SkibaModel
-    c_policy_function = cubic_spline_interpolation(
-        variables.k,
-        variables.c,
-        extrapolation_bc = Interpolations.Line()
-    );
-    kdot_function = k -> production_function(m)(k) - m.δ*k - c_policy_function(k)    
-    SolvedModel(
-        value.convergence_status,
-        [:k],
-        [:c],
-        variables,
-        production_function(m),
-        x -> c_policy_function(x),
-        kdot_function,
-        m
+function show(io::IO, r::SolvedModel)
+    print(
+        io,
+        lineplot(
+            r.variables.k,
+            r.variables.c,
+            xlabel = "k(t)",
+            ylabel = "c(t)"
+        )
     )
 end

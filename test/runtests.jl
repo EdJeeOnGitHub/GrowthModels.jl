@@ -3,12 +3,9 @@ using Test
 using Plots
 
 @testset "GrowthModels.jl" begin
-
-
     m_skiba = SkibaModel()
     hyperparams = HyperParams(m_skiba)
     init_value = Value(hyperparams);
-
 
 
     fail_fit_value, fail_fit_variables, fail_fit_iter = solve_HJB(m_skiba, hyperparams, init_value = init_value, maxit = 2);
@@ -37,4 +34,13 @@ using Plots
 
     @test isa(plot_model_output, Plots.Plot) 
     @test isa(plot_diagnostics_output, Plots.Plot) 
+
+    # Model Output
+    r_skiba = SolvedModel(m_skiba, fit_value, fit_variables)
+    ode_skiba = r_skiba([0.1, 0.5, 1.0, 4.0], (0.0, 24.0))
+    time_plot = plot_timepath(ode_skiba, r_skiba)
+
+    @test isa(r_skiba, SolvedModel)
+    @test isa(time_plot, Plots.Plot)
+
 end

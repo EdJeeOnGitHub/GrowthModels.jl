@@ -1,11 +1,10 @@
-
+# Hyperparameters governing State Space and size of difference we're taking
 struct HyperParams
     N::Int64
     dk::Float64
     kmax::Float64
     kmin::Float64
 end
-
 
 # Create a HyperParams object 
 # just take kmin and kmax as inputs to create grid
@@ -14,7 +13,7 @@ function HyperParams(N = 1000, kmax = 10, kmin = 0.001)
     HyperParams(N, dk, kmax, kmin)
 end
 
-
+# Struct to hold value function, its derivatives, and convergence diagnostics
 struct Value
     v::Array{Float64,1}
     dVf::Array{Float64,1}
@@ -40,7 +39,15 @@ function Value(; v, dVf, dVb, dV0, dist, convergence_status = false, iter = 0)
     Value(v, dVf, dVb, dV0, dist, convergence_status, iter)
 end
 
-
+# Very simple struct to hold state space, individual models will define a function 
+# to construct state space specific to their model
+struct StateSpace
+    state::NamedTuple
+end
+# Define a custom getter method
+Base.getindex(ss::StateSpace, key::Symbol) = ss.state[key]
+# Define a custom property accessor
+Base.getproperty(ss::StateSpace, name::Symbol) = getfield(ss, :state)[name]
 
 #### Diagnostic Plotting ####
 

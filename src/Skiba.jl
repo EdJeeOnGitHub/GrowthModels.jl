@@ -27,11 +27,12 @@ function HyperParams(m::SkibaModel; N = 1000, kmax_f = 1.3, kmin_f = 0.001)
     HyperParams(N, dk, kmax, kmin)
 end
 
-function create_state_space(m::SkibaModel, hyperparams::HyperParams)
+function StateSpace(m::SkibaModel, hyperparams::HyperParams)
     k = range(hyperparams.kmin, hyperparams.kmax, length = hyperparams.N)
     y = production_function(m).(k)
-    return (k = k, y = y)
+    StateSpace((k = k, y = y))
 end
+
 
 
 function SkibaModel(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0)
@@ -50,7 +51,7 @@ y_H(m::SkibaModel) = (k) -> m.A_H*max(k - m.κ,0)^m.α
 y_L(m::SkibaModel) = (k) -> m.A_L*k^m.α 
 production_function(m::SkibaModel) = (k) -> max(m.A_H*max(k - m.κ,0)^m.α, m.A_L*k^m.α)
 
-function update_v(m::SkibaModel, value::Value, state::NamedTuple, hyperparams::HyperParams; iter = 0, crit = 10^(-6), Delta = 1000, silent = false)
+function update_v(m::SkibaModel, value::Value, state::StateSpace, hyperparams::HyperParams; iter = 0, crit = 10^(-6), Delta = 1000, silent = false)
     (; γ, α, ρ, δ, A_H, A_L, κ ) = m
     (; v, dVf, dVb, dV0, dist) = value
     (; k, y) = state # y isn't really a state but avoid computing it each iteration this way
@@ -161,22 +162,6 @@ end
 
 
 
-function solve_HJB(m::Model, hyperparams::HyperParams; init_value = Value(hyperparams), maxit = 1000)
-    state = create_state_space(m, hyperparams)
-    curr_iter = 0
-    val = deepcopy(init_value)
-    for n in 1:maxit
-        curr_iter += 1
-        output_value, curr_iter = update_v(m, val, state, hyperparams, iter = n)
-        if output_value.convergence_status
-            fit_value, _, fit_variables = update_v(m, val, state, hyperparams, iter = curr_iter, silent = true)
-            return (value = fit_value, variables = fit_variables, iter = curr_iter)
-            break
-        end
-        val = output_value
-    end
-    return (value = val, variables = nothing, iter = curr_iter)
-end
 
 
 #### Misc Functions ####
