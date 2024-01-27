@@ -49,7 +49,7 @@ k_star(m::SkibaModel) = m.κ/(1-(m.A_L/m.A_H)^(1/m.α))
 
 y_H(m::SkibaModel) = (k) -> m.A_H*max(k - m.κ,0)^m.α
 y_L(m::SkibaModel) = (k) -> m.A_L*k^m.α 
-production_function(m::SkibaModel) = (k) -> max(pow(m.A_H*max(k - m.κ,0), m.α), pow(m.A_L*k, m.α))
+production_function(m::SkibaModel) = (k) -> max(m.A_H*pow(max(k - m.κ,0), m.α), m.A_L*pow(k, m.α))
 
 function update_v(m::SkibaModel, value::Value, state::StateSpace, hyperparams::HyperParams; iter = 0, crit = 10^(-6), Delta = 1000, silent = false)
     (; γ, α, ρ, δ, A_H, A_L, κ ) = m
@@ -105,9 +105,9 @@ function update_v(m::SkibaModel, value::Value, state::StateSpace, hyperparams::H
         -1 => X[2:N],
         1 => Z[1:(N-1)]
     );
-        
-    if maximum(abs.(sum(A, dims=2))) > 10^(-6)
-        error(println("Improper Transition Matrix"))
+    A_err = abs.(sum(A, dims = 2))        
+    if maximum(A_err) > 10^(-12)
+        error(println("Improper Transition Matrix: " , maximum(A_err), " > 10^(-12)"))
     end    
 
 
