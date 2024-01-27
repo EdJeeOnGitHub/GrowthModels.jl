@@ -49,7 +49,7 @@ k_star(m::SkibaModel) = m.κ/(1-(m.A_L/m.A_H)^(1/m.α))
 
 y_H(m::SkibaModel) = (k) -> m.A_H*max(k - m.κ,0)^m.α
 y_L(m::SkibaModel) = (k) -> m.A_L*k^m.α 
-production_function(m::SkibaModel) = (k) -> max(NaNMath.pow(m.A_H*max(k - m.κ,0), m.α), NaNMath.pow(m.A_L*k, m.α))
+production_function(m::SkibaModel) = (k) -> max(pow(m.A_H*max(k - m.κ,0), m.α), pow(m.A_L*k, m.α))
 
 function update_v(m::SkibaModel, value::Value, state::StateSpace, hyperparams::HyperParams; iter = 0, crit = 10^(-6), Delta = 1000, silent = false)
     (; γ, α, ρ, δ, A_H, A_L, κ ) = m
