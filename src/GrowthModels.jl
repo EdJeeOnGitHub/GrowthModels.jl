@@ -7,6 +7,7 @@ module GrowthModels
     import Base: show
     using Printf
     using OrdinaryDiffEq, Interpolations
+    using NaNMath: pow
 
     # exports
     ## util exports
