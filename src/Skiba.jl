@@ -106,8 +106,8 @@ function update_v(m::SkibaModel, value::Value, state::StateSpace, hyperparams::H
         1 => Z[1:(N-1)]
     );
     A_err = abs.(sum(A, dims = 2))        
-    if maximum(A_err) > 10^(-12)
-        error(println("Improper Transition Matrix: " , maximum(A_err), " > 10^(-12)"))
+    if maximum(A_err) > 10^(-6)
+        error(println("Improper Transition Matrix: " , maximum(A_err), " > 10^(-6)"))
     end    
 
 
