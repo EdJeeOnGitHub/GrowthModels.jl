@@ -44,3 +44,7 @@ using Plots
     @test isa(time_plot, Plots.Plot)
 
 end
+
+
+# Differentiation tests
+include("test-differentiable.jl")

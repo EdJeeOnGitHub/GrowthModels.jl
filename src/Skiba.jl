@@ -7,13 +7,13 @@
 
 
 struct SkibaModel <: Model
-    γ::Float64
-    α::Float64
-    ρ::Float64
-    δ::Float64
-    A_H::Float64
-    A_L::Float64
-    κ::Float64
+    γ::Real
+    α::Real
+    ρ::Real
+    δ::Real
+    A_H::Real
+    A_L::Real
+    κ::Real
 end
 
 #### Util Functions ####

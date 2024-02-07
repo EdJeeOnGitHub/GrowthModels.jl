@@ -8,6 +8,8 @@ module GrowthModels
     using Printf
     using OrdinaryDiffEq, Interpolations
     using NaNMath: pow
+    using ForwardDiff
+    import Base:\
 
     # exports
     ## util exports
