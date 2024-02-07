@@ -36,7 +36,7 @@ function SolvedModel(m::T, res::NamedTuple) where T <: Model
 end
 
 
-function(r::SolvedModel)(state::Number, span::Tuple)
+function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, span::Tuple)
     f(u, p, t) = r.kdot_function.(u)
     k0 = state
     prob = ODEProblem(f, k0, span)
@@ -45,7 +45,7 @@ function(r::SolvedModel)(state::Number, span::Tuple)
 end
 
 
-function(r::SolvedModel)(state::Number, time_period::Int)
+function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, time_period::Int)
     if time_period == 0
         return state
     end
