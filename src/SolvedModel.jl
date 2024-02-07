@@ -36,7 +36,7 @@ function SolvedModel(m::T, res::NamedTuple) where T <: Model
 end
 
 
-function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, span::Tuple)
+function(r::SolvedModel)(state::Number, span::Tuple)
     f(u, p, t) = r.kdot_function.(u)
     k0 = state
     prob = ODEProblem(f, k0, span)
@@ -45,7 +45,7 @@ function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, span::Tuple)
 end
 
 
-function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, time_period::Int)
+function(r::SolvedModel)(state::Number, time_period::Int)
     if time_period == 0
         return state
     end
@@ -56,19 +56,41 @@ function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, time_period::Int
     return sol
 end
 
-function f_ode(model_type, solved_model)
-    if model_type != "inplace"
-        return (u, p, t) -> [solved_model.kdot_function(u[1])]
-    else
-        function (du, u, p, t)
-            du[1] = solved_model.kdot_function(u[1])
-            return nothing
-        end
+function(r::SolvedModel)(state_dict::Dict, ensemble)
+    function f(du, u, p, t)
+        du[1] = r.kdot_function(u[1])
+        return nothing
     end
+
+    flat_states = vcat(values(state_dict)...)
+    flat_keys = vcat([repeat([key], length(value)) for (key, value) in state_dict]...)
+    n_indiv = length(flat_keys)
+
+
+    prob = ODEProblem(f, [flat_states[1]], max_time, save_everystep = false)
+
+    function prob_fun(prob, i, repeat)
+            remake(prob, u0 = [flat_states[i]], tspan = flat_keys[i], save_everystep = false)
+    end
+
+    ensemble_prob = EnsembleProblem(
+        prob, 
+        prob_func = prob_fun
+    )
+    sol = solve(
+        ensemble_prob,
+        Tsit5(),
+        ensemble,
+        trajectories = n_indiv 
+    )
+    return sol
 end
 
-function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, max_time::Int, timesteps::Vector, ensemble::Union{EnsembleThreads,EnsembleSerial})
-    f = f_ode("inplace", r)
+function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, max_time::Int, timesteps::Vector, ensemble)
+    function f(du, u, p, t)
+        du[1] = r.kdot_function(u[1])
+        return nothing
+    end
     k0 = state
     prob = ODEProblem(f, k0[1], max_time)
     function prob_fun(prob, i, repeat)
@@ -85,10 +107,10 @@ function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, max_time::Int, t
     return sol
 end
 
-function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, span::Tuple, ensemble::Union{EnsembleThreads,EnsembleSerial})
+function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, time_span::Tuple, ensemble)
     f = f_ode("inplace", r)
     k0 = state
-    prob = ODEProblem(f, k0[1], span)
+    prob = ODEProblem(f, k0[1], time_span)
     function prob_fun(prob, i, repeat)
         remake(prob, u0 = [k0[i]])
     end
@@ -103,27 +125,6 @@ function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, span::Tuple, ens
     return sol
 end
 
-function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, time_period::Int, ensemble::Union{EnsembleThreads,EnsembleSerial})
-    if time_period == 0
-        return state
-    end
-    f = f_ode("inplace", r)
-    
-    k0 = state
-    prob = ODEProblem(f, k0[1], time_period)
-    function prob_fun(prob, i, repeat)
-        remake(prob, u0 = [k0[i]])
-    end
-    ensemble_prob = EnsembleProblem(prob, prob_func = prob_fun)
-    sol = solve(
-        ensemble_prob,
-        Tsit5(),
-        ensemble,
-        save_everystep = false,
-        trajectories = length(k0)
-    )
-    return sol
-end
 
 
 

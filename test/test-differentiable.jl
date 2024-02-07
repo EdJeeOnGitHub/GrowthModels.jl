@@ -12,14 +12,6 @@ test_params = [
     2.0
 ]
 
-p = test_params
-    m_skiba = SkibaModel(p...)
-    hyperparams = HyperParams(m_skiba)
-    init_value = Value(hyperparams);
-    fit_value, fit_variables, fit_iter = solve_HJB(m_skiba, hyperparams, init_value = init_value, maxit = 1000);
-    # r_skiba = SolvedModel(m_skiba, fit_value, fit_variables)
-
-
 function policy_wrapper_inplace(p; x = 1.0, init_value = Value(hyperparams))
     m_skiba = SkibaModel(p...)
     hyperparams = HyperParams(m_skiba)
