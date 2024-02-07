@@ -66,7 +66,7 @@ function(r::SolvedModel)(state_dict::Dict, ensemble; algorithm = Tsit5())
     flat_keys = vcat([repeat([key], length(value)) for (key, value) in state_dict]...)
     n_indiv = length(flat_keys)
 
-
+    max_time = maximum(flat_keys)
     prob = ODEProblem(f, [flat_states[1]], max_time, save_everystep = false)
 
     function prob_fun(prob, i, repeat)
