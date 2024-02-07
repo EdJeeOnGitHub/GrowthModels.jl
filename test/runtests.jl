@@ -48,3 +48,5 @@ end
 
 # Differentiation tests
 include("test-differentiable.jl")
+# Precision tests
+include("test-precision.jl")
