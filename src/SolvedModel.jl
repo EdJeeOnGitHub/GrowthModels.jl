@@ -56,7 +56,7 @@ function(r::SolvedModel)(state::Number, time_period::Int)
     return sol
 end
 
-function(r::SolvedModel)(state_dict::Dict, ensemble)
+function(r::SolvedModel)(state_dict::Dict, ensemble; algorithm = Tsit5())
     function f(du, u, p, t)
         du[1] = r.kdot_function(u[1])
         return nothing
@@ -79,7 +79,7 @@ function(r::SolvedModel)(state_dict::Dict, ensemble)
     )
     sol = solve(
         ensemble_prob,
-        Tsit5(),
+        algorithm,
         ensemble,
         trajectories = n_indiv 
     )
