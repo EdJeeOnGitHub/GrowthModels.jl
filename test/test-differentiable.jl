@@ -51,13 +51,16 @@ end
         @test isnan(g[i]) == false
     end
     inplace_value = Value(HyperParams())
-    g_inplace = ForwardDiff.gradient(x -> policy_wrapper_inplace(x, init_value = inplace_value), test_params)
-    g_inplace = ForwardDiff.gradient(x -> policy_wrapper_inplace(x, init_value = inplace_value), test_params)
-    @test isa(g_inplace, Vector);
-    for i in eachindex(g_inplace)
-        @test isnan(g_inplace[i]) == false
+    g_inplace_1 = ForwardDiff.gradient(x -> policy_wrapper_inplace(x, init_value = inplace_value), test_params)
+    g_inplace_2 = ForwardDiff.gradient(x -> policy_wrapper_inplace(x, init_value = inplace_value), test_params)
+    g_inplace_3 = ForwardDiff.gradient(x -> policy_wrapper_inplace(x, init_value = inplace_value), test_params)
+    @test isa(g_inplace_1, Vector);
+    for i in eachindex(g_inplace_1)
+        @test isnan(g_inplace_1[i]) == false
+        # first and second can be off due to first value function being far from 
+        # true value but second -> are very close to true value
+        @test abs(g_inplace_2[i] - g_inplace_3[i]) < 1e-8
     end
-
 end
 
 
