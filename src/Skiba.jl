@@ -29,7 +29,7 @@ end
 
 function StateSpace(m::SkibaModel, hyperparams::HyperParams)
     k = range(hyperparams.kmin, hyperparams.kmax, length = hyperparams.N)
-    y = production_function(m).(k)
+    y = production_function(m, collect(k))
     StateSpace((k = k, y = y))
 end
 
@@ -49,7 +49,21 @@ k_star(m::SkibaModel) = m.κ/(1-(m.A_L/m.A_H)^(1/m.α))
 
 y_H(m::SkibaModel) = (k) -> m.A_H*max(k - m.κ,0)^m.α
 y_L(m::SkibaModel) = (k) -> m.A_L*k^m.α 
-production_function(m::SkibaModel) = (k) -> max(m.A_H*pow(max(k - m.κ,0), m.α), m.A_L*pow(k, m.α))
+
+
+@inline function skiba_production_function(k, α, A_H, A_L, κ)
+    max(A_H * pow(max(k - κ, 0), α), A_L * pow(k, α))
+end
+
+@inline production_function(m::SkibaModel, k::Real, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function(k, α, A_H, A_L, κ)
+@inline production_function(m::SkibaModel, k::Real, params::Vector) = skiba_production_function(k, params[1], params[2], params[3], params[4])
+@inline production_function(m::SkibaModel, k::Real) = skiba_production_function(k, m.α, m.A_H, m.A_L, m.κ)
+
+@inline production_function(m::SkibaModel, k::Vector, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function.(k, α, A_H, A_L, κ)
+@inline production_function(m::SkibaModel, k::Vector, params::Vector) = skiba_production_function.(k, params[1], params[2], params[3], params[4])
+@inline production_function(m::SkibaModel, k::Vector) = skiba_production_function.(k, m.α, m.A_H, m.A_L, m.κ)
+
+
 
 function update_v(m::SkibaModel, value::Value, state::StateSpace, hyperparams::HyperParams; iter = 0, crit = 10^(-6), Delta = 1000, silent = false)
     (; γ, α, ρ, δ, A_H, A_L, κ ) = m
