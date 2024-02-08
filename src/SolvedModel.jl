@@ -140,8 +140,7 @@ function(r::SolvedModel)(state_dict::Dict, ensemble::DiffEqBase.EnsembleAlgorith
     prob = ODEProblem(f, flat_states[1], max_time, save_everystep = false)
 
     function prob_fun(prob, i, repeat)
-            new_u = @view flat_states[i]
-            remake(prob, u0 = new_u, tspan = flat_keys[i], save_everystep = false)
+            remake(prob, u0 = [flat_states[i]], tspan = flat_keys[i], save_everystep = false)
     end
 
     ensemble_prob = EnsembleProblem(
@@ -158,7 +157,6 @@ function(r::SolvedModel)(state_dict::Dict, ensemble::DiffEqBase.EnsembleAlgorith
     )
     return sol
 end
-
 
 # Plot evolution of outcomes using ODE result and model solution
 function plot_timepath(ode_result::ODESolution, r::SolvedModel{T}; N = size(ode_result, 1)) where T <: SkibaModel
