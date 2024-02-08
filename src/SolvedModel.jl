@@ -125,7 +125,38 @@ function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, time_span::Tuple
     return sol
 end
 
+function(r::SolvedModel)(state_dict::Dict, ensemble::DiffEqBase.EnsembleAlgorithm; algorithm::Union{DiffEqBase.AbstractDEAlgorithm,Nothing} = Tsit5(), reltol = 1e-6, abstol = 1e-6)
+    function f(du, u, p, t)
+        du[1] = r.kdot_function(u[1])
+        return nothing
+    end
 
+    flat_states = vcat(values(state_dict)...)
+    flat_keys = vcat([repeat([key], length(value)) for (key, value) in state_dict]...)
+    n_indiv = length(flat_keys)
+
+    max_time = maximum(flat_keys)
+    prob = ODEProblem(f, flat_states[1], max_time, save_everystep = false)
+
+    function prob_fun(prob, i, repeat)
+            new_u = @view flat_states[i]
+            remake(prob, u0 = new_u, tspan = flat_keys[i], save_everystep = false)
+    end
+
+    ensemble_prob = EnsembleProblem(
+        prob, 
+        prob_func = prob_fun
+    )
+    sol = solve(
+        ensemble_prob,
+        algorithm,
+        ensemble,
+        reltol = reltol,
+        abstol = abstol,
+        trajectories = n_indiv 
+    )
+    return sol
+end
 
 
 # Plot evolution of outcomes using ODE result and model solution
