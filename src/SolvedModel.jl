@@ -18,13 +18,14 @@ function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Skiba
         variables.c,
         extrapolation_bc = Interpolations.Line()
     );
-    kdot_function = k -> production_function(m)(k) - m.δ*k - c_policy_function(k)    
+    prod_func = x -> production_function(m, x)
+    kdot_function = k -> prod_func(k) - m.δ*k - c_policy_function(k)    
     SolvedModel(
         value.convergence_status,
         [:k],
         [:c],
         variables,
-        production_function(m),
+        prod_func,
         x -> c_policy_function(x),
         kdot_function,
         m
