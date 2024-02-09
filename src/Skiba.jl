@@ -185,7 +185,7 @@ V_err(m::SkibaModel) = (value::Value, variables::NamedTuple) -> variables.c .^ (
 
 #### Plotting ####
 function plot_production_function(m::SkibaModel, k)
-    y = production_function(m).(k)
+    y = production_function(m, collect(k))
     yH = y_H(m).(k)
     yL = y_L(m).(k)
     plot(k, y, label="y")

@@ -117,8 +117,8 @@ function plot_model(m::Model, value::Value, variables::NamedTuple)
     fit_kdot = k_dot(m)(variables)
 
     # subplot = plot(layout = (2, 2), size = (800, 600))
-    p1 =  plot_production_function(m, k)
-    scatter!(p1, [kstar], [production_function(m)(kstar)], label="kstar", markersize=4)
+    p1 =  plot_production_function(m, collect(k))
+    scatter!(p1, [kstar], [production_function(m, kstar)], label="kstar", markersize=4)
 
     index = findmin(abs.(kstar .- k))[2]
     p2 = plot(k, v, label="V")
