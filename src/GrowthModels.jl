@@ -17,7 +17,8 @@ module GrowthModels
            Value,
            StateSpace,
            plot_model, 
-           plot_diagnostics
+           plot_diagnostics,
+           ValueFunctionError
     # solved model output
     export SolvedModel
     ## skiba exports

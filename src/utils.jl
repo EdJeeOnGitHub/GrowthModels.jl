@@ -1,3 +1,10 @@
+
+struct ValueFunctionError <: Exception
+    var::String
+end
+Base.showerror(io::IO, e::ValueFunctionError) = print(io, "ValueFunctionError: Error whilst iterating value function - $(e.var)")
+
+
 # ForwardDiff of a Dual vector by a sparse matrix
 # See: https://github.com/magerton/ForwardDiffSparseSolve.jl
 function \(A::SparseMatrixCSC{ForwardDiff.Dual{T, V, N}, P}, b::AbstractVector{G}) where {T, V, N, P<:Integer, G}
