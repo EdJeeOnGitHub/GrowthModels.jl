@@ -109,7 +109,10 @@ function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, max_time::Int, t
 end
 
 function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, time_span::Tuple, ensemble)
-    f = f_ode("inplace", r)
+    function f(du, u, p, t)
+        du[1] = r.kdot_function(u[1])
+        return nothing
+    end
     k0 = state
     prob = ODEProblem(f, k0[1], time_span)
     function prob_fun(prob, i, repeat)
