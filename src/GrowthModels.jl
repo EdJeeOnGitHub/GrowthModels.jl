@@ -21,16 +21,19 @@ module GrowthModels
            ValueFunctionError
     # solved model output
     export SolvedModel
+    export update_v,
+           solve_HJB
     ## skiba exports
     export SkibaModel, 
-           update_v,
-           solve_HJB, 
            k_steady_state_hi, k_steady_state_lo, k_star,
            production_function,
            k_dot,
            plot_production_function,
            plot_timepath
 
+    # Models
+    export SkibaModel, 
+           RamseyCassKoopmansModel
 
     # Types
     abstract type Model end
@@ -38,14 +41,13 @@ module GrowthModels
 
 
     # Modules
+    include("Models.jl")
     include("utils.jl")
     include("HJB.jl")
     include("Skiba.jl")
+    include("RamseyCassKoopmans.jl")
     include("SolvedModel.jl")
 
-    function show(io::IO, m::SkibaModel)
-        print(io, "SkibaModel: γ = ", m.γ, ", α = ", m.α, ", ρ = ", m.ρ, ", δ = ", m.δ, ", A_H = ", m.A_H, ", A_L = ", m.A_L, ", κ = ", m.κ)
-    end
 
     function show(io::IO, h::HyperParams)
         print(io, "HyperParams(N = ", h.N, ", dk = ", @sprintf("%.3g", h.dk), ", kmax = ", @sprintf("%.3g", h.kmax), ", kmin = ", @sprintf("%.3g", h.kmin), ")")
