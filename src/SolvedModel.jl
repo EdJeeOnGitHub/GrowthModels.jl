@@ -8,6 +8,8 @@ struct SolvedModel{T<:Model}
     production_function_prime::Function
     policy_function::Function
     kdot_function::Function
+    ydot_function::Function
+    cdot_function::Function
     m::T
 end
 
@@ -22,6 +24,17 @@ function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union
     prod_func = x -> production_function(m, x)
     prod_func_prime = x -> production_function_prime(m, x)
     kdot_function = k -> prod_func(k) - m.δ*k - c_policy_function(k)    
+    ydot_function = (k, kdot) -> prod_func(k) * kdot
+    ydot_function = k -> prod_func(k) * kdot_function(k)
+
+    function cdot_function(c, k, γ, ρ) 
+        cdot = (c/γ) * (prod_func_prime(k) - ρ)
+        return cdot
+    end
+    function cdot_function(c, k)
+        cdot_function(c, k, m.γ, m.ρ)
+    end
+
     SolvedModel(
         value.convergence_status,
         [:k],
@@ -31,6 +44,8 @@ function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union
         prod_func_prime,
         x -> c_policy_function(x),
         kdot_function,
+        ydot_function,
+        cdot_function,
         m
     )
 end
