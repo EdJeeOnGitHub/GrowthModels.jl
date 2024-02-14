@@ -27,13 +27,23 @@ end
 k_steady_state(m::RamseyCassKoopmansModel) = (m.α*m.A/(m.ρ + m.δ))^(1/(1-m.α))
 k_star(m::RamseyCassKoopmansModel) = k_steady_state(m)
 
+# Production function
 @inline function rck_production_function(k, α, A, δ)
     A * pow(k, α)
 end
+# Derivative of production function
+@inline function rck_production_function_prime(k, α, A, δ)
+    A * α * pow(k, α - 1)
+end
+
 
 @inline production_function(m::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, α::Real, A::Real, δ::Real) = rck_production_function.(k, α, A, δ)
 @inline production_function(m::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, params::Vector) = rck_production_function.(k, params[1], params[2], params[3])
 @inline production_function(m::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}) = rck_production_function.(k, m.α, m.A, m.δ)
+
+@inline production_function_prime(m::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, α::Real, A::Real, δ::Real) = rck_production_function_prime.(k, α, A, δ)
+@inline production_function_prime(m::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, params::Vector) = rck_production_function_prime.(k, params[1], params[2], params[3])
+@inline production_function_prime(m::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}) = rck_production_function_prime.(k, m.α, m.A, m.δ)
 
 
 

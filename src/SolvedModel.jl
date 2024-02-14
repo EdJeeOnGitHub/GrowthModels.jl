@@ -5,6 +5,7 @@ struct SolvedModel{T<:Model}
     control::Vector{Symbol}
     variables::NamedTuple
     production_function::Function
+    production_function_prime::Function
     policy_function::Function
     kdot_function::Function
     m::T
@@ -19,6 +20,7 @@ function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union
         extrapolation_bc = Interpolations.Line()
     );
     prod_func = x -> production_function(m, x)
+    prod_func_prime = x -> production_function_prime(m, x)
     kdot_function = k -> prod_func(k) - m.δ*k - c_policy_function(k)    
     SolvedModel(
         value.convergence_status,
@@ -26,6 +28,7 @@ function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union
         [:c],
         variables,
         prod_func,
+        prod_func_prime,
         x -> c_policy_function(x),
         kdot_function,
         m

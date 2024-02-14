@@ -40,6 +40,9 @@ using Plots
     ode_skiba = r_skiba([0.1, 0.5, 1.0, 4.0], (0.0, 24.0))
     time_plot = plot_timepath(ode_skiba, r_skiba)
 
+
+    @test r_skiba.production_function_prime(0.1) == m_skiba.A_L * m_skiba.α * 0.1^(m_skiba.α - 1)
+
     @test isa(r_skiba, SolvedModel)
     @test isa(time_plot, Plots.Plot)
 
@@ -82,6 +85,9 @@ end
     r = SolvedModel(m, fit_value, fit_variables)
     ode = r([0.1, 0.5, 1.0, 4.0], (0.0, 24.0))
     time_plot = plot_timepath(ode, r)
+
+
+    @test r.production_function_prime(0.1) == m.A * m.α * 0.1^(m.α - 1)
 
     @test isa(r, SolvedModel)
     @test isa(time_plot, Plots.Plot)
