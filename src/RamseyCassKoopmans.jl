@@ -36,7 +36,6 @@ end
     A * α * pow(k, α - 1)
 end
 
-
 @inline production_function(m::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, α::Real, A::Real, δ::Real) = rck_production_function.(k, α, A, δ)
 @inline production_function(m::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, params::Vector) = rck_production_function.(k, params[1], params[2], params[3])
 @inline production_function(m::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}) = rck_production_function.(k, m.α, m.A, m.δ)
@@ -50,6 +49,7 @@ end
 
 #### Misc Functions ####
 k_dot(m::RamseyCassKoopmansModel) =  (variables::NamedTuple) -> variables.y .- m.δ .* variables.k .- variables.c
+k_star(m::RamseyCassKoopmansModel) = ((m.α * m.A)/ (m.ρ + m.δ))^(1/(1 - m.α))
 
 #### Plotting ####
 function plot_production_function(m::RamseyCassKoopmansModel, k)

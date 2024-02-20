@@ -27,12 +27,12 @@ function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union
     ydot_function = (k, kdot) -> prod_func(k) * kdot
     ydot_function = k -> prod_func(k) * kdot_function(k)
 
-    function cdot_function(c, k, γ, ρ) 
-        cdot = (c/γ) * (prod_func_prime(k) - ρ)
+    function cdot_function(c, k, γ, ρ, δ) 
+        cdot = (c/γ) * (prod_func_prime(k) - ρ - δ)
         return cdot
     end
     function cdot_function(c, k)
-        cdot_function(c, k, m.γ, m.ρ)
+        cdot_function(c, k, m.γ, m.ρ, m.δ)
     end
 
     SolvedModel(
