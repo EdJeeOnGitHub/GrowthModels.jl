@@ -49,7 +49,6 @@ end
 
 #### Misc Functions ####
 k_dot(m::RamseyCassKoopmansModel) =  (variables::NamedTuple) -> variables.y .- m.δ .* variables.k .- variables.c
-k_star(m::RamseyCassKoopmansModel) = ((m.α * m.A)/ (m.ρ + m.δ))^(1/(1 - m.α))
 
 #### Plotting ####
 function plot_production_function(m::RamseyCassKoopmansModel, k)
