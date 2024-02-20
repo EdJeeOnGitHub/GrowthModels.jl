@@ -15,7 +15,7 @@ end
 
 #### Model Specific Dispatch ####
 # Can probably dispatch on just model here but will see in future
-function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union{SkibaModel,RamseyCassKoopmansModel}
+function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}
     c_policy_function = cubic_spline_interpolation(
         variables.k,
         variables.c,
@@ -180,7 +180,7 @@ function(r::SolvedModel)(state_dict::Dict, ensemble::DiffEqBase.EnsembleAlgorith
 end
 
 # Plot evolution of outcomes using ODE result and model solution
-function plot_timepath(ode_result::ODESolution, r::SolvedModel{T}; N = size(ode_result, 1)) where T <: Union{SkibaModel,RamseyCassKoopmansModel}
+function plot_timepath(ode_result::ODESolution, r::SolvedModel{T}; N = size(ode_result, 1)) where T <: Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}
     kt_path = Array(ode_result)
     ct_path = r.policy_function.(kt_path)
     yt_path = r.production_function.(kt_path)
@@ -212,7 +212,7 @@ function plot_timepath(ode_result::ODESolution, r::SolvedModel{T}; N = size(ode_
 end
 
 
-function plot_timepath(ode_result::EnsembleSolution, r::SolvedModel{T}; N = size(ode_result, 3)) where T <: Union{SkibaModel,RamseyCassKoopmansModel}
+function plot_timepath(ode_result::EnsembleSolution, r::SolvedModel{T}; N = size(ode_result, 3)) where T <: Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}
     kt_path = Array(ode_result)
     ct_path = r.policy_function.(kt_path)
     yt_path = r.production_function.(kt_path)

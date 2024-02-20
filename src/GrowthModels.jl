@@ -24,8 +24,7 @@ module GrowthModels
     export update_v,
            solve_HJB
     ## skiba exports
-    export SkibaModel, 
-           k_steady_state_hi, k_steady_state_lo, k_star,
+    export  k_steady_state_hi, k_steady_state_lo, k_star,
            production_function,
            k_dot,
            plot_production_function,
@@ -33,6 +32,7 @@ module GrowthModels
 
     # Models
     export SkibaModel, 
+           SmoothSkibaModel,
            RamseyCassKoopmansModel
 
     # Types
@@ -45,6 +45,7 @@ module GrowthModels
     include("utils.jl")
     include("HJB.jl")
     include("Skiba.jl")
+    include("SmoothSkiba.jl")
     include("RamseyCassKoopmans.jl")
     include("SolvedModel.jl")
 

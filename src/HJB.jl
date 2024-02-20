@@ -1,5 +1,5 @@
 
-function update_v(m::Union{SkibaModel,RamseyCassKoopmansModel}, value::Value, state::StateSpace, hyperparams::HyperParams; iter = 0, crit = 10^(-6), Delta = 1000, silent = false)
+function update_v(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}, value::Value, state::StateSpace, hyperparams::HyperParams; iter = 0, crit = 10^(-6), Delta = 1000, silent = false)
     γ, ρ, δ = m.γ, m.ρ, m.δ
     (; v, dVf, dVb, dV0, dist) = value
     (; k, y) = state # y isn't really a state but avoid computing it each iteration this way
@@ -130,4 +130,4 @@ function solve_HJB(m::Model, hyperparams::HyperParams; init_value = Value(hyperp
 end
 
 dV_Upwind(value::Value, variables::NamedTuple) = value.dVf .* variables.If .+ value.dVb .* variables.Ib .+ value.dV0 .* variables.I0
-V_err(m::Union{SkibaModel,RamseyCassKoopmansModel}) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.γ) / (1-m.γ) .+ dV_Upwind(value, variables) .* k_dot(m)(variables) .- m.ρ .* value.v
+V_err(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.γ) / (1-m.γ) .+ dV_Upwind(value, variables) .* k_dot(m)(variables) .- m.ρ .* value.v
