@@ -30,7 +30,7 @@ end
 
 
 
-function SmoothSkibaModel(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0, β = 1.0)
+function SmoothSkibaModel(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0, β = 10.0)
     SmoothSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, β)
 end
 

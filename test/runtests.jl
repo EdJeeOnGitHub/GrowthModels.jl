@@ -96,7 +96,7 @@ end
 
 
 @testset "SmoothSkiba" begin
-    m = SmoothSkibaModel(β = 100.0, δ = 0.05, κ = 2.0, ρ = 0.2)
+    m = SmoothSkibaModel(β = 10.0)
     hyperparams = HyperParams(m)
     init_value = Value(hyperparams);
 
