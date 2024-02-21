@@ -19,7 +19,8 @@ module GrowthModels
            plot_model, 
            plot_diagnostics,
            ValueFunctionError,
-           solve_growth_model
+           solve_growth_model,
+           check_statespace_constraints
     # solved model output
     export SolvedModel
     export update_v,

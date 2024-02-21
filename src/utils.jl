@@ -149,6 +149,20 @@ function plot_model(m::Model, value::Value, variables::NamedTuple)
     return subplot
 end
 
+"""
+    check_statespace_constraints(statespace::GrowthModels.StateSpace, p)
+
+Check if statespace (non-negativity of capital) is satisfied even with 0 consumption. Throw a 
+    domain error if not.
+"""
+function check_statespace_constraints(statespace::StateSpace, p)
+    # Check state constraint satisfied and exit early if not 
+    max_statespace_constraint = statespace.y[end] - p.δ * maximum(statespace.k)
+    min_statespace_constraint = statespace.y[1] - p.δ * minimum(statespace.k)
+    if max_statespace_constraint < 0 || min_statespace_constraint < 0
+        throw(DomainError(p, "State space constraint violated"))
+    end
+end
 
 """
     solve_growth_model(model::GrowthModels.Model, init_value::GrowthModels.Value)
