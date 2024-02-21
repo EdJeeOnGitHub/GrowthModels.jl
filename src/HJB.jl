@@ -116,10 +116,10 @@ update_v is internal function used for value function iteration. update_value_fu
 """
 function update_value_function!(init_value, res)
     if res.value.convergence_status == true
-            init_value.v[:] = value.(res.value.v)
-            init_value.dVf[:] = value.(res.value.dVf)
-            init_value.dVb[:] = value.(res.value.dVb)
-            init_value.dV0[:] = value.(res.value.dV0)
+            init_value.v[:] = ForwardDiff.value.(res.value.v)
+            init_value.dVf[:] = ForwardDiff.value.(res.value.dVf)
+            init_value.dVb[:] = ForwardDiff.value.(res.value.dVb)
+            init_value.dV0[:] = ForwardDiff.value.(res.value.dV0)
     end
 end
 
