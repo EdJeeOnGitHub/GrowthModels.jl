@@ -148,3 +148,28 @@ function plot_model(m::Model, value::Value, variables::NamedTuple)
 
     return subplot
 end
+
+
+"""
+    solve_growth_model(model::GrowthModels.Model, init_value::GrowthModels.Value)
+
+Solves the growth model using the specified model and initial value.
+
+# Arguments
+- `model::GrowthModels.Model`: The growth model to solve.
+- `init_value::GrowthModels.Value`: The initial value for the model.
+
+# Returns
+- `sm::SolvedModel`: The solved growth model.
+
+# Example
+"""
+function solve_growth_model(model::Model, init_value::Value) 
+    m = model
+    hyper_params = HyperParams(m, N = 1000)
+    check_statespace_constraints(StateSpace(m, hyper_params), m)
+    res = solve_HJB(m, hyper_params, init_value = init_value)
+    update_value_function!(init_value, res)
+    sm = SolvedModel(m, res)
+    return sm
+end

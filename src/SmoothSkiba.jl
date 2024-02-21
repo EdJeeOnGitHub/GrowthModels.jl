@@ -35,8 +35,6 @@ function SmoothSkibaModel(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6,
 end
 
 
-
-
 y_H(m::SmoothSkibaModel) = (k) -> m.A_H*k^m.α
 y_L(m::SmoothSkibaModel) = (k) -> m.A_L*k^m.α 
 # Just an approximation -> assuming ω(k) == 1

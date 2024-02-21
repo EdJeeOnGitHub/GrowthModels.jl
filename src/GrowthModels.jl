@@ -18,11 +18,13 @@ module GrowthModels
            StateSpace,
            plot_model, 
            plot_diagnostics,
-           ValueFunctionError
+           ValueFunctionError,
+           solve_growth_model
     # solved model output
     export SolvedModel
     export update_v,
-           solve_HJB
+           solve_HJB,
+           update_value_function!
     ## skiba exports
     export  k_steady_state_hi, k_steady_state_lo, k_star,
            production_function,

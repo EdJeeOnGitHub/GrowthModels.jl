@@ -106,6 +106,23 @@ function update_v(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel},
 end
 
 
+"""
+    update_value_function!(init_value, res)
+
+If the HJB solver has converged, update the value function inplace. Uses ForwardDiff.value 
+to ensure only the value and not dual components are passed. 
+
+update_v is internal function used for value function iteration. update_value_function! is exported to the user so we can hotstart the VFI across optimization draws.
+"""
+function update_value_function!(init_value, res)
+    if res.value.convergence_status == true
+            init_value.v[:] = ForwardDiff.value.(res.value.v)
+            init_value.dVf[:] = ForwardDiff.value.(res.value.dVf)
+            init_value.dVb[:] = ForwardDiff.value.(res.value.dVb)
+            init_value.dV0[:] = ForwardDiff.value.(res.value.dV0)
+    end
+end
+
 
 
 function solve_HJB(m::Model, hyperparams::HyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000)
@@ -128,6 +145,10 @@ function solve_HJB(m::Model, hyperparams::HyperParams; init_value = Value(hyperp
     state = StateSpace(m, hyperparams)
     return solve_HJB(m, hyperparams, state; init_value = init_value, maxit = maxit)
 end
+
+
+
+
 
 dV_Upwind(value::Value, variables::NamedTuple) = value.dVf .* variables.If .+ value.dVb .* variables.Ib .+ value.dV0 .* variables.I0
 V_err(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.γ) / (1-m.γ) .+ dV_Upwind(value, variables) .* k_dot(m)(variables) .- m.ρ .* value.v

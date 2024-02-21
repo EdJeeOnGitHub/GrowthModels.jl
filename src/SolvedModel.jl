@@ -179,6 +179,30 @@ function(r::SolvedModel)(state_dict::Dict, ensemble::DiffEqBase.EnsembleAlgorith
     return sol
 end
 
+function(r::SolvedModel)(k0::Real, timesteps::Vector; algorithm = AutoTsit5(Rosenbrock23()), reltol = 1e-6, abstol = 1e-6)
+    function f(du, u, p, t)
+        du[1] = r.kdot_function(u[1])
+        return nothing
+    end
+
+    prob = ODEProblem(f, [k0], maximum(timesteps))
+
+
+    sol = solve(
+        prob,
+        algorithm,
+        reltol = reltol,
+        abstol = abstol,
+        saveat = timesteps,
+        save_everystep = false,
+        force_dtmin = true,
+        maxiters = 5000,
+        isoutofdomain = (m,p,t) -> any(x->x<eps(), m)
+    )
+    return sol
+end
+
+
 # Plot evolution of outcomes using ODE result and model solution
 function plot_timepath(ode_result::ODESolution, r::SolvedModel{T}; N = size(ode_result, 1)) where T <: Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}
     kt_path = Array(ode_result)
