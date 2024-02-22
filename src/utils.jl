@@ -183,7 +183,7 @@ function solve_growth_model(model::Model, init_value::Value)
     hyper_params = HyperParams(m, N = 1000)
     check_statespace_constraints(StateSpace(m, hyper_params), m)
     res = solve_HJB(m, hyper_params, init_value = init_value)
-    update_value_function!(init_value, res)
+    # update_value_function!(init_value, res)
     sm = SolvedModel(m, res)
     return sm
 end

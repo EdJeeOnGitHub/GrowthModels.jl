@@ -128,6 +128,8 @@ end
 function solve_HJB(m::Model, hyperparams::HyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000)
     curr_iter = 0
     val = deepcopy(init_value)
+    # initial guess
+    val.v[:] = (state.k .^ m.α).^(1-m.γ) ./ (1-m.γ) ./ m.ρ
     for n in 1:maxit
         curr_iter += 1
         output_value, curr_iter = update_v(m, val, state, hyperparams, iter = n)
