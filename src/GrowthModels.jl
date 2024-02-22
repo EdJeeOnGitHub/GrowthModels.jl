@@ -32,7 +32,7 @@ module GrowthModels
            k_dot,
            plot_production_function,
            plot_timepath
-
+    export k_steady_state
     # Models
     export SkibaModel, 
            SmoothSkibaModel,

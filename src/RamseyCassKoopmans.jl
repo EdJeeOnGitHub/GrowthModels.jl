@@ -25,6 +25,8 @@ end
 
 
 k_steady_state(m::RamseyCassKoopmansModel) = (m.α*m.A/(m.ρ + m.δ))^(1/(1-m.α))
+k_steady_state_hi(m::RamseyCassKoopmansModel) = k_steady_state(m)
+k_steady_state_lo(m::RamseyCassKoopmansModel) = k_steady_state(m)
 k_star(m::RamseyCassKoopmansModel) = k_steady_state(m)
 
 # Production function
