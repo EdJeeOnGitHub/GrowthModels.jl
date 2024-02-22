@@ -178,12 +178,14 @@ Solves the growth model using the specified model and initial value.
 
 # Example
 """
-function solve_growth_model(model::Model, init_value::Value) 
+function solve_growth_model(model::Model, init_value::Value; update = false) 
     m = model
     hyper_params = HyperParams(m, N = 1000)
     check_statespace_constraints(StateSpace(m, hyper_params), m)
     res = solve_HJB(m, hyper_params, init_value = init_value)
-    # update_value_function!(init_value, res)
+    if update
+        update_value_function!(init_value, res)
+    end
     sm = SolvedModel(m, res)
     return sm
 end
