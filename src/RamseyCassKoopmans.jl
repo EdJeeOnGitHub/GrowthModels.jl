@@ -23,11 +23,14 @@ function RamseyCassKoopmansModel(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A =
     RamseyCassKoopmansModel(γ, α, ρ, δ, A)
 end
 
-
-k_steady_state(m::RamseyCassKoopmansModel) = (m.α*m.A/(m.ρ + m.δ))^(1/(1-m.α))
+k_steady_state_RCK(α::Real, A::Real, ρ::Real, δ::Real) = (α*A/(ρ + δ))^(1/(1-α))
+k_steady_state(m::RamseyCassKoopmansModel) = k_steady_state_RCK(m.α, m.A, m.ρ, m.δ) 
+k_steady_state_hi_RCK(α::Real, A::Real, ρ::Real, δ::Real) = k_steady_state_RCK(α, A, ρ, δ)
 k_steady_state_hi(m::RamseyCassKoopmansModel) = k_steady_state(m)
 k_steady_state_lo(m::RamseyCassKoopmansModel) = k_steady_state(m)
+k_steady_state_lo_RCK(α::Real, A::Real, ρ::Real, δ::Real) = k_steady_state_RCK(α, A, ρ, δ)
 k_star(m::RamseyCassKoopmansModel) = k_steady_state(m)
+k_star_RCK(α::Real, A::Real, ρ::Real, δ::Real) = k_steady_state_RCK(α, A, ρ, δ)
 
 # Production function
 @inline function rck_production_function(k, α, A, δ)

@@ -42,7 +42,7 @@ end
 
 # Create a HyperParams object 
 # just take kmin and kmax as inputs to create grid
-function HyperParams(N = 1000, kmax = 10, kmin = 0.001)
+function HyperParams(;N = 1000, kmax = 10, kmin = 0.001)
     dk = (kmax-kmin)/(N-1)
     HyperParams(N, dk, kmax, kmin)
 end
@@ -187,5 +187,36 @@ function solve_growth_model(model::Model, init_value::Value; update = false)
         update_value_function!(init_value, res)
     end
     sm = SolvedModel(m, res)
-    return sm
+    return sm, res
 end
+
+
+"""
+    solve_growth_model(model::Model, init_value::Value, hyper_params::HyperParams; update = false)
+
+Solves the growth model using the specified model, initial value, and hyperparameters.
+
+# Arguments
+- `model::Model`: The growth model to solve.
+- `init_value::Value`: The initial value for the value function.
+- `hyper_params::HyperParams`: The hyperparameters for the growth model.
+- `update::Bool`: (optional) Whether to update the initial value function with the result. Default is `false`.
+
+# Returns
+- `sm::SolvedModel`: The solved growth model.
+- `res::Result`: The result of solving the growth model.
+
+"""
+function solve_growth_model(model::Model, init_value::Value, hyper_params::HyperParams; update = false)
+    m = model
+    check_statespace_constraints(StateSpace(m, hyper_params), m)
+    res = solve_HJB(m, hyper_params, init_value = init_value)
+    if update
+        update_value_function!(init_value, res)
+    end
+    sm = SolvedModel(m, res)
+    return sm, res
+end
+
+
+

@@ -38,29 +38,14 @@ end
 y_H(m::SmoothSkibaModel) = (k) -> m.A_H*k^m.α
 y_L(m::SmoothSkibaModel) = (k) -> m.A_L*k^m.α 
 # Just an approximation -> assuming ω(k) == 1
-k_steady_state_hi(m::SmoothSkibaModel) = (m.α*m.A_H/(m.ρ + m.δ))^(1/(1-m.α)) + m.κ
+k_steady_state_hi_SmoothSkiba(α::Real, A_H::Real, ρ::Real, δ::Real, κ::Real) = (α*A_H/(ρ + δ))^(1/(1-α)) + κ
+k_steady_state_hi(m::SmoothSkibaModel) = k_steady_state_hi_SmoothSkiba(m.α, m.A_H, m.ρ, m.δ, m.κ) 
 # Just an approximation -> assuming ω(k) == 0
-k_steady_state_lo(m::SmoothSkibaModel) = (m.α*m.A_L/(m.ρ + m.δ))^(1/(1-m.α))
+k_steady_state_lo_SmoothSkiba(α::Real, A_L::Real, ρ::Real, δ::Real, κ::Real) = (α*A_L/(ρ + δ))^(1/(1-α))
+k_steady_state_lo(m::SmoothSkibaModel) = k_steady_state_lo_SmoothSkiba(m.α, m.A_L, m.ρ, m.δ, m.κ) 
 # not really well defined atm -> think about this ed
-k_star(m::SmoothSkibaModel) = m.κ/(1-(m.A_L/m.A_H)^(1/m.α))
-
-
-
-# function prod_fun_sig(k, m, β)
-#     (; γ, α, ρ, δ, A_L, A_H, κ) = m
-#     weight_fun = 1 / (1 + exp(-β * (k - κ)))
-#     A = A_H * weight_fun + A_L * (1 - weight_fun) 
-#     Y = A * k^α
-#     return Y
-# end
-
-
-# function prod_fun_sig_prime(k, m, β)
-#     weight_fun = 1 / (1 + exp(-β * (k - κ)))
-#     exp_deriv = β * exp(-β * (k - κ)) / (1 + exp(-β * (k - κ)))^2
-#     y_prime = (A_H - A_L)*exp_deriv * k^α + (A_H * weight_fun + A_L * (1 - weight_fun)) * α * k^(α - 1)
-#     return y_prime
-# end
+k_star(m::SmoothSkibaModel) = k_star_SmoothSkiba(m.α, m.A_L, m.A_H, m.κ)
+k_star_SmoothSkiba(α::Real, A_L::Real, A_H::Real, κ::Real) = κ/(1-(A_L/A_H)^(1/α))
 
 
 # Skiba production function
