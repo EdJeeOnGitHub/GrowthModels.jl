@@ -1,5 +1,5 @@
 
-function update_v(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}, value::Value, state::StateSpace, hyperparams::HyperParams; iter = 0, crit = 10^(-6), Delta = 1000, silent = false)
+function update_v(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}, value::Value, state::StateSpace, hyperparams::HyperParams; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true)
     γ, ρ, δ = m.γ, m.ρ, m.δ
     (; v, dVf, dVb, dV0, dist) = value
     (; k, y) = state # y isn't really a state but avoid computing it each iteration this way
@@ -68,7 +68,7 @@ function update_v(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel},
     dist[iter] = distance
 
     if distance < crit
-        if !silent
+        if verbose
             println("Value Function Converged, Iteration = ", iter)
         end
         dist[iter+1:end] .= distance
@@ -125,7 +125,7 @@ end
 
 
 
-function solve_HJB(m::Model, hyperparams::HyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000)
+function solve_HJB(m::Model, hyperparams::HyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000, verbose = true)
     curr_iter = 0
     val = deepcopy(init_value)
     # initial guess - doesn't seem to help?
@@ -134,7 +134,7 @@ function solve_HJB(m::Model, hyperparams::HyperParams, state::StateSpace; init_v
         curr_iter += 1
         output_value, curr_iter = update_v(m, val, state, hyperparams, iter = n)
         if output_value.convergence_status
-            fit_value, _, fit_variables = update_v(m, val, state, hyperparams, iter = curr_iter, silent = true)
+            fit_value, _, fit_variables = update_v(m, val, state, hyperparams, iter = curr_iter, verbose = verbose)
             return (value = fit_value, variables = fit_variables, iter = curr_iter)
             break
         end
@@ -143,9 +143,9 @@ function solve_HJB(m::Model, hyperparams::HyperParams, state::StateSpace; init_v
     return (value = val, variables = nothing, iter = curr_iter)
 end
 
-function solve_HJB(m::Model, hyperparams::HyperParams; init_value = Value(hyperparams), maxit = 1000)
+function solve_HJB(m::Model, hyperparams::HyperParams; init_value = Value(hyperparams), maxit = 1000, verbose = true)
     state = StateSpace(m, hyperparams)
-    return solve_HJB(m, hyperparams, state; init_value = init_value, maxit = maxit)
+    return solve_HJB(m, hyperparams, state; init_value = init_value, maxit = maxit, verbose = verbose)
 end
 
 
