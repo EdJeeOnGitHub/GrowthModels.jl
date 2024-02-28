@@ -132,7 +132,7 @@ function solve_HJB(m::Model, hyperparams::HyperParams, state::StateSpace; init_v
     # val.v[:] = (state.k .^ m.α).^(1-m.γ) ./ (1-m.γ) ./ m.ρ
     for n in 1:maxit
         curr_iter += 1
-        output_value, curr_iter = update_v(m, val, state, hyperparams, iter = n)
+        output_value, curr_iter = update_v(m, val, state, hyperparams, iter = n, verbose = verbose)
         if output_value.convergence_status
             fit_value, _, fit_variables = update_v(m, val, state, hyperparams, iter = curr_iter, verbose = verbose)
             return (value = fit_value, variables = fit_variables, iter = curr_iter)
