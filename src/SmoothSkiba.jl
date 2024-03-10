@@ -63,12 +63,12 @@ end
 end
 
 
-@inline production_function(m::SmoothSkibaModel, k::Union{Real,Vector{<:Real}}, α::Real, A_H::Real, A_L::Real, κ::Real, β::Real) = smooth_skiba_production_function.(k, α, A_H, A_L, κ, β);
-@inline production_function(m::SmoothSkibaModel, k::Union{Real,Vector{<:Real}}, params::Vector) = smooth_skiba_production_function.(k, params[1], params[2], params[3], params[4], params[5])
+@inline production_function(::SmoothSkibaModel, k::Union{Real,Vector{<:Real}}, α::Real, A_H::Real, A_L::Real, κ::Real, β::Real) = smooth_skiba_production_function.(k, α, A_H, A_L, κ, β);
+@inline production_function(::SmoothSkibaModel, k::Union{Real,Vector{<:Real}}, params::Vector) = smooth_skiba_production_function.(k, params[1], params[2], params[3], params[4], params[5])
 @inline production_function(m::SmoothSkibaModel, k::Union{Real,Vector{<:Real}}) = smooth_skiba_production_function.(k, m.α, m.A_H, m.A_L, m.κ, m.β)
 
-@inline production_function_prime(m::SmoothSkibaModel, k::Union{Real,Vector{<:Real}}, α::Real, A_H::Real, A_L::Real, κ::Real, β::Real) = smooth_skiba_production_function_prime.(k, α, A_H, A_L, κ, β)
-@inline production_function_prime(m::SmoothSkibaModel, k::Union{Real,Vector{<:Real}}, params::Vector) = smooth_skiba_production_function_prime.(k, params[1], params[2], params[3], params[4], params[5])
+@inline production_function_prime(::SmoothSkibaModel, k::Union{Real,Vector{<:Real}}, α::Real, A_H::Real, A_L::Real, κ::Real, β::Real) = smooth_skiba_production_function_prime.(k, α, A_H, A_L, κ, β)
+@inline production_function_prime(::SmoothSkibaModel, k::Union{Real,Vector{<:Real}}, params::Vector) = smooth_skiba_production_function_prime.(k, params[1], params[2], params[3], params[4], params[5])
 @inline production_function_prime(m::SmoothSkibaModel, k::Union{Real,Vector{<:Real}}) = smooth_skiba_production_function_prime.(k, m.α, m.A_H, m.A_L, m.κ, m.β)
 
 

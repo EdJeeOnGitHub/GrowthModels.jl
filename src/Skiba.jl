@@ -56,12 +56,12 @@ end
 end
 
 
-@inline production_function(m::SkibaModel, k::Union{Real,Vector{<:Real}}, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function.(k, α, A_H, A_L, κ)
-@inline production_function(m::SkibaModel, k::Union{Real,Vector{<:Real}}, params::Vector) = skiba_production_function.(k, params[1], params[2], params[3], params[4])
+@inline production_function(::SkibaModel, k::Union{Real,Vector{<:Real}}, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function.(k, α, A_H, A_L, κ)
+@inline production_function(::SkibaModel, k::Union{Real,Vector{<:Real}}, params::Vector) = skiba_production_function.(k, params[1], params[2], params[3], params[4])
 @inline production_function(m::SkibaModel, k::Union{Real,Vector{<:Real}}) = skiba_production_function.(k, m.α, m.A_H, m.A_L, m.κ)
 
-@inline production_function_prime(m::SkibaModel, k::Union{Real,Vector{<:Real}}, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function_prime.(k, α, A_H, A_L, κ)
-@inline production_function_prime(m::SkibaModel, k::Union{Real,Vector{<:Real}}, params::Vector) = skiba_production_function_prime.(k, params[1], params[2], params[3], params[4])
+@inline production_function_prime(::SkibaModel, k::Union{Real,Vector{<:Real}}, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function_prime.(k, α, A_H, A_L, κ)
+@inline production_function_prime(::SkibaModel, k::Union{Real,Vector{<:Real}}, params::Vector) = skiba_production_function_prime.(k, params[1], params[2], params[3], params[4])
 @inline production_function_prime(m::SkibaModel, k::Union{Real,Vector{<:Real}}) = skiba_production_function_prime.(k, m.α, m.A_H, m.A_L, m.κ)
 
 

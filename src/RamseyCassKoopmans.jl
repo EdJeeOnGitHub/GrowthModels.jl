@@ -41,12 +41,12 @@ end
     A * α * pow(k, α - 1)
 end
 
-@inline production_function(m::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, α::Real, A::Real, δ::Real) = rck_production_function.(k, α, A, δ)
-@inline production_function(m::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, params::Vector) = rck_production_function.(k, params[1], params[2], params[3])
+@inline production_function(::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, α::Real, A::Real, δ::Real) = rck_production_function.(k, α, A, δ)
+@inline production_function(::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, params::Vector) = rck_production_function.(k, params[1], params[2], params[3])
 @inline production_function(m::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}) = rck_production_function.(k, m.α, m.A, m.δ)
 
-@inline production_function_prime(m::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, α::Real, A::Real, δ::Real) = rck_production_function_prime.(k, α, A, δ)
-@inline production_function_prime(m::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, params::Vector) = rck_production_function_prime.(k, params[1], params[2], params[3])
+@inline production_function_prime(::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, α::Real, A::Real, δ::Real) = rck_production_function_prime.(k, α, A, δ)
+@inline production_function_prime(::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, params::Vector) = rck_production_function_prime.(k, params[1], params[2], params[3])
 @inline production_function_prime(m::RamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}) = rck_production_function_prime.(k, m.α, m.A, m.δ)
 
 
