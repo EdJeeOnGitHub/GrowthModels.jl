@@ -33,55 +33,111 @@ end
 
 
 # Hyperparameters governing State Space and size of difference we're taking
+
+
+
+
+
+# modified StateSpace construct inspired by Mathieu Gomez
+# ensures each state variable is a vector with same dimension
+# probably not a great modification but makes things easier for me 
+# when I create a struct to hold value functions
+struct StateSpace{T, D, N, C <: NamedTuple} 
+    state::C
+end
+
+# Constructor function ensuring all vectors in the named tuple are of the same size D.
+function StateSpace(state::NamedTuple{Names, <: NTuple{N, <: AbstractVector{T}}}) where {Names, N, T}
+    D = length(first(values(state)))
+    all(v -> length(v) == D, values(state)) || error("All vectors must be of the same size")
+    StateSpace{T, D, N, typeof(state)}(state)
+end
+
+# Adjusting the eltype and size functions to incorporate the new D parameter.
+function Base.eltype(::StateSpace{T, D, N, <: NamedTuple{Names, V}}) where {T, D, N, Names, V}
+    NamedTuple{Names, NTuple{N, T}}
+end
+
+Base.ndims(::StateSpace{T, D, N}) where {T, D, N} = N
+
+# Correctly adjusted size function to return a tuple of length N with elements D repeated.
+Base.size(::StateSpace{T, D, N}) where {T, D, N} = ntuple(_ -> D, N)
+
+# Adjust the indexing functions if necessary to work with the new struct definition.
+Base.eachindex(statespace::StateSpace) = CartesianIndices(size(statespace))
+function Base.getindex(statespace::StateSpace, args::CartesianIndex)
+    eltype(statespace)(ntuple(i -> statespace.state[i][args[i]], ndims(statespace)))
+end
+Base.getindex(statespace::StateSpace, x::Symbol) = statespace.state[x]
+
 struct HyperParams
     N::Int64
-    dk::Real
-    kmax::Real
-    kmin::Real
+    dx::Real
+    xmin::Real
+    xmax::Real
+    function HyperParams(; N = 1000, xmin = 0.001, xmax = 10.0)
+        dx = (xmax - xmin) / (N - 1)
+        new(N, dx, xmin, xmax)
+    end
 end
 
-# Create a HyperParams object 
-# just take kmin and kmax as inputs to create grid
-function HyperParams(;N = 1000, kmax = 10, kmin = 0.001)
-    dk = (kmax-kmin)/(N-1)
-    HyperParams(N, dk, kmax, kmin)
+struct StateSpaceHyperParams{N, D}
+    hyperparams::NamedTuple
 end
+
+function StateSpaceHyperParams(hyperparams::NamedTuple{Names, <: NTuple{N, <: HyperParams}}) where {Names, N}
+    D = first(hyperparams).N
+    all(v -> v.N == D, hyperparams) || error("All vectors must be of same size")
+    StateSpaceHyperParams{N, D}(hyperparams)
+end
+Base.getindex(statespacehyperparams::StateSpaceHyperParams, x::Symbol) = statespacehyperparams.hyperparams[x]
+
+
+
+function StateSpace(statespacehyperparams::StateSpaceHyperParams{N}) where {N}
+    names = keys(statespacehyperparams.hyperparams)
+    values = map(
+        x -> collect(
+            range(x.xmin, x.xmax, length = x.N - 1)
+        ), statespacehyperparams.hyperparams)
+    state = NamedTuple(zip(names, values))
+    T = typeof(first(values))
+    StateSpace{T, length(first(values)), N, typeof(state)}(state)
+end
+
+
+k_hps = HyperParams(N = 10, xmin = 1.0, xmax = 10)
+y_hps = HyperParams(N = 10, xmin = 0.0,  xmax = 10)
+
+hps = StateSpaceHyperParams((k = k_hps, y = y_hps))
+
+
+
+
 
 # Struct to hold value function, its derivatives, and convergence diagnostics
-struct Value
-    v::Array{Real,1}
-    dVf::Array{Real,1}
-    dVb::Array{Real,1}
-    dV0::Array{Real,1}
-    dist::Array{Real,1}
+struct Value{T, N} 
+    v::Array{T, 1}
+    dVf::Array{T, N}
+    dVb::Array{T, N}
+    dV0::Array{T, N}
+    dist::Array{T, 1}
     convergence_status::Bool
     iter::Int64
 end
 
-function Value(hyperparams::HyperParams)
-    v = zeros(hyperparams.N)
-    dVf = zeros(hyperparams.N)
-    dVb = zeros(hyperparams.N)
-    dV0 = zeros(hyperparams.N)
-    dist = fill(Inf, hyperparams.N)
+
+function Value(::StateSpace{T,D, N, C }) where {T, D, N, C <: NamedTuple}
+    v = zeros(T, D)
+    dVf = zeros(T, (D, N))
+    dVb = zeros(T, (D, N))
+    dV0 = zeros(T, (D, N))
+    dist = fill(Inf, D)
     convergence_status = false
     iter = 0
-    Value(v, dVf, dVb, dV0, dist, convergence_status, iter)
+    Value{T, N}(v, dVf, dVb, dV0, dist, convergence_status, iter)
 end
 
-function Value(; v, dVf, dVb, dV0, dist, convergence_status = false, iter = 0)
-    Value(v, dVf, dVb, dV0, dist, convergence_status, iter)
-end
-
-# Very simple struct to hold state space, individual models will define a function 
-# to construct state space specific to their model
-struct StateSpace
-    state::NamedTuple
-end
-# Define a custom getter method
-Base.getindex(ss::StateSpace, key::Symbol) = ss.state[key]
-# Define a custom property accessor
-Base.getproperty(ss::StateSpace, name::Symbol) = getfield(ss, :state)[name]
 
 #### Diagnostic Plotting ####
 
@@ -220,3 +276,29 @@ end
 
 
 
+
+
+
+
+
+
+# struct StateSpace{T, N, C <: NamedTuple} <: AbstractArray{T, N}
+#     state::C
+# end
+
+# function StateSpace(x::NamedTuple{Names, <: NTuple{N, <: AbstractVector{T}}}) where {Names, N, T}
+#     StateSpace{T, N, typeof(x)}(x)
+# end
+
+# function Base.eltype(::StateSpace{T, N, <: NamedTuple{Names, V}}) where {T, N, Names, V}
+#     NamedTuple{Names, NTuple{N, T}}
+# end
+
+# Base.ndims(::StateSpace{T, N}) where {T, N} = N
+# base.size(statespace::StateSpace{T, N}) where {T, N} = ntuple(i -> length(statespace.state[i]), N)
+
+# Base.eachindex(statespace::StateSpace) = CartesianIndices(size(statespace))
+# function Base.getindex(statespace::StateSpace, args::CartesianIndex)
+#     eltype(statespace)(ntuple(i -> statespace.state[i][args[i]], ndims(statespace)))
+# end
+# Base.getindex(statespace::StateSpace, x::Symbol) = statespace.state[x]
