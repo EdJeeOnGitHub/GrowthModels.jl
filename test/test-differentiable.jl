@@ -12,9 +12,9 @@ test_params = [
     2.0
 ]
 
-function policy_wrapper_inplace(p; x = 1.0, init_value = Value(hyperparams))
+function policy_wrapper_inplace(p; x = 1.0, init_value )
     m_skiba = SkibaModel(p...)
-    hyperparams = HyperParams(m_skiba)
+    hyperparams = StateSpaceHyperParams(m_skiba)
     fit_value, fit_variables, fit_iter = solve_HJB(m_skiba, hyperparams, init_value = init_value, maxit = 1000);
     # Updating In Place
     init_value.v[:] = ForwardDiff.value.(fit_value.v)
@@ -26,11 +26,14 @@ function policy_wrapper_inplace(p; x = 1.0, init_value = Value(hyperparams))
 end
 
 
+init_value = Value(Real, 1000, 1)
+policy_wrapper_inplace(test_params, init_value = init_value)
+policy_wrapper(test_params)
 
 function policy_wrapper(p; x = 1.0)
     m_skiba = SkibaModel(p...)
-    hyperparams = HyperParams(m_skiba)
-    init_value = Value(hyperparams);
+    hyperparams = StateSpaceHyperParams(m_skiba)
+    init_value = Value(Real, hyperparams);
     fit_value, fit_variables, fit_iter = solve_HJB(m_skiba, hyperparams, init_value = init_value, maxit = 1000);
     r_skiba = SolvedModel(m_skiba, fit_value, fit_variables)
     return r_skiba.policy_function(x...)

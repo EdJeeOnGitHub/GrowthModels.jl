@@ -11,16 +11,19 @@
 # Util functions to dispatch on for Skiba models
 # Create a HyperParams object from a SkibaModel
 # use high steady state to guide grid formation
-function HyperParams(m::SkibaModel; N = 1000, kmax_f = 1.3, kmin_f = 0.001)
+function StateSpaceHyperParams(m::SkibaModel; N = 1000, kmax_f = 1.3, kmin_f = 0.001)
     kssH = k_steady_state_hi(m)
     kmin, kmax = kmin_f*kssH, kmax_f*kssH
-    dk = (kmax-kmin)/(N-1)
-    HyperParams(N, dk, kmax, kmin)
+    k_hps = HyperParams(N = N, xmax = kmax, xmin = kmin)
+    # not actually used
+    y_hps = HyperParams(N = N, xmax = kmax, xmin = kmin)
+    return StateSpaceHyperParams((k = k_hps, y = y_hps))
 end
 
-function StateSpace(m::SkibaModel, hyperparams::HyperParams)
-    k = range(hyperparams.kmin, hyperparams.kmax, length = hyperparams.N)
-    y = production_function(m, collect(k))
+function StateSpace(m::SkibaModel, statespacehyperparams::StateSpaceHyperParams)
+    k_hps = statespacehyperparams[:k]
+    k = collect(range(k_hps.xmin, k_hps.xmax, length = k_hps.N))
+    y = production_function(m, k)
     StateSpace((k = k, y = y))
 end
 
@@ -37,6 +40,7 @@ k_steady_state_lo_Skiba(α::Real, A_L::Real, ρ::Real, δ::Real) = (α*A_L/(ρ +
 k_star_Skiba(α::Real, A_H::Real, A_L::Real) = κ/(1-(A_L/A_H)^(1/α))
 k_steady_state_hi(m::SkibaModel) = (m.α*m.A_H/(m.ρ + m.δ))^(1/(1-m.α)) + m.κ
 k_steady_state_lo(m::SkibaModel) = (m.α*m.A_L/(m.ρ + m.δ))^(1/(1-m.α))
+k_steady_state(m::SkibaModel) = [k_steady_state_lo(m), k_steady_state_hi(m)]
 k_star(m::SkibaModel) = m.κ/(1-(m.A_L/m.A_H)^(1/m.α))
 
 y_H(m::SkibaModel) = (k) -> m.A_H*max(k - m.κ,0)^m.α
@@ -74,7 +78,7 @@ end
 
 
 #### Misc Functions ####
-k_dot(m::SkibaModel) = (variables::NamedTuple) -> variables.y .- m.δ .* variables.k .- variables.c
+statespace_k_dot(m::SkibaModel) = (variables::NamedTuple) -> variables.y .- m.δ .* variables.k .- variables.c
 
 #### Plotting ####
 function plot_production_function(m::SkibaModel, k)

@@ -4,17 +4,20 @@
 
 
 # HyperParams for the NGM model
-function HyperParams(m::RamseyCassKoopmansModel; N = 1000, kmax_f = 1.3, kmin_f = 0.001)
+function StateSpaceHyperParams(m::RamseyCassKoopmansModel; N = 1000, kmax_f = 1.3, kmin_f = 0.001)
     kss = k_steady_state(m)
     kmin, kmax = kmin_f*kss, kmax_f*kss
-    dk = (kmax-kmin)/(N-1)
-    HyperParams(N, dk, kmax, kmin)
+    k_hps = HyperParams(N = N, xmax = kmax, xmin = kmin)
+    # again, not actually used to generate state space
+    y_hps = HyperParams(N = N, xmax = kmax, xmin = kmin)
+    return StateSpaceHyperParams((k = k_hps, y = y_hps))
 end
 
 
-function StateSpace(m::RamseyCassKoopmansModel, hyperparams::HyperParams)
-    k = range(hyperparams.kmin, hyperparams.kmax, length = hyperparams.N)
-    y = production_function(m, collect(k))
+function StateSpace(m::RamseyCassKoopmansModel, statespacehyperparams::StateSpaceHyperParams)
+    k_hps = statespacehyperparams[:k]
+    k = collect(range(k_hps.xmin, k_hps.xmax, length = k_hps.N))
+    y = production_function(m, k)
     StateSpace((k = k, y = y))
 end
 
@@ -53,7 +56,6 @@ end
 
 
 #### Misc Functions ####
-k_dot(m::RamseyCassKoopmansModel) =  (variables::NamedTuple) -> variables.y .- m.δ .* variables.k .- variables.c
 
 #### Plotting ####
 function plot_production_function(m::RamseyCassKoopmansModel, k)

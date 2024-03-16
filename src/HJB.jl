@@ -1,32 +1,34 @@
 
-function update_v(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}, value::Value, state::StateSpace, hyperparams::HyperParams; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true)
+function update_v(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v}
     γ, ρ, δ = m.γ, m.ρ, m.δ
     (; v, dVf, dVb, dV0, dist) = value
-    (; k, y) = state # y isn't really a state but avoid computing it each iteration this way
-    (; N, dk, kmax, kmin) = hyperparams
+    k, y = state[:k], state[:y] # y isn't really a state but avoid computing it each iteration this way
+    (; N, dx, xmax, xmin) = hyperparams[:k]
+    dk, kmax, kmin = dx, xmax, xmin
+
 
 
     V = v
     # forward difference
-    dVf[1:(N-1)] = (V[2:N] .- V[1:(N-1)])/dk
-    dVf[N] = (y[N] - δ*kmax)^(-γ) # state constraint, for stability
+    dVf[1:(N-1), 1] = (V[2:N, 1] .- V[1:(N-1), 1])/dk
+    dVf[N, 1] = (y[N] - δ*kmax)^(-γ) # state constraint, for stability
     # backward difference
-    dVb[2:N] = (V[2:N] .- V[1:(N-1)])/dk
-    dVb[1] = (y[1] - δ*kmin)^(-γ) # state constraint, for stability
+    dVb[2:N, 1] = (V[2:N, 1] .- V[1:(N-1), 1])/dk
+    dVb[1, 1] = (y[1] - δ*kmin)^(-γ) # state constraint, for stability
 
     # consumption and savings with forward difference
-    cf = max.(dVf,eps()).^(-1/γ)
+    cf = max.(dVf[:, 1],eps()).^(-1/γ)
     muf = y - δ.*k - cf
-    Hf = (cf.^(1-γ))/(1-γ) + dVf.*muf
+    Hf = (cf.^(1-γ))/(1-γ) + dVf[:, 1].*muf
 
     # consumption and savings with backward difference
-    cb = max.(dVb,eps()).^(-1/γ)
+    cb = max.(dVb[:, 1],eps()).^(-1/γ)
     mub = y - δ.*k - cb
-    Hb = (cb.^(1-γ))/(1-γ) + dVb.*mub
+    Hb = (cb.^(1-γ))/(1-γ) + dVb[:, 1].*mub
 
     # consumption and derivative of value function at steady state
     c0 = y - δ.*k
-    dV0[1:N] = max.(c0, eps()).^(-γ)
+    dV0[1:N, 1] = max.(c0, eps()).^(-γ)
     H0 = (c0.^(1-γ))/(1-γ)
 
     # dV_upwind makes a choice of forward or backward differences based on
@@ -72,7 +74,7 @@ function update_v(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel},
             println("Value Function Converged, Iteration = ", iter)
         end
         dist[iter+1:end] .= distance
-        value = Value(
+        value = Value{T, N_v}(
             v = V, 
             dVf = dVf, 
             dVb = dVb, 
@@ -92,7 +94,7 @@ function update_v(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel},
         return value, iter, variables
     end
 
-    value = Value(
+    value = Value{T,N_v}(
         v = V, 
         dVf = dVf, 
         dVb = dVb, 
@@ -125,7 +127,7 @@ end
 
 
 
-function solve_HJB(m::Model, hyperparams::HyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000, verbose = true)
+function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000, verbose = true)
     curr_iter = 0
     val = deepcopy(init_value)
     # initial guess - doesn't seem to help?
@@ -143,8 +145,11 @@ function solve_HJB(m::Model, hyperparams::HyperParams, state::StateSpace; init_v
     return (value = val, variables = nothing, iter = curr_iter)
 end
 
-function solve_HJB(m::Model, hyperparams::HyperParams; init_value = Value(hyperparams), maxit = 1000, verbose = true)
+function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams; init_value = nothing, maxit = 1000, verbose = true)
     state = StateSpace(m, hyperparams)
+    if isnothing(init_value)
+        init_value = Value(state)
+    end
     return solve_HJB(m, hyperparams, state; init_value = init_value, maxit = maxit, verbose = verbose)
 end
 
@@ -152,5 +157,5 @@ end
 
 
 
-dV_Upwind(value::Value, variables::NamedTuple) = value.dVf .* variables.If .+ value.dVb .* variables.Ib .+ value.dV0 .* variables.I0
-V_err(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.γ) / (1-m.γ) .+ dV_Upwind(value, variables) .* k_dot(m)(variables) .- m.ρ .* value.v
+dV_Upwind(::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}, value::Value, variables::NamedTuple) = value.dVf[:, 1] .* variables.If .+ value.dVb[:, 1] .* variables.Ib .+ value.dV0 .* variables.I0
+V_err(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.γ) / (1-m.γ) .+ dV_Upwind(m, value, variables) .* statespace_k_dot(m)(variables) .- m.ρ .* value.v

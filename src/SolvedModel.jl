@@ -16,10 +16,10 @@ end
 #### Model Specific Dispatch ####
 # Can probably dispatch on just model here but will see in future
 function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}
-    c_policy_function = cubic_spline_interpolation(
-        variables.k,
+    c_policy_function = CubicSpline(
         variables.c,
-        extrapolation_bc = Interpolations.Line()
+        variables.k;
+       extrapolate = true 
     );
     prod_func = x -> production_function(m, x)
     prod_func_prime = x -> production_function_prime(m, x)

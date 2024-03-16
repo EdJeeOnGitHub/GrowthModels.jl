@@ -32,12 +32,6 @@ end
 
 
 
-# Hyperparameters governing State Space and size of difference we're taking
-
-
-
-
-
 # modified StateSpace construct inspired by Mathieu Gomez
 # ensures each state variable is a vector with same dimension
 # probably not a great modification but makes things easier for me 
@@ -76,7 +70,7 @@ struct HyperParams
     xmin::Real
     xmax::Real
     function HyperParams(; N = 1000, xmin = 0.001, xmax = 10.0)
-        dx = (xmax - xmin) / (N - 1)
+        dx = (xmax - xmin) / N 
         new(N, dx, xmin, xmax)
     end
 end
@@ -98,20 +92,12 @@ function StateSpace(statespacehyperparams::StateSpaceHyperParams{N}) where {N}
     names = keys(statespacehyperparams.hyperparams)
     values = map(
         x -> collect(
-            range(x.xmin, x.xmax, length = x.N - 1)
+            range(x.xmin, x.xmax, length = x.N)
         ), statespacehyperparams.hyperparams)
     state = NamedTuple(zip(names, values))
     T = typeof(first(values))
     StateSpace{T, length(first(values)), N, typeof(state)}(state)
 end
-
-
-k_hps = HyperParams(N = 10, xmin = 1.0, xmax = 10)
-y_hps = HyperParams(N = 10, xmin = 0.0,  xmax = 10)
-
-hps = StateSpaceHyperParams((k = k_hps, y = y_hps))
-
-
 
 
 
@@ -138,10 +124,31 @@ function Value(::StateSpace{T,D, N, C }) where {T, D, N, C <: NamedTuple}
     Value{T, N}(v, dVf, dVb, dV0, dist, convergence_status, iter)
 end
 
+function Value(T, h::Union{HyperParams,StateSpaceHyperParams{N,D}}) where {N, D}
+    D_v = isa(h, HyperParams) ? h.N : D
+    N_v = isa(h, HyperParams) ? 1 : N 
+    Value(T, D_v, N_v)
+end
+
+function Value(T, D, N)
+    v = zeros(T, D)
+    dVf = zeros(T, (D, N))
+    dVb = zeros(T, (D, N))
+    dV0 = zeros(T, (D, N))
+    dist = fill(Inf, D)
+    convergence_status = false
+    iter = 0
+    Value{T, N}(v, dVf, dVb, dV0, dist, convergence_status, iter)
+end
+
+function Value{T,N}(; v, dVf, dVb, dV0, dist, convergence_status, iter) where {T,N}
+    Value{T,N}(v, dVf, dVb, dV0, dist, convergence_status, iter)
+end
+
 
 #### Diagnostic Plotting ####
 
-function plot_diagnostics(m::Model, value::Value, variables::NamedTuple, hyperparams::HyperParams)
+function plot_diagnostics(m::Model, value::Value, variables::NamedTuple, hyperparams::StateSpaceHyperParams)
     Verr = V_err(m)(value, variables);
     convergence_status, curr_iter = value.convergence_status, value.iter
     subplot = plot(
@@ -163,7 +170,7 @@ function plot_diagnostics(m::Model, value::Value, variables::NamedTuple, hyperpa
         label="", 
         xlabel="k", 
         ylabel="Error in HJB Equation",
-        xlims=(hyperparams.kmin, hyperparams.kmax)
+        xlims=(hyperparams[:k].xmin, hyperparams[:k].xmax)
     )
     title!(
         subplot, 
@@ -177,7 +184,7 @@ function plot_model(m::Model, value::Value, variables::NamedTuple)
     (; k, y, c) = variables
     (; v, dVf, dVb, dV0, dist) = value
     kstar = k_star(m)
-    fit_kdot = k_dot(m)(variables)
+    fit_kdot = statespace_k_dot(m)(variables)
 
     # subplot = plot(layout = (2, 2), size = (800, 600))
     p1 =  plot_production_function(m, collect(k))
@@ -275,30 +282,4 @@ function solve_growth_model(model::Model, init_value::Value, hyper_params::Hyper
 end
 
 
-
-
-
-
-
-
-
-# struct StateSpace{T, N, C <: NamedTuple} <: AbstractArray{T, N}
-#     state::C
-# end
-
-# function StateSpace(x::NamedTuple{Names, <: NTuple{N, <: AbstractVector{T}}}) where {Names, N, T}
-#     StateSpace{T, N, typeof(x)}(x)
-# end
-
-# function Base.eltype(::StateSpace{T, N, <: NamedTuple{Names, V}}) where {T, N, Names, V}
-#     NamedTuple{Names, NTuple{N, T}}
-# end
-
-# Base.ndims(::StateSpace{T, N}) where {T, N} = N
-# base.size(statespace::StateSpace{T, N}) where {T, N} = ntuple(i -> length(statespace.state[i]), N)
-
-# Base.eachindex(statespace::StateSpace) = CartesianIndices(size(statespace))
-# function Base.getindex(statespace::StateSpace, args::CartesianIndex)
-#     eltype(statespace)(ntuple(i -> statespace.state[i][args[i]], ndims(statespace)))
-# end
-# Base.getindex(statespace::StateSpace, x::Symbol) = statespace.state[x]
+statespace_k_dot(m::Model) =  (variables::NamedTuple) -> variables.y .- m.δ .* variables.k .- variables.c
