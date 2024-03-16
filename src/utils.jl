@@ -107,7 +107,7 @@ struct Value{T, N}
     dVf::Array{T, N}
     dVb::Array{T, N}
     dV0::Array{T, N}
-    dist::Array{T, 1}
+    dist::Array{Float64, 1}
     convergence_status::Bool
     iter::Int64
 end
@@ -138,7 +138,11 @@ function Value(T, D, N)
     dist = fill(Inf, D)
     convergence_status = false
     iter = 0
-    Value{T, N}(v, dVf, dVb, dV0, dist, convergence_status, iter)
+    Value(v, dVf, dVb, dV0, dist, convergence_status, iter)
+end
+
+function Value(; v, dVf, dVb, dV0, dist, convergence_status, iter) 
+    Value(v, dVf, dVb, dV0, dist, convergence_status, iter)
 end
 
 function Value{T,N}(; v, dVf, dVb, dV0, dist, convergence_status, iter) where {T,N}
