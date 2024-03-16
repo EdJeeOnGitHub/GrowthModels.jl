@@ -7,7 +7,6 @@ function update_v(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel},
     dk, kmax, kmin = dx, xmax, xmin
 
 
-
     V = v
     # forward difference
     dVf[1:(N-1), 1] = (V[2:N, 1] .- V[1:(N-1), 1])/dk
@@ -159,3 +158,5 @@ end
 
 dV_Upwind(::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}, value::Value, variables::NamedTuple) = value.dVf[:, 1] .* variables.If .+ value.dVb[:, 1] .* variables.Ib .+ value.dV0 .* variables.I0
 V_err(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.γ) / (1-m.γ) .+ dV_Upwind(m, value, variables) .* statespace_k_dot(m)(variables) .- m.ρ .* value.v
+
+

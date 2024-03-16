@@ -39,6 +39,12 @@ module GrowthModels
            SmoothSkibaModel,
            RamseyCassKoopmansModel
 
+    # stochastic stuff
+    export StochasticProcess,
+           OrnsteinUhlenbeckProcess,
+           from_stationary_OrnsteinUhlenbeckProcess,
+           StochasticSkibaModel
+
     # Types
     abstract type Model end
 
@@ -51,6 +57,7 @@ module GrowthModels
     include("Skiba.jl")
     include("SmoothSkiba.jl")
     include("RamseyCassKoopmans.jl")
+    include("StochasticSkiba.jl")
     include("SolvedModel.jl")
 
 

@@ -112,7 +112,6 @@ struct Value{T, N}
     iter::Int64
 end
 
-
 function Value(::StateSpace{T,D, N, C }) where {T, D, N, C <: NamedTuple}
     v = zeros(T, D)
     dVf = zeros(T, (D, N))
@@ -121,8 +120,19 @@ function Value(::StateSpace{T,D, N, C }) where {T, D, N, C <: NamedTuple}
     dist = fill(Inf, D)
     convergence_status = false
     iter = 0
-    Value{T, N}(v, dVf, dVb, dV0, dist, convergence_status, iter)
+    Value(v, dVf, dVb, dV0, dist, convergence_status, iter)
 end
+
+# function Value(::StateSpace{T,D, N, C }) where {T, D, N, C <: NamedTuple}
+#     v = zeros(T, D)
+#     dVf = zeros(T, (D, N))
+#     dVb = zeros(T, (D, N))
+#     dV0 = zeros(T, (D, N))
+#     dist = fill(Inf, D)
+#     convergence_status = false
+#     iter = 0
+#     Value{T, N}(v, dVf, dVb, dV0, dist, convergence_status, iter)
+# end
 
 function Value(T, h::Union{HyperParams,StateSpaceHyperParams{N,D}}) where {N, D}
     D_v = isa(h, HyperParams) ? h.N : D

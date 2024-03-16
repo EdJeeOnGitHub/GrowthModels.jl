@@ -9,16 +9,16 @@ struct SkibaModel <: Model
     κ::Real
 end
 
-struct StochasticSkibaModel <: Model
-    γ::Real
-    α::Real
-    ρ::Real
-    δ::Real
-    A_H::Real
-    A_L::Real
-    κ::Real
-    σ_z::Real
-end
+# struct StochasticSkibaModel <: Model
+#     γ::Real
+#     α::Real
+#     ρ::Real
+#     δ::Real
+#     A_H::Real
+#     A_L::Real
+#     κ::Real
+#     σ_z::Real
+# end
 
 struct SmoothSkibaModel <: Model
     γ::Real
