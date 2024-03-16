@@ -11,11 +11,6 @@ test_params = [
     0.4,
     2.0
 ]
-D = 3
-N = 100
-Value(Real, D, N)
-
-fill(convert(Real, Inf), 10)
 
 function policy_wrapper_inplace(p; x = 1.0, init_value = Value(Real, 2, 1000))
     m_skiba = SkibaModel(p...)
@@ -41,14 +36,16 @@ function policy_wrapper(p; x = 1.0)
     return r_skiba.policy_function(x...)
 end
 
-init_value = Value(Real, 1000, 2)
+policy_wrapper(test_params)
+
 @testset "Policy function differentiable wrt params" begin
+    init_value = Value(Real, 1000, 2)
     g = ForwardDiff.gradient(p -> policy_wrapper(p, x = 1.0), test_params);
     @test isa(g, Vector);
     for i in eachindex(g)
         @test isnan(g[i]) == false
     end
-    inplace_value = Value(HyperParams())
+    inplace_value = Value(Real, 1000, 2)
     g_inplace_1 = ForwardDiff.gradient(x -> policy_wrapper_inplace(x, init_value = inplace_value), test_params)
     g_inplace_2 = ForwardDiff.gradient(x -> policy_wrapper_inplace(x, init_value = inplace_value), test_params)
     g_inplace_3 = ForwardDiff.gradient(x -> policy_wrapper_inplace(x, init_value = inplace_value), test_params)
@@ -64,8 +61,8 @@ end
 
 function kdot_wrapper(p; x = 1.0)
     m_skiba = SkibaModel(p...)
-    hyperparams = HyperParams(m_skiba)
-    init_value = Value(hyperparams);
+    hyperparams = StateSpaceHyperParams(m_skiba)
+    init_value = Value(Real, hyperparams);
     fit_value, fit_variables, fit_iter = solve_HJB(m_skiba, hyperparams, init_value = init_value, maxit = 1000);
     r_skiba = SolvedModel(m_skiba, fit_value, fit_variables)
     return r_skiba.kdot_function(x...)
@@ -85,8 +82,8 @@ end
 
 function loss_wrapper(p; x = 0.2)
     m_skiba = SkibaModel(p...)
-    hyperparams = HyperParams(m_skiba)
-    init_value = Value(hyperparams);
+    hyperparams = StateSpaceHyperParams(m_skiba)
+    init_value = Value(Real, hyperparams);
     fit_value, fit_variables, fit_iter = solve_HJB(m_skiba, hyperparams, init_value = init_value, maxit = 1000);
     r_skiba = SolvedModel(m_skiba, fit_value, fit_variables)
     sol = r_skiba(convert.(eltype(p), x), (0.0, 24.0))

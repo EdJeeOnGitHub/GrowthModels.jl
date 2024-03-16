@@ -65,8 +65,8 @@ function update_v(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel},
     b = u + V/Delta
     V = B\b # SOLVE SYSTEM OF EQUATIONS
     Vchange = V - v
-
-    distance = maximum(abs.(Vchange))
+    # If using forward diff, want this just to be value part
+    distance = ForwardDiff.value(maximum(abs.(Vchange)))
     dist[iter] = distance
 
     if distance < crit

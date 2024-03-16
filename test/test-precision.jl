@@ -14,8 +14,8 @@ test_params = [
 
 function wrapper(p)
     m_skiba = SkibaModel(p...)
-    hyperparams = HyperParams(m_skiba)
-    init_value = Value(hyperparams);
+    hyperparams = StateSpaceHyperParams(m_skiba)
+    init_value = Value(Float64, hyperparams);
     res = solve_HJB(m_skiba, hyperparams, init_value = init_value, maxit = 1000);
     return res
 end
