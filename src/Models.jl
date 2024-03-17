@@ -1,5 +1,5 @@
 
-struct SkibaModel{T} <: Model where {T <: Real}
+struct SkibaModel{T <: Real} <: Model{T}
     γ::T
     α::T
     ρ::T
@@ -20,7 +20,7 @@ end
 #     σ_z::Real
 # end
 
-struct SmoothSkibaModel{T} <: Model where {T <: Real}
+struct SmoothSkibaModel{T <: Real} <: Model{T} 
     γ::T
     α::T
     ρ::T
@@ -32,7 +32,7 @@ struct SmoothSkibaModel{T} <: Model where {T <: Real}
 end
 
 
-struct RamseyCassKoopmansModel{T} <: Model where {T <: Real}
+struct RamseyCassKoopmansModel{T <: Real} <: Model{T} 
     γ::T
     α::T
     ρ::T
@@ -82,7 +82,7 @@ OrnsteinUhlenbeckProcess(θ = 1, σ = 2)
 from_stationary_OrnsteinUhlenbeckProcess(ρ = 0.3678, stationary_σ = 2.0)
 process_mean(p::OrnsteinUhlenbeckProcess) = exp(p.stationary_σ/2) 
 
-struct StochasticRamseyCassKoopmansModel{T} <: Model where {T <: Real}
+struct StochasticRamseyCassKoopmansModel{T <: Real} <: Model{T}
     γ::T
     α::T
     ρ::T

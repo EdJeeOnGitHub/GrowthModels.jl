@@ -66,7 +66,7 @@ struct HyperParams
     xmin::Real
     xmax::Real
     function HyperParams(; N = 1000, xmin = 0.001, xmax = 10.0)
-        dx = (xmax - xmin) / N 
+        dx = (xmax - xmin) / (N - 1) 
         new(N, dx, xmin, xmax)
     end
 end

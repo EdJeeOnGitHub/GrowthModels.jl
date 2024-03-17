@@ -38,14 +38,14 @@ OrnsteinUhlenbeckProcess(θ = 1, σ = 2)
 from_stationary_OrnsteinUhlenbeckProcess(ρ = 0.3678, stationary_σ = 2.0)
 process_mean(p::OrnsteinUhlenbeckProcess) = exp(p.stationary_σ/2) 
 
-struct StochasticSkibaModel <: Model
-    γ::Real
-    α::Real
-    ρ::Real
-    δ::Real
-    A_H::Real
-    A_L::Real
-    κ::Real
+struct StochasticSkibaModel{T <: Real} <: Model{T}
+    γ::T
+    α::T
+    ρ::T
+    δ::T
+    A_H::T
+    A_L::T
+    κ::T
     stochasticprocess::StochasticProcess
 end
 

@@ -47,7 +47,7 @@ module GrowthModels
            StochasticRamseyCassKoopmansModel
 
     # Types
-    abstract type Model end
+    abstract type Model{T <: Real} end
 
 
 

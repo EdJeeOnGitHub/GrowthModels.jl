@@ -145,17 +145,8 @@ function update_v(m::Union{StochasticRamseyCassKoopmansModel}, value::Value{T, N
 
     dz2 = dz^2
 
-
-    k 
-    z
-    y
-
-
-    @show size(k)
-    @show size(z)
-
-
-    @show size(v)
+    @show z
+    @show k
 
     kk = repeat(reshape(k, :, 1), 1, Nz);
     zz = repeat(reshape(z, 1, :), Nk, 1);
@@ -163,12 +154,18 @@ function update_v(m::Union{StochasticRamseyCassKoopmansModel}, value::Value{T, N
     σ_sq = σ^2
     # drift
     mu = (-θ*log.(z) .+ σ_sq/2).*z
+    @show mu
     # variance - Ito's
     s2 = σ_sq.*z.^2;
+    @show s2
 
     yy = -s2/dz2 - mu/dz
     chi = s2/(2*dz2)
     zeta = mu/dz + s2/(2*dz2)
+    
+    @show yy
+    @show chi
+    @show zeta
 
     lowdiag = fill(chi[2], Nk)
     for j in 3:Nz 
@@ -322,11 +319,12 @@ function update_v(m::Union{StochasticRamseyCassKoopmansModel}, value::Value{T, N
     return value, iter
 end
 
+initial_guess(m::GrowthModels.Model{T}, state) where {T <: Real} = state.aux_state[:y] .^ (1 - m.γ) / (1 - m.γ) / m.ρ
+
 function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000, verbose = true)
     curr_iter = 0
     val = deepcopy(init_value)
-    # initial guess - doesn't seem to help?
-    # val.v[:] = (state.k .^ m.α).^(1-m.γ) ./ (1-m.γ) ./ m.ρ
+    val.v[:] = initial_guess(m, state)
     for n in 1:maxit
         curr_iter += 1
         output_value, curr_iter = update_v(m, val, state, hyperparams, iter = n, verbose = verbose)
