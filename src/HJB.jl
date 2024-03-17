@@ -66,13 +66,13 @@ function update_v(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel},
     Vchange = V - v
     # If using forward diff, want this just to be value part
     distance = ForwardDiff.value(maximum(abs.(Vchange)))
-    dist[iter] = distance
+    push!(dist, distance)
 
     if distance < crit
         if verbose
             println("Value Function Converged, Iteration = ", iter)
         end
-        dist[iter+1:end] .= distance
+        push!(dist, distance)
         value = Value{T, N_v}(
             v = V, 
             dVf = dVf, 

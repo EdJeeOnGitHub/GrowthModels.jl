@@ -12,7 +12,7 @@ test_params = [
     2.0
 ]
 
-function policy_wrapper_inplace(p; x = 1.0, init_value = Value(Real, 2, 1000))
+function policy_wrapper_inplace(p; x = 1.0, init_value = Value(Real, (1000,)))
     m_skiba = SkibaModel(p...)
     hyperparams = StateSpaceHyperParams(m_skiba)
     fit_value, fit_variables, fit_iter = solve_HJB(m_skiba, hyperparams, init_value = init_value, maxit = 1000);
@@ -39,13 +39,13 @@ end
 policy_wrapper(test_params)
 
 @testset "Policy function differentiable wrt params" begin
-    init_value = Value(Real, 1000, 2)
+    init_value = Value(Real, (1000,) )
     g = ForwardDiff.gradient(p -> policy_wrapper(p, x = 1.0), test_params);
     @test isa(g, Vector);
     for i in eachindex(g)
         @test isnan(g[i]) == false
     end
-    inplace_value = Value(Real, 1000, 2)
+    inplace_value = Value(Real, (1000,))
     g_inplace_1 = ForwardDiff.gradient(x -> policy_wrapper_inplace(x, init_value = inplace_value), test_params)
     g_inplace_2 = ForwardDiff.gradient(x -> policy_wrapper_inplace(x, init_value = inplace_value), test_params)
     g_inplace_3 = ForwardDiff.gradient(x -> policy_wrapper_inplace(x, init_value = inplace_value), test_params)

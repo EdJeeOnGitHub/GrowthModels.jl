@@ -17,7 +17,8 @@ value = Value(state)
     γ, ρ, δ = m.γ, m.ρ, m.δ
     (; θ, σ) = m.stochasticprocess
     (; v, dVf, dVb, dV0, dist) = value
-    k, y, z = state[:k], state[:y], state[:z]' # y isn't really a state but avoid computing it each iteration this way
+    k, z = state[:k], state[:z]' # y isn't really a state but avoid computing it each iteration this way
+    y = state.aux_state[:y]
     k_hps = hyperparams[:k]
     z_hps = hyperparams[:z]
 
@@ -323,7 +324,8 @@ Bswitch = spdiagm(-N => lowdiag, 0 => centdiag, N => updiag)
 v0 = (zz .* kk .^ alpha) .^ (1 - ga) / (1 - ga) / rho
 global v = v0
 
-for n = 1:maxit
+# for n = 1:maxit
+n = 1
 global    V = v
     # Forward difference
     Vaf[1:N-1, :] = (V[2:N, :] - V[1:N-1, :]) ./ dk
@@ -418,6 +420,7 @@ global    v = V
         break
     end
 end
+dist
 # Measure elapsed time
 toc = time() - tic
 println("Elapsed time: $toc seconds")

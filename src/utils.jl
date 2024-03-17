@@ -36,26 +36,22 @@ end
 # ensures each state variable is a vector with same dimension
 # probably not a great modification but makes things easier for me 
 # when I create a struct to hold value functions
-struct StateSpace{T, D, N, C <: NamedTuple, A <: NamedTuple} 
+struct StateSpace{T, N, D, C <: NamedTuple, A <: NamedTuple} 
     state::C
     aux_state::A
 end
 
-# Constructor function ensuring all vectors in the named tuple are of the same size D.
-function StateSpace(state::NamedTuple{Names, <: NTuple{N, <: AbstractVector{T}}}, aux_state::NamedTuple{Names_a, <: NTuple{N_a, <: AbstractVector{T}}}) where {Names, N, T, Names_a, N_a}
-    D = length(first(values(state)))
-    all(v -> length(v) == D, values(state)) || error("All vectors must be of the same size")
-    StateSpace{T, D, N, typeof(state), typeof(aux_state)}(state, aux_state)
-end
+Base.ndims(::StateSpace{T, N}) where {T, N} = N
+Base.size(statespace::StateSpace{T, N}) where {T, N} = ntuple(i -> length(statespace.state[i]), N)
 
-function Base.eltype(::StateSpace{T, D, N, <: NamedTuple{Names, V}}) where {T, D, N, Names, V}
+tuple_size(x) = ntuple(i -> length(x[i]), length(x))
+function StateSpace(state::NamedTuple{Names, <: NTuple{N, <: AbstractVector{T}}}, aux_state::NamedTuple{Names_a, <: NTuple{N_a, <: AbstractVector{T}}}) where {Names, N, T, Names_a, N_a}
+    StateSpace{T, N, tuple_size(state), typeof(state), typeof(aux_state)}(state, aux_state)
+end
+function Base.eltype(::StateSpace{T, N, <: NamedTuple{Names, V}}) where {T, N, Names, V}
     NamedTuple{Names, NTuple{N, T}}
 end
 
-Base.ndims(::StateSpace{T, D, N}) where {T, D, N} = N
-
-# Correctly adjusted size function to return a tuple of length N with elements D repeated.
-Base.size(::StateSpace{T, D, N}) where {T, D, N} = ntuple(_ -> D, N)
 
 # Adjust the indexing functions if necessary to work with the new struct definition.
 Base.eachindex(statespace::StateSpace) = CartesianIndices(size(statespace))
@@ -80,15 +76,19 @@ struct StateSpaceHyperParams{N, D}
 end
 
 function StateSpaceHyperParams(hyperparams::NamedTuple{Names, <: NTuple{N, <: HyperParams}}) where {Names, N}
-    D = first(hyperparams).N
-    all(v -> v.N == D, hyperparams) || error("All vectors must be of same size")
-    StateSpaceHyperParams{N, D}(hyperparams)
+    D = ntuple(i -> hyperparams[i].N, N)
+    StateSpaceHyperParams{N,D}(hyperparams)
 end
 Base.getindex(statespacehyperparams::StateSpaceHyperParams, x::Symbol) = statespacehyperparams.hyperparams[x]
+Base.size(::StateSpaceHyperParams{N, D}) where {N, D} = D
+Base.size(h::HyperParams) = (h.N,)
 
 
 
-function StateSpace(statespacehyperparams::StateSpaceHyperParams{N}, aux_state::NamedTuple) where {N}
+
+
+
+function StateSpace(statespacehyperparams::StateSpaceHyperParams{N, D}, aux_state::NamedTuple) where {N, D}
     names = keys(statespacehyperparams.hyperparams)
     values = map(
         x -> collect(
@@ -96,56 +96,44 @@ function StateSpace(statespacehyperparams::StateSpaceHyperParams{N}, aux_state::
         ), statespacehyperparams.hyperparams)
     state = NamedTuple(zip(names, values))
     T = typeof(first(values))
-    StateSpace{T, length(first(values)), N, typeof(state)}(state, aux_state)
+    StateSpace{T, N, D, typeof(state), typeof(aux_state)}(state, aux_state)
 end
 
 
 
 # Struct to hold value function, its derivatives, and convergence diagnostics
-struct Value{T, N} 
-    v::Array{T, 1}
-    dVf::Array{T, N}
-    dVb::Array{T, N}
-    dV0::Array{T, N}
-    dist::Array{Float64, 1}
+struct Value{T, D} 
+    v::Array{T, D}
+    dVf::Array{T, D}
+    dVb::Array{T, D}
+    dV0::Array{T, D}
+    dist::Vector{Float64}
     convergence_status::Bool
     iter::Int64
 end
 
-function Value(::StateSpace{T,D, N, C }) where {T, D, N, C <: NamedTuple}
+function Value(::StateSpace{T, N, D, C }) where {T, N, D, C <: NamedTuple}
     v = zeros(T, D)
-    dVf = zeros(T, (D, N))
-    dVb = zeros(T, (D, N))
-    dV0 = zeros(T, (D, N))
-    dist = fill(Inf, D)
+    dVf = zeros(T, D)
+    dVb = zeros(T, D)
+    dV0 = zeros(T, D)
+    dist = [Inf]
     convergence_status = false
     iter = 0
     Value(v, dVf, dVb, dV0, dist, convergence_status, iter)
 end
 
-# function Value(::StateSpace{T,D, N, C }) where {T, D, N, C <: NamedTuple}
-#     v = zeros(T, D)
-#     dVf = zeros(T, (D, N))
-#     dVb = zeros(T, (D, N))
-#     dV0 = zeros(T, (D, N))
-#     dist = fill(Inf, D)
-#     convergence_status = false
-#     iter = 0
-#     Value{T, N}(v, dVf, dVb, dV0, dist, convergence_status, iter)
-# end
-
 function Value(T, h::Union{HyperParams,StateSpaceHyperParams{N,D}}) where {N, D}
     D_v = isa(h, HyperParams) ? h.N : D
-    N_v = isa(h, HyperParams) ? 1 : N 
-    Value(T, D_v, N_v)
+    Value(T, D_v)
 end
 
-function Value(T, D, N)
+function Value(T, D)
     v = zeros(T, D)
-    dVf = zeros(T, (D, N))
-    dVb = zeros(T, (D, N))
-    dV0 = zeros(T, (D, N))
-    dist = fill(Inf, D)
+    dVf = zeros(T, D)
+    dVb = zeros(T, D)
+    dV0 = zeros(T, D)
+    dist = [Inf]
     convergence_status = false
     iter = 0
     Value(v, dVf, dVb, dV0, dist, convergence_status, iter)
@@ -155,8 +143,8 @@ function Value(; v, dVf, dVb, dV0, dist, convergence_status, iter)
     Value(v, dVf, dVb, dV0, dist, convergence_status, iter)
 end
 
-function Value{T,N}(; v, dVf, dVb, dV0, dist, convergence_status, iter) where {T,N}
-    Value{T,N}(v, dVf, dVb, dV0, dist, convergence_status, iter)
+function Value{T,D}(; v, dVf, dVb, dV0, dist, convergence_status, iter) where {T,D}
+    Value{T,D}(v, dVf, dVb, dV0, dist, convergence_status, iter)
 end
 
 
