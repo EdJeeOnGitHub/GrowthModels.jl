@@ -126,6 +126,202 @@ end
 
 
 
+function update_v(m::Union{StochasticRamseyCassKoopmansModel}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v}
+
+
+    # γ, ρ, δ = m.γ, m.ρ, m.δ
+    (; γ, α, ρ, δ) = m
+    (; θ, σ) = m.stochasticprocess
+    (; v, dVf, dVb, dV0, dist) = value
+    k, z = state[:k], state[:z]' # y isn't really a state but avoid computing it each iteration this way
+    y = state.aux_state[:y]
+    k_hps = hyperparams[:k]
+    z_hps = hyperparams[:z]
+
+
+    
+    Nk, dk, kmax, kmin = k_hps.N, k_hps.dx, k_hps.xmax, k_hps.xmin
+    Nz, dz, zmax, zmin = z_hps.N, z_hps.dx, z_hps.xmax, z_hps.xmin
+
+    dz2 = dz^2
+
+
+    k 
+    z
+    y
+
+
+    @show size(k)
+    @show size(z)
+
+
+    @show size(v)
+
+    kk = repeat(reshape(k, :, 1), 1, Nz);
+    zz = repeat(reshape(z, 1, :), Nk, 1);
+
+    σ_sq = σ^2
+    # drift
+    mu = (-θ*log.(z) .+ σ_sq/2).*z
+    # variance - Ito's
+    s2 = σ_sq.*z.^2;
+
+    yy = -s2/dz2 - mu/dz
+    chi = s2/(2*dz2)
+    zeta = mu/dz + s2/(2*dz2)
+
+    lowdiag = fill(chi[2], Nk)
+    for j in 3:Nz 
+        lowdiag = [lowdiag; fill(chi[j], Nk)]
+    end
+    lowdiag
+
+    updiag = Vector{Float64}()
+    for j in 1:(Nz - 1)
+        updiag = [updiag; fill(zeta[j], Nk)]
+    end
+    updiag
+
+
+    centdiag = fill(chi[1] + yy[1], Nk)
+    for j in 2:(Nz - 1)
+        centdiag = [centdiag; fill(yy[j], Nk)]
+    end
+    centdiag = [centdiag; fill(yy[end] + zeta[end], Nk)]
+
+    # Construct B_switch matrix with corrected diagonals
+    Bswitch = spdiagm(-Nk => lowdiag, 0 => centdiag, Nk => updiag)
+
+    V = v
+
+    # Forward difference
+    dVf[1:Nk-1, :] .= (V[2:Nk, :] - V[1:Nk-1, :]) ./ dk
+
+    # Backward difference
+    dVb[2:Nk, :] .= (V[2:Nk, :] - V[1:Nk-1, :]) ./ dk
+    dVb[1, :] .= (y[1, :] .- δ .* k[1, :]).^(-γ) # State constraint at kmin
+
+    # Indicator whether value function is concave
+    I_concave = dVb .> dVf
+
+    # Consumption and savings with forward difference
+    cf = dVf.^(-1 / γ)
+    sf = y - δ .* kk - cf
+    # Consumption and savings with backward difference
+    cb = dVb.^(-1 / γ)
+    sb = y - δ .* kk - cb
+    # Consumption and derivative of value function at steady state
+    c0 = y - δ .* kk
+    dV0 .= c0.^(-γ)
+
+    # Decision on forward or backward differences based on the sign of the drift
+    If = sf .> 0 # positive drift -> forward difference
+    Ib = sb .< 0 # negative drift -> backward difference
+    I0 = 1 .- If .- Ib # at steady state
+
+    V_Upwind = dVf .* If + dVb .* Ib + dV0 .* I0
+
+    c = V_Upwind.^(-1 / γ)
+    u = c.^(1 - γ) / (1 - γ)
+
+    # Construct matrix A
+    X = -min.(sb, 0) ./ dk
+    Y = -max.(sf, 0) ./ dk + min.(sb, 0) ./ dk
+    Z = max.(sf, 0) ./ dk
+
+
+
+
+
+    # Initialize updiag with zeros, to be filled in the loop
+    updiag = Vector{Float64}()  # Start with an empty array, assuming Z contains Float64 values
+    for j in 1:Nz
+        updiag = [updiag; Z[1:Nk-1, j]]
+        if j != Nz
+            push!(updiag, 0)
+        end
+    end
+    updiag
+
+
+
+    # Convert centdiag
+    centdiag = reshape(Y, Nk*Nz)  # Assuming Y is already a matrix or array that matches the dimensions
+
+    lowdiag = X[2:end, 1]
+    for j in 2:Nz
+        lowdiag = [lowdiag; 0; X[2:end, j]]
+    end
+    lowdiag
+
+
+    AA = spdiagm(0 => centdiag, 1 => updiag, -1 => lowdiag)
+
+
+    A = AA + Bswitch
+    A_err = abs.(sum(A, dims = 2))        
+    if maximum(A_err) > 10^(-6)
+        throw(ValueFunctionError("Improper Transition Matrix: $(maximum(A_err)) > 10^(-6)"))
+    end    
+
+    B = (1 / Delta + ρ) * sparse(I, size(A)) .- A
+
+
+
+    u_stacked = reshape(u, Nk*Nz)
+    V_stacked = reshape(V, Nk*Nz)
+
+    b = u_stacked + V_stacked / Delta
+
+    V_stacked = B \ b
+
+    V = reshape(V_stacked, Nk, Nz)
+
+    Vchange = V - v
+
+    # If using forward diff, want this just to be value part
+    distance = ForwardDiff.value(maximum(abs.(Vchange)))
+    push!(dist, distance)
+
+    if distance < crit
+        if verbose
+            println("Value Function Converged, Iteration = ", iter)
+        end
+        push!(dist, distance)
+        value = Value{T, N_v}(
+            v = V, 
+            dVf = dVf, 
+            dVb = dVb, 
+            dV0 = dV0, 
+            dist = dist,
+            convergence_status = true,
+            iter = iter
+            )
+        variables = (
+            y = y, 
+            k = kk, 
+            z = zz,
+            c = c, 
+            If = If, 
+            Ib = Ib, 
+            I0 = I0
+            )
+        return value, iter, variables
+    end
+
+    value = Value{T,N_v}(
+        v = V, 
+        dVf = dVf, 
+        dVb = dVb, 
+        dV0 = dV0, 
+        dist = dist,
+        convergence_status = false,
+        iter = iter
+        )
+
+    return value, iter
+end
+
 function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000, verbose = true)
     curr_iter = 0
     val = deepcopy(init_value)

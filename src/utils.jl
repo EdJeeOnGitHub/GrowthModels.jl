@@ -45,7 +45,7 @@ Base.ndims(::StateSpace{T, N}) where {T, N} = N
 Base.size(statespace::StateSpace{T, N}) where {T, N} = ntuple(i -> length(statespace.state[i]), N)
 
 tuple_size(x) = ntuple(i -> length(x[i]), length(x))
-function StateSpace(state::NamedTuple{Names, <: NTuple{N, <: AbstractVector{T}}}, aux_state::NamedTuple{Names_a, <: NTuple{N_a, <: AbstractVector{T}}}) where {Names, N, T, Names_a, N_a}
+function StateSpace(state::NamedTuple{Names, <: NTuple{N, <: AbstractVector{T}}}, aux_state::NamedTuple{Names_a, <: NTuple{N_a, <: AbstractArray{T}}}) where {Names, N, T, Names_a, N_a}
     StateSpace{T, N, tuple_size(state), typeof(state), typeof(aux_state)}(state, aux_state)
 end
 function Base.eltype(::StateSpace{T, N, <: NamedTuple{Names, V}}) where {T, N, Names, V}

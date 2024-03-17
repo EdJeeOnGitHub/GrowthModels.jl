@@ -1,6 +1,18 @@
 using GrowthModels
 using Test
 using Plots
+    
+
+    skiba_model = SkibaModel()
+    skiba_hyperparams = StateSpaceHyperParams(skiba_model)
+    skiba_state = StateSpace(skiba_model, skiba_hyperparams)
+    skiba_init_value = Value(skiba_state);
+
+
+    @btime fit_value, fit_variables, fit_iter = solve_HJB(
+        skiba_model, 
+        skiba_hyperparams, 
+        init_value = skiba_init_value, maxit = 1000);
 
 
 @testset "Skiba" begin

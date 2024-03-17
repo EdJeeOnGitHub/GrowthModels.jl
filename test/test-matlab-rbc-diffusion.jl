@@ -3,226 +3,96 @@
 using GrowthModels
 using BenchmarkTools
 using LinearAlgebra, SparseArrays, Plots
+using ForwardDiff
+
+
 
 # function update_v(m::Union{StochasticSkibaModel}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v}
-iter = 0
-crit = 10^(-6)
-Delta = 1000 
-verbose = true
-m = StochasticSkibaModel()
-hyperparams = StateSpaceHyperParams(m, N = 10)
+
+# Parameters
+ga = 2 # CRRA utility with parameter gamma
+rho = 0.05 # discount rate
+alpha = 0.3 # CURVATURE OF PRODUCTION FUNCTION
+d = 0.05 # DEPRECIATION RATE
+
+# ORNSTEIN-UHLENBECK PROCESS parameters
+Var = 0.07
+zmean = exp(Var / 2) # MEAN OF LOG-NORMAL DISTRIBUTION N(0,Var)
+Corr = 0.9
+the = -log(Corr)
+sig2 = 2 * the * Var
+m = StochasticRamseyCassKoopmansModel(
+    γ = 2.0,
+    ρ = 0.05,
+    α = 0.3,
+    δ = 0.05,
+    stochasticprocess = OrnsteinUhlenbeckProcess(θ = -log(0.9), σ = 2*-log(0.9)*0.07 )
+)
+
+hyperparams = StateSpaceHyperParams(m, Nk = 10, Nz = 4)
 state = StateSpace(m, hyperparams)
 value = Value(state)
-
-    γ, ρ, δ = m.γ, m.ρ, m.δ
-    (; θ, σ) = m.stochasticprocess
-    (; v, dVf, dVb, dV0, dist) = value
-    k, z = state[:k], state[:z]' # y isn't really a state but avoid computing it each iteration this way
-    y = state.aux_state[:y]
-    k_hps = hyperparams[:k]
-    z_hps = hyperparams[:z]
-
-    Nk, dk, kmax, kmin = k_hps.N, k_hps.dx, k_hps.xmax, k_hps.xmin
-    Nz, dz, zmax, zmin = z_hps.N, z_hps.dx, z_hps.xmax, z_hps.xmin
-
-    dz2 = dz^2
+ed = similar(value.v)
 
 
-    
+initial_guess(m, state) = state.aux_state[:y] .^ (1 - m.γ) / (1 - m.γ) / m.ρ
 
-    kk = repeat(reshape(k, :, 1), 1, Nz);
-    zz = repeat(reshape(z, 1, :), Nk, 1);
+v0 = initial_guess(m, state)
+value.v .= initial_guess(m, state)
 
-    σ_sq = σ^2
-    # drift
-    mu = (-θ*log.(z) .+ σ_sq/2).*z
-    # variance - Ito's
-    s2 = σ_sq.*z.^2;
+update_v(
+    m,
+    value,
+    state,
+    hyperparams
+)
 
-    yy = -s2/dz2 - mu/dz
-    chi = s2/(2*dz2)
-    zeta = mu/dz + s2/(2*dz2)
-
-    lowdiag = fill(chi[2], Nk)
-    for j in 3:Nz 
-        lowdiag = [lowdiag; fill(chi[j], Nk)]
-    end
-    lowdiag
-
-    updiag = Vector{Float64}()
-    for j in 1:(Nz - 1)
-        updiag = [updiag; fill(zeta[j], Nk)]
-    end
-    updiag
-
-
-    centdiag = fill(chi[1] + yy[1], Nk)
-    for j in 2:(Nz - 1)
-        centdiag = [centdiag; fill(yy[j], Nk)]
-    end
-    centdiag = [centdiag; fill(yy[end] + zeta[end], Nk)]
-
-    # Construct B_switch matrix with corrected diagonals
-    Bswitch = spdiagm(-Nk => lowdiag, 0 => centdiag, Nk => updiag)
-
-    V = v
-
-    # Forward difference
-    Vaf[1:N-1, :] = (V[2:N, :] - V[1:N-1, :]) ./ dk
-
-    # Backward difference
-    Vab[2:N, :] = (V[2:N, :] - V[1:N-1, :]) ./ dk
-    Vab[1, :] .= (z .* kmin.^alpha .- d .* kmin).^(-ga) # State constraint at kmin
-
-    # Indicator whether value function is concave
-    I_concave = Vab .> Vaf
-
-    # Consumption and savings with forward difference
-    cf = Vaf.^(-1 / ga)
-    sf = zz .* kk.^alpha - d .* kk - cf
-    # Consumption and savings with backward difference
-    cb = Vab.^(-1 / ga)
-    sb = zz .* kk.^alpha - d .* kk - cb
-    # Consumption and derivative of value function at steady state
-    c0 = zz .* kk.^alpha - d .* kk
-    Va0 = c0.^(-ga)
-
-    # Decision on forward or backward differences based on the sign of the drift
-    If = sf .> 0 # positive drift -> forward difference
-    Ib = sb .< 0 # negative drift -> backward difference
-    I0 = 1 .- If .- Ib # at steady state
-
-    Va_Upwind = Vaf .* If + Vab .* Ib + Va0 .* I0
-
-    c .= Va_Upwind.^(-1 / ga)
-    u = c.^(1 - ga) / (1 - ga)
-
-    # Construct matrix A
-    X = -min.(sb, 0) ./ dk
-    Y = -max.(sf, 0) ./ dk + min.(sb, 0) ./ dk
-    Z = max.(sf, 0) ./ dk
+initial_guess(m, state)
 
 
 
+    fit_value, fit_variables, fit_iter = solve_HJB(
+        m, 
+        hyperparams, 
+        init_value = value, maxit = 1000);
 
 
-    # Initialize updiag with zeros, to be filled in the loop
-    updiag = Vector{Float64}()  # Start with an empty array, assuming Z contains Float64 values
-    for j in 1:J
-        updiag = [updiag; Z[1:N-1, j]]
-        if j != J
-            push!(updiag, 0)
-        end
-    end
-    updiag
+fit_value
 
 
 
-    # Convert centdiag
-    centdiag = reshape(Y, N*J)  # Assuming Y is already a matrix or array that matches the dimensions
+state[:k]
 
-    lowdiag = X[2:end, 1]
-    for j in 2:J
-        lowdiag = [lowdiag; 0; X[2:end, j]]
-    end
-    lowdiag
+fit_variables[:y]
+fit_variables[:c]
+fit_variables[:k]
 
+ss = state.aux_state[:y] - m.δ .* 
 
-    AA = spdiagm(0 => centdiag, 1 => updiag, -1 => lowdiag)
+# Calculation before plotting
+ss = zz .* kk.^alpha - d .* kk - c
+using CSV, Tables
+matlab_result =  Tables.matrix(CSV.File("test/test-data/diffusion-rbc-matlab-output.csv", header = false))
 
+max_diff = abs(maximum(ss .- matlab_result))
 
-    A = AA + Bswitch
-
-    if maximum(abs.(sum(A, dims=2))) > 10^(-12)
-        println("Improper Transition Matrix")
-        break
-    end
-
-    B = (1 / Delta + rho) * sparse(I, size(A)) .- A
+@testset "Recover Matlab Estimates" begin
+    @test max_diff < 10^(-6)
+end
 
 
+# # Creating the plot
+# plot(k, ss, label="", linewidth=2, xlabel="k", ylabel="s(k,z)", legend=:topright)
+# plot!(k, zeros(size(k)), linestyle=:dash, label="", linewidth=2)
 
-    u_stacked = reshape(u, N*J)
-    V_stacked = reshape(V, N*J)
+# # Setting the font size for the plot is typically done through themes in Julia, or by adjusting default attributes
+# plot!(tickfontsize=14, labelfontsize=14, legendfontsize=14, titlefontsize=14)
 
-    b = u_stacked + V_stacked / Delta
+# # Setting x-axis limits
+# xlims!(kmin, kmax)
 
-    V_stacked = B \ b
-
-    V = reshape(V_stacked, N, J)
-
-    Vchange = V - v
-
-    # If using forward diff, want this just to be value part
-    distance = ForwardDiff.value(maximum(abs.(Vchange)))
-    dist[iter] = distance
-
-    if distance < crit
-        if verbose
-            println("Value Function Converged, Iteration = ", iter)
-        end
-        dist[iter+1:end] .= distance
-        value = Value{T, N_v}(
-            v = V, 
-            dVf = dVf, 
-            dVb = dVb, 
-            dV0 = dV0, 
-            dist = dist,
-            convergence_status = true,
-            iter = iter
-            )
-        variables = (
-            y = y, 
-            k = k, 
-            c = c, 
-            If = If, 
-            Ib = Ib, 
-            I0 = I0
-            )
-        return value, iter, variables
-    end
-
-    value = Value{T,N_v}(
-        v = V, 
-        dVf = dVf, 
-        dVb = dVb, 
-        dV0 = dV0, 
-        dist = dist,
-        convergence_status = false,
-        iter = iter
-        )
-
-    # return value, iter
-
-# %This will be the upperdiagonal of the B_switch
-# updiag=zeros(I,1); %This is necessary because of the peculiar way spdiags is defined.
-# for j=1:J
-#     updiag=[updiag;repmat(zeta(j),I,1)];
-# end
-
-# %This will be the center diagonal of the B_switch
-# centdiag=repmat(chi(1)+yy(1),I,1);
-# for j=2:J-1
-#     centdiag=[centdiag;repmat(yy(j),I,1)];
-# end
-# centdiag=[centdiag;repmat(yy(J)+zeta(J),I,1)];
-
-# %This will be the lower diagonal of the B_switch
-# lowdiag=repmat(chi(2),I,1);
-# for j=3:J
-#     lowdiag=[lowdiag;repmat(chi(j),I,1)];
-# end
-
-# %Add up the upper, center, and lower diagonal into a sparse matrix
-# Bswitch=spdiags(centdiag,0,I*J,I*J)+spdiags(lowdiag,-I,I*J,I*J)+spdiags(updiag,I,I*J,I*J);
-
-
-
-
-
-
-
-
+# # Display the plot
+# display(plot)
 
 
 
