@@ -8,9 +8,7 @@ function StateSpaceHyperParams(m::RamseyCassKoopmansModel; N = 1000, kmax_f = 1.
     kss = k_steady_state(m)
     kmin, kmax = kmin_f*kss, kmax_f*kss
     k_hps = HyperParams(N = N, xmax = kmax, xmin = kmin)
-    # again, not actually used to generate state space
-    y_hps = HyperParams(N = N, xmax = kmax, xmin = kmin)
-    return StateSpaceHyperParams((k = k_hps, y = y_hps))
+    return StateSpaceHyperParams((k = k_hps,))
 end
 
 
@@ -18,7 +16,7 @@ function StateSpace(m::RamseyCassKoopmansModel, statespacehyperparams::StateSpac
     k_hps = statespacehyperparams[:k]
     k = collect(range(k_hps.xmin, k_hps.xmax, length = k_hps.N))
     y = production_function(m, k)
-    StateSpace((k = k, y = y))
+    StateSpace((k = k,), (y = y,))
 end
 
 

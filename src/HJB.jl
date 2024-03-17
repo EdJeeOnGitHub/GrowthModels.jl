@@ -2,7 +2,7 @@
 function update_v(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v}
     γ, ρ, δ = m.γ, m.ρ, m.δ
     (; v, dVf, dVb, dV0, dist) = value
-    k, y = state[:k], state[:y] # y isn't really a state but avoid computing it each iteration this way
+    k, y = state[:k], state.aux_state[:y] # y isn't really a state but avoid computing it each iteration this way
     (; N, dx, xmax, xmin) = hyperparams[:k]
     dk, kmax, kmin = dx, xmax, xmin
 

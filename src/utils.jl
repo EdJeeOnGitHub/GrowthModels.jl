@@ -36,18 +36,18 @@ end
 # ensures each state variable is a vector with same dimension
 # probably not a great modification but makes things easier for me 
 # when I create a struct to hold value functions
-struct StateSpace{T, D, N, C <: NamedTuple} 
+struct StateSpace{T, D, N, C <: NamedTuple, A <: NamedTuple} 
     state::C
+    aux_state::A
 end
 
 # Constructor function ensuring all vectors in the named tuple are of the same size D.
-function StateSpace(state::NamedTuple{Names, <: NTuple{N, <: AbstractVector{T}}}) where {Names, N, T}
+function StateSpace(state::NamedTuple{Names, <: NTuple{N, <: AbstractVector{T}}}, aux_state::NamedTuple{Names_a, <: NTuple{N_a, <: AbstractVector{T}}}) where {Names, N, T, Names_a, N_a}
     D = length(first(values(state)))
     all(v -> length(v) == D, values(state)) || error("All vectors must be of the same size")
-    StateSpace{T, D, N, typeof(state)}(state)
+    StateSpace{T, D, N, typeof(state), typeof(aux_state)}(state, aux_state)
 end
 
-# Adjusting the eltype and size functions to incorporate the new D parameter.
 function Base.eltype(::StateSpace{T, D, N, <: NamedTuple{Names, V}}) where {T, D, N, Names, V}
     NamedTuple{Names, NTuple{N, T}}
 end
@@ -88,7 +88,7 @@ Base.getindex(statespacehyperparams::StateSpaceHyperParams, x::Symbol) = statesp
 
 
 
-function StateSpace(statespacehyperparams::StateSpaceHyperParams{N}) where {N}
+function StateSpace(statespacehyperparams::StateSpaceHyperParams{N}, aux_state::NamedTuple) where {N}
     names = keys(statespacehyperparams.hyperparams)
     values = map(
         x -> collect(
@@ -96,7 +96,7 @@ function StateSpace(statespacehyperparams::StateSpaceHyperParams{N}) where {N}
         ), statespacehyperparams.hyperparams)
     state = NamedTuple(zip(names, values))
     T = typeof(first(values))
-    StateSpace{T, length(first(values)), N, typeof(state)}(state)
+    StateSpace{T, length(first(values)), N, typeof(state)}(state, aux_state)
 end
 
 

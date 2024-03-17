@@ -19,16 +19,14 @@ function StateSpaceHyperParams(m::SmoothSkibaModel; N = 1000, kmax_f = 1.3, kmin
     kssH = k_steady_state_hi(m)
     kmin, kmax = kmin_f*kssH, kmax_f*kssH
     k_hps = HyperParams(N = N, xmax = kmax, xmin = kmin)
-    # not actually used
-    y_hps = HyperParams(N = N, xmax = kmax, xmin = kmin)
-    return StateSpaceHyperParams((k = k_hps, y = y_hps))
+    return StateSpaceHyperParams((k = k_hps,))
 end
 
 function StateSpace(m::SmoothSkibaModel, statespacehyperparams::StateSpaceHyperParams)
     k_hps = statespacehyperparams[:k]
     k = collect(range(k_hps.xmin, k_hps.xmax, length = k_hps.N))
     y = production_function(m, k)
-    StateSpace((k = k, y = y))
+    StateSpace((k = k,), (y = y,))
 end
 
 
