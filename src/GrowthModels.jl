@@ -6,7 +6,7 @@ module GrowthModels
     using SparseArrays, LinearAlgebra
     import Base: show
     using Printf
-    using OrdinaryDiffEq, DataInterpolations
+    using OrdinaryDiffEq, DataInterpolations, Interpolations
     using NaNMath: pow
     using ForwardDiff
     import Base:\

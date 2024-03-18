@@ -55,3 +55,11 @@ end
 @inline production_function_prime(::StochasticRamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, z::Union{Real, Vector{<: Real}}, α::Real, A::Real, δ::Real) = stochastic_rck_production_function_prime(k, z', α, A)
 @inline production_function_prime(::StochasticRamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, z::Union{Real, Vector{<: Real}}, params::Vector) = stochastic_rck_production_function_prime(k, z', params[1], params[2])
 @inline production_function_prime(m::StochasticRamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, z::Union{Real, Vector{<: Real}}) = stochastic_rck_production_function_prime(k, z', m.α, m.A)
+
+
+function plot_production_function(m::StochasticRamseyCassKoopmansModel, k, z)
+    y = production_function(m, collect(k), collect(z))
+    plot(k, y, label="")
+    xlabel!("\$k\$")
+    ylabel!("\$f(k)\$")
+end

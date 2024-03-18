@@ -182,38 +182,6 @@ function plot_diagnostics(m::Model, value::Value, variables::NamedTuple, hyperpa
     return subplot
 end
 
-function plot_model(m::Model, value::Value, variables::NamedTuple)
-    (; k, y, c) = variables
-    (; v, dVf, dVb, dV0, dist) = value
-    kstar = k_star(m)
-    fit_kdot = statespace_k_dot(m)(variables)
-
-    # subplot = plot(layout = (2, 2), size = (800, 600))
-    p1 =  plot_production_function(m, collect(k))
-    scatter!(p1, [kstar], [production_function(m, kstar)], label="kstar", markersize=4)
-
-    index = findmin(abs.(kstar .- k))[2]
-    p2 = plot(k, v, label="V")
-    scatter!(p2, [kstar], [v[index]], label="kstar", markersize=4)
-    xlabel!(p2, "\$k\$")
-    ylabel!(p2, "\$v(k)\$")
-
-    p3 = plot(k, c, label="Consumption, c(k)")
-    plot!(p3, k, y .- m.δ .* k, label="Production net of depreciation, f(k) - δk")
-    xlabel!(p3, "\$k\$")
-    ylabel!(p3, "\$c(k)\$")
-
-    p4 = plot(k, fit_kdot, label="kdot")
-    plot!(p4, k, zeros(length(k)), linestyle=:dash, label="zeros")
-    scatter!(p4, [kstar], [0], label="kstar", markersize=4)
-    xlabel!(p4, "\$k\$")
-    ylabel!(p4, "\$s(k)\$")
-
-    subplot = plot(p1, p2, p3, p4, layout = (2, 2), size = (800, 600))
-
-    return subplot
-end
-
 """
     check_statespace_constraints(statespace::GrowthModels.StateSpace, p)
 

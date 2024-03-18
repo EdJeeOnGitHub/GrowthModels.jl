@@ -376,6 +376,6 @@ end
 
 
 
-dV_Upwind(::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}, value::Value, variables::NamedTuple) = value.dVf[:, 1] .* variables.If .+ value.dVb[:, 1] .* variables.Ib .+ value.dV0 .* variables.I0
-V_err(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.γ) / (1-m.γ) .+ dV_Upwind(m, value, variables) .* statespace_k_dot(m)(variables) .- m.ρ .* value.v
+dV_Upwind(::Model, value::Value, variables::NamedTuple) = value.dVf .* variables.If .+ value.dVb .* variables.Ib .+ value.dV0 .* variables.I0
+V_err(m::Model) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.γ) / (1-m.γ) .+ dV_Upwind(m, value, variables) .* statespace_k_dot(m)(variables) .- m.ρ .* value.v
 

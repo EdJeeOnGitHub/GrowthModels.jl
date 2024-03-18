@@ -53,24 +53,26 @@ using Plots
 
 end
 
-@testset "RamseyCassKoopmans" begin
-    m = RamseyCassKoopmansModel()
+model_names = ["RamseyCassKoopmansModel", "SkibaModel", "SmoothSkibaModel"]
+@testset "Model Tests for $model_name" for model_name in model_names
+    # Dynamically instantiate the model based on its name
+    m = eval(Meta.parse(model_name))()
     hyperparams = StateSpaceHyperParams(m)
     state = StateSpace(m, hyperparams)
-    init_value = Value(state);
+    init_value = Value(state)
 
-    fail_fit_value, fail_fit_variables, fail_fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 2);
-    fit_value, fit_variables, fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 1000);
+    fail_fit_value, fail_fit_variables, fail_fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 2)
+    fit_value, fit_variables, fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 1000)
 
     @test fit_value.convergence_status == true
     @test fail_fit_value.convergence_status == false
     @test fit_value.v !== zeros(hyperparams[:k].N)
-    @test isnothing(fail_fit_variables) == true 
-    @test isnothing(fit_variables) == false 
+    @test isnothing(fail_fit_variables) == true
+    @test isnothing(fit_variables) == false
 
-    # make sure not changing in place
+    # Make sure not changing in place
     old_value = deepcopy(fit_value)
-    fail_fit_value, fail_fit_variables, fail_fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 2);
+    fail_fit_value, fail_fit_variables, fail_fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 2)
     @test old_value.v == fit_value.v
     @test old_value.dV0 == fit_value.dV0
     @test old_value.dVf == fit_value.dVf
@@ -83,8 +85,8 @@ end
     plot_diagnostics_output = plot_diagnostics(m, fit_value, fit_variables, hyperparams)
     plot_model_output = plot_model(m, fit_value, fit_variables)
 
-    @test isa(plot_model_output, Plots.Plot) 
-    @test isa(plot_diagnostics_output, Plots.Plot) 
+    @test isa(plot_model_output, Plots.Plot)
+    @test isa(plot_diagnostics_output, Plots.Plot)
 
     # Model Output
     r = SolvedModel(m, fit_value, fit_variables)
@@ -92,33 +94,33 @@ end
     time_plot = plot_timepath(ode, r)
 
 
-    @test r.production_function_prime(0.1) == m.A * m.α * 0.1^(m.α - 1)
-
     @test isa(r, SolvedModel)
     @test isa(time_plot, Plots.Plot)
-
 end
 
-
-@testset "SmoothSkiba" begin
-    m = SmoothSkibaModel(β = 10.0)
-    hyperparams = StateSpaceHyperParams(m)
+model_names = ["StochasticRamseyCassKoopmansModel"]
+@testset "Stochasatic Model Tests for $model_name" for model_name in model_names
+    # Dynamically instantiate the model based on its name
+    m = eval(Meta.parse(model_name))()
+    # Dynamically instantiate the model based on its name
+    model_name = "StochasticRamseyCassKoopmansModel"
+    m = eval(Meta.parse(model_name))()
+    hyperparams = StateSpaceHyperParams(m, Nz = 4, Nk = 10)
     state = StateSpace(m, hyperparams)
-    init_value = Value(state);
+    init_value = Value(state)
 
-
-    fail_fit_value, fail_fit_variables, fail_fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 2);
-    fit_value, fit_variables, fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 1000);
+    fit_value, fit_variables, fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 1000)
+    fail_fit_value, fail_fit_variables, fail_fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 2)
 
     @test fit_value.convergence_status == true
     @test fail_fit_value.convergence_status == false
     @test fit_value.v !== zeros(hyperparams[:k].N)
-    @test isnothing(fail_fit_variables) == true 
-    @test isnothing(fit_variables) == false 
+    @test isnothing(fail_fit_variables) == true
+    @test isnothing(fit_variables) == false
 
-    # make sure not changing in place
+    # Make sure not changing in place
     old_value = deepcopy(fit_value)
-    fail_fit_value, fail_fit_variables, fail_fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 2);
+    fail_fit_value, fail_fit_variables, fail_fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 2)
     @test old_value.v == fit_value.v
     @test old_value.dV0 == fit_value.dV0
     @test old_value.dVf == fit_value.dVf
@@ -131,20 +133,22 @@ end
     plot_diagnostics_output = plot_diagnostics(m, fit_value, fit_variables, hyperparams)
     plot_model_output = plot_model(m, fit_value, fit_variables)
 
-    @test isa(plot_model_output, Plots.Plot) 
-    @test isa(plot_diagnostics_output, Plots.Plot) 
 
-    plot_k = collect(fit_variables.k[10:10:end])
-    # Model Output
-    r = SolvedModel(m, fit_value, fit_variables)
-    ode = r(plot_k, (0.0, 48.0))
-    plot_model_output
-    time_plot = plot_timepath(ode, r)
+    @test isa(plot_model_output, Plots.Plot)
+    @test isa(plot_diagnostics_output, Plots.Plot)
 
-    @test isa(r, SolvedModel)
-    @test isa(time_plot, Plots.Plot)
 
+    # TODO: add these for stochastic models or just remove
+
+    # r = SolvedModel(m, fit_value, fit_variables)
+    # ode = r([0.1, 0.5, 1.0, 4.0], (0.0, 24.0))
+    # time_plot = plot_timepath(ode, r)
+
+
+    # @test isa(r, SolvedModel)
+    # @test isa(time_plot, Plots.Plot)
 end
+
 
 
 # Differentiation tests

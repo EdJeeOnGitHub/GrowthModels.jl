@@ -1,4 +1,69 @@
 
+function plot_model(m::Union{StochasticRamseyCassKoopmansModel,StochasticSkibaModel}, value::Value, variables::NamedTuple)
+    (; k, z, y, c) = variables
+    (; v, dVf, dVb, dV0, dist) = value
+    kstar = k_star(m)
+    fit_kdot = GrowthModels.statespace_k_dot(m)(variables)
+
+    # subplot = plot(layout = (2, 2), size = (800, 600))
+    p1 =  plot_production_function(m, k[:], z[:])
+    scatter!(p1, [kstar], [production_function(m, kstar, sum(z[:])/length(z[:]) )], label="kstar", markersize=4)
+
+    index = findmin(abs.(kstar .- k))[2]
+    p2 = plot(k, v, label="V")
+    plot!(legend = false)
+    scatter!(p2, [kstar], [v[index]], label="kstar", markersize=4)
+    xlabel!(p2, "\$k\$")
+    ylabel!(p2, "\$v(k)\$")
+
+    p3 = plot(k, c, label="")
+    plot!(p3, k, y .- m.δ .* k, label="", linestyle = :dash)
+    xlabel!(p3, "\$k\$")
+    ylabel!(p3, "\$c(k)\$")
+
+    p4 = plot(k, fit_kdot, label="")
+    # scatter!(p4, [kstar], [0], label="kstar", markersize=4)
+    hline!(p4, [0], linestyle = :dash, label="kdot = 0")
+    xlabel!(p4, "\$k\$")
+    ylabel!(p4, "\$s(k)\$")
+
+    subplot = plot(p1, p2, p3, p4, layout = (2, 2), size = (800, 600))
+
+    return subplot
+end
+
+function plot_model(m::Union{SkibaModel, SmoothSkibaModel, RamseyCassKoopmansModel}, value::Value, variables::NamedTuple)
+    (; k, y, c) = variables
+    (; v, dVf, dVb, dV0, dist) = value
+    kstar = k_star(m)
+    fit_kdot = statespace_k_dot(m)(variables)
+
+    # subplot = plot(layout = (2, 2), size = (800, 600))
+    p1 =  plot_production_function(m, collect(k))
+    scatter!(p1, [kstar], [production_function(m, kstar)], label="kstar", markersize=4)
+
+    index = findmin(abs.(kstar .- k))[2]
+    p2 = plot(k, v, label="V")
+    scatter!(p2, [kstar], [v[index]], label="kstar", markersize=4)
+    xlabel!(p2, "\$k\$")
+    ylabel!(p2, "\$v(k)\$")
+
+    p3 = plot(k, c, label="Consumption, c(k)")
+    plot!(p3, k, y .- m.δ .* k, label="Production net of depreciation, f(k) - δk")
+    xlabel!(p3, "\$k\$")
+    ylabel!(p3, "\$c(k)\$")
+
+    p4 = plot(k, fit_kdot, label="kdot")
+    plot!(p4, k, zeros(length(k)), linestyle=:dash, label="zeros")
+    scatter!(p4, [kstar], [0], label="kstar", markersize=4)
+    xlabel!(p4, "\$k\$")
+    ylabel!(p4, "\$s(k)\$")
+
+    subplot = plot(p1, p2, p3, p4, layout = (2, 2), size = (800, 600))
+
+    return subplot
+end
+
 struct SolvedModel{T<:Model}
     convergence_status::Bool
     state::Vector{Symbol}
@@ -6,7 +71,7 @@ struct SolvedModel{T<:Model}
     variables::NamedTuple
     production_function::Function
     production_function_prime::Function
-    policy_function::Function
+    policy_function::Union{Function, Interpolations.Extrapolation}
     kdot_function::Function
     ydot_function::Function
     cdot_function::Function
@@ -49,6 +114,47 @@ function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union
         m
     )
 end
+
+
+function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union{StochasticRamseyCassKoopmansModel,StochasticSkibaModel}
+    c_interpolation = interpolate(
+        (variables.k[:, 1], variables.z[1, :]),
+        variables.c,
+        Gridded(Linear())
+    )
+    c_policy_function = extrapolate(c_interpolation, Line())
+    prod_func = (k, z) -> production_function(m, k, z)
+    prod_func_prime = (k, z) -> production_function_prime(m, k, z)
+    kdot_function = (k, z) -> prod_func(k, z) - m.δ*k - c_policy_function(k, z)    
+    ydot_function = (k, z, kdot) -> throw("Not yet implemented - need to add z evolution")
+    ydot_function = k -> throw("Not yet implemented - need to add z evolution")
+
+    function cdot_function(c, k, γ, ρ, δ) 
+        # cdot = (c/γ) * (prod_func_prime(k) - ρ - δ)
+        throw("Not yet implemented - need to add z evolution")
+        return cdot
+    end
+    function cdot_function(c, k)
+        throw("Not yet implemented - need to add z evolution")
+        # cdot_function(c, k, m.γ, m.ρ, m.δ)
+    end
+
+    SolvedModel(
+        value.convergence_status,
+        [:k, :z],
+        [:c],
+        variables,
+        prod_func,
+        prod_func_prime,
+        c_policy_function,
+        kdot_function,
+        ydot_function,
+        cdot_function,
+        m
+    )
+end
+
+
 
 function SolvedModel(m::T, res::NamedTuple) where T <: Model
     SolvedModel(m, res.value, res.variables)
@@ -271,8 +377,8 @@ function show(io::IO, r::SolvedModel)
     print(
         io,
         lineplot(
-            r.variables.k,
-            r.variables.c,
+            r.variables.k[:],
+            r.variables.c[:],
             xlabel = "k(t)",
             ylabel = "c(t)"
         )

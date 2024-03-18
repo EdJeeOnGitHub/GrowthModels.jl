@@ -108,8 +108,6 @@ end
 # )
 # state = StateSpace(m, hyperparams)
 # value = Value(state)
-
-
 # using BenchmarkTools
 # @btime fit_value, fit_variables, fit_iter = solve_HJB(
 #     m, 
@@ -123,3 +121,4 @@ end
 #         m, 
 #         hyperparams, 
 #         init_value = value, maxit = 1000);
+
