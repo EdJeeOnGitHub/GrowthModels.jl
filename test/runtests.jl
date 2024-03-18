@@ -99,8 +99,7 @@ model_names = ["RamseyCassKoopmansModel", "SkibaModel", "SmoothSkibaModel"]
 end
 
 model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
-# @testset "Stochasatic Model Tests for $model_name" for model_name in model_names
-    model_name = "StochasticSkibaModel"
+@testset "Stochasatic Model Tests for $model_name" for model_name in model_names
     # Dynamically instantiate the model based on its name
     m = eval(Meta.parse(model_name))()
     hyperparams = StateSpaceHyperParams(m, Nz = 40, Nk = 100)
@@ -131,14 +130,6 @@ model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
     plot_diagnostics_output = plot_diagnostics(m, fit_value, fit_variables, hyperparams)
     plot_model_output = plot_model(m, fit_value, fit_variables)
 
-    ks = collect(0.1:0.1:5.0)
-    ys = production_function(m, ks,  [1, 10, 100])
-    plot(
-        ks,
-        ys
-    )
-
-
     @test isa(plot_model_output, Plots.Plot)
     @test isa(plot_diagnostics_output, Plots.Plot)
 
@@ -154,15 +145,6 @@ model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
     # @test isa(time_plot, Plots.Plot)
 end
 
-
-    # m = eval(Meta.parse(model_name))()
-    m = StochasticSkibaModel()
-    hyperparams = StateSpaceHyperParams(m)
-    state = StateSpace(m, hyperparams)
-    init_value = Value(state)
-
-    fail_fit_value, fail_fit_variables, fail_fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 2)
-    fit_value, fit_variables, fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 1000)
 
 # Differentiation tests
 include("test-differentiable.jl")

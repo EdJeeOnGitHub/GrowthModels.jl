@@ -13,7 +13,7 @@ function plot_model(m::StochasticModel, value::Value, variables::NamedTuple)
     fit_kdot = GrowthModels.statespace_k_dot(m)(variables)
 
     # subplot = plot(layout = (2, 2), size = (800, 600))
-    p1 =  plot_production_function(m, k[:], z[:])
+    p1 =  plot_production_function(m, k[:, 1], z[1, :])
     scatter!(p1, [kstar], [production_function(m, kstar, sum(z[:])/length(z[:]) )], label="kstar", markersize=4)
 
     index = findmin(abs.(kstar .- k))[2]
