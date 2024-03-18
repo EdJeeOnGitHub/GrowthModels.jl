@@ -1,5 +1,12 @@
 
-function plot_model(m::Union{StochasticRamseyCassKoopmansModel,StochasticSkibaModel}, value::Value, variables::NamedTuple)
+function plot_production_function(m::StochasticModel, k, z)
+    y = production_function(m, collect(k), collect(z))
+    plot(k, y, label="")
+    xlabel!("\$k\$")
+    ylabel!("\$f(k)\$")
+end
+
+function plot_model(m::StochasticModel, value::Value, variables::NamedTuple)
     (; k, z, y, c) = variables
     (; v, dVf, dVb, dV0, dist) = value
     kstar = k_star(m)

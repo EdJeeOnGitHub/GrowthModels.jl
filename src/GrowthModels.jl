@@ -37,24 +37,27 @@ module GrowthModels
     # Models
     export SkibaModel, 
            SmoothSkibaModel,
-           RamseyCassKoopmansModel
-
+           RamseyCassKoopmansModel,
+           StochasticSkibaModel,
+           StochasticRamseyCassKoopmansModel
+       
     # stochastic stuff
     export StochasticProcess,
            OrnsteinUhlenbeckProcess,
-           from_stationary_OrnsteinUhlenbeckProcess,
-           StochasticSkibaModel,
-           StochasticRamseyCassKoopmansModel
+           from_stationary_OrnsteinUhlenbeckProcess
 
 
-       export solve_HJB_inplace, update_v!
+       export Model, DeterministicModel, StochasticModel
 
     # Types
     abstract type Model{T <: Real} end
 
+    abstract type DeterministicModel{T <: Real} <: Model{T} end
+    abstract type StochasticModel{T <: Real} <: Model{T} end
 
 
     # Modules
+    include("StochasticProcesses.jl")
     include("Models.jl")
     include("utils.jl")
     include("HJB.jl")

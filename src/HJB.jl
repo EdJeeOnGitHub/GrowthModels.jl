@@ -1,5 +1,5 @@
 
-function update_v(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v}
+function update_v(m::DeterministicModel, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v}
     γ, ρ, δ = m.γ, m.ρ, m.δ
     (; v, dVf, dVb, dV0, dist) = value
     k, y = state[:k], state.aux_state[:y] # y isn't really a state but avoid computing it each iteration this way
@@ -169,7 +169,7 @@ function construct_diffusion_matrix(stochasticprocess::StochasticProcess, state:
     return Bswitch
 end
 
-function update_v(m::Union{StochasticRamseyCassKoopmansModel}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams, diffusion_matrix; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v}
+function update_v(m::StochasticModel, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams, diffusion_matrix; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v}
     (; γ, α, ρ, δ) = m
     (; v, dVf, dVb, dV0, dist) = value
     k, z = state[:k], state[:z]' # y isn't really a state but avoid computing it each iteration this way
@@ -356,7 +356,7 @@ function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams; init_value = no
 end
 
 
-function solve_HJB(m::StochasticRamseyCassKoopmansModel, hyperparams::StateSpaceHyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000, verbose = true)
+function solve_HJB(m::StochasticModel, hyperparams::StateSpaceHyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000, verbose = true)
     curr_iter = 0
     val = deepcopy(init_value)
     val.v[:] = initial_guess(m, state)
