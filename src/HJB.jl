@@ -125,13 +125,52 @@ function update_value_function!(init_value, res)
 end
 
 
+function construct_diffusion_matrix(stochasticprocess::StochasticProcess, state::StateSpace, hyperparams::StateSpaceHyperParams)
+    (; θ, σ) = stochasticprocess
+    z = state[:z]
+    k_hps, z_hps = hyperparams[:k], hyperparams[:z]
 
-function update_v(m::Union{StochasticRamseyCassKoopmansModel}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v}
+    Nk, dk, kmax, kmin = k_hps.N, k_hps.dx, k_hps.xmax, k_hps.xmin
+    Nz, dz, zmax, zmin = z_hps.N, z_hps.dx, z_hps.xmax, z_hps.xmin
+
+    dz2 = dz^2
 
 
-    # γ, ρ, δ = m.γ, m.ρ, m.δ
+    σ_sq = σ^2
+    # drift
+    mu = (-θ*log.(z) .+ σ_sq/2).*z
+    # variance - Ito's
+    s2 = σ_sq.*z.^2;
+
+    yy = -s2/dz2 - mu/dz
+    chi = s2/(2*dz2)
+    zeta = mu/dz + s2/(2*dz2)
+    
+    off_diag_length = (Nz-1)*Nk
+
+    ldiag = Vector{typeof(chi[2])}(undef, off_diag_length)
+    cdiag = Vector{typeof(yy[1] + chi[1])}(undef, Nz*Nk)
+    udiag = Vector{eltype(zeta[1])}(undef, off_diag_length)
+
+    for j in 2:Nz
+        ldiag[(j-2)*Nk+1:(j-1)*Nk] .= chi[j]
+    end
+    for j in 1:(Nz-1)
+        udiag[(j-1)*Nk+1:(j)*Nk] .= zeta[j]
+    end
+    cdiag[1:Nk] .= chi[1] + yy[1]
+    for j in 2:(Nz -1)
+        cdiag[(j-1)*Nk+1:(j)*Nk] .= yy[j]
+    end
+    cdiag[end-Nk+1:end] .= zeta[end] + yy[end]
+
+    # Construct B_switch matrix with corrected diagonals
+    Bswitch = spdiagm(-Nk => ldiag, 0 => cdiag, Nk => udiag)
+    return Bswitch
+end
+
+function update_v(m::Union{StochasticRamseyCassKoopmansModel}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams, diffusion_matrix; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v}
     (; γ, α, ρ, δ) = m
-    (; θ, σ) = m.stochasticprocess
     (; v, dVf, dVb, dV0, dist) = value
     k, z = state[:k], state[:z]' # y isn't really a state but avoid computing it each iteration this way
     y = state.aux_state[:y]
@@ -143,51 +182,11 @@ function update_v(m::Union{StochasticRamseyCassKoopmansModel}, value::Value{T, N
     Nk, dk, kmax, kmin = k_hps.N, k_hps.dx, k_hps.xmax, k_hps.xmin
     Nz, dz, zmax, zmin = z_hps.N, z_hps.dx, z_hps.xmax, z_hps.xmin
 
-    dz2 = dz^2
-
-    @show z
-    @show k
 
     kk = repeat(reshape(k, :, 1), 1, Nz);
     zz = repeat(reshape(z, 1, :), Nk, 1);
 
-    σ_sq = σ^2
-    # drift
-    mu = (-θ*log.(z) .+ σ_sq/2).*z
-    @show mu
-    # variance - Ito's
-    s2 = σ_sq.*z.^2;
-    @show s2
-
-    yy = -s2/dz2 - mu/dz
-    chi = s2/(2*dz2)
-    zeta = mu/dz + s2/(2*dz2)
-    
-    @show yy
-    @show chi
-    @show zeta
-
-    lowdiag = fill(chi[2], Nk)
-    for j in 3:Nz 
-        lowdiag = [lowdiag; fill(chi[j], Nk)]
-    end
-    lowdiag
-
-    updiag = Vector{Float64}()
-    for j in 1:(Nz - 1)
-        updiag = [updiag; fill(zeta[j], Nk)]
-    end
-    updiag
-
-
-    centdiag = fill(chi[1] + yy[1], Nk)
-    for j in 2:(Nz - 1)
-        centdiag = [centdiag; fill(yy[j], Nk)]
-    end
-    centdiag = [centdiag; fill(yy[end] + zeta[end], Nk)]
-
-    # Construct B_switch matrix with corrected diagonals
-    Bswitch = spdiagm(-Nk => lowdiag, 0 => centdiag, Nk => updiag)
+    Bswitch = diffusion_matrix    
 
     V = v
 
@@ -228,31 +227,41 @@ function update_v(m::Union{StochasticRamseyCassKoopmansModel}, value::Value{T, N
 
 
 
+    ## start here
+    total_length = Nz*Nk
+    udiag = Vector{eltype(Z)}(undef, total_length - 1)
+    cdiag = reshape(Y, Nz*Nk)  # Assuming Y is already a matrix or array that matches the dimensions
+    ldiag = Vector{eltype(X)}(undef, total_length - 1)
 
-
-    # Initialize updiag with zeros, to be filled in the loop
-    updiag = Vector{Float64}()  # Start with an empty array, assuming Z contains Float64 values
+    index = 1
     for j in 1:Nz
-        updiag = [updiag; Z[1:Nk-1, j]]
         if j != Nz
-            push!(updiag, 0)
+            segment = vcat(Z[1:Nk-1, j], 0.0)  # Include 0.0 for all but the last column
+            len = Nk  # Nk-1 elements plus a 0.0
+        else
+            segment = Z[1:Nk-1, j]  # Do not include 0.0 for the last column
+            len = Nk - 1  # Only Nk-1 elements
         end
+        
+        udiag[index:index+len-1] .= segment
+        index += len  # Adjust index for the next iteration
     end
-    updiag
-
-
-
-    # Convert centdiag
-    centdiag = reshape(Y, Nk*Nz)  # Assuming Y is already a matrix or array that matches the dimensions
-
-    lowdiag = X[2:end, 1]
+    # Fill the first part of lowdiag without prepending 0
+    ldiag[1:Nk-1] = X[2:end, 1]
+    # Index to keep track of the position in lowdiag
+    index = Nk
     for j in 2:Nz
-        lowdiag = [lowdiag; 0; X[2:end, j]]
+        # Prepend 0 before adding elements from the jth column
+        ldiag[index] = 0.0
+        index += 1  # Move index after the 0
+        
+        # Slice assignment for elements from the jth column
+        ldiag[index:index+Nk-2] = X[2:end, j]
+        index += Nk-1  # Update index for the next iteration
     end
-    lowdiag
 
 
-    AA = spdiagm(0 => centdiag, 1 => updiag, -1 => lowdiag)
+    AA = spdiagm(0 => cdiag, 1 => udiag, -1 => ldiag)
 
 
     A = AA + Bswitch
@@ -347,10 +356,26 @@ function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams; init_value = no
 end
 
 
+function solve_HJB(m::StochasticRamseyCassKoopmansModel, hyperparams::StateSpaceHyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000, verbose = true)
+    curr_iter = 0
+    val = deepcopy(init_value)
+    val.v[:] = initial_guess(m, state)
+    Bswitch = construct_diffusion_matrix(m.stochasticprocess, state, hyperparams)
+    for n in 1:maxit
+        curr_iter += 1
+        output_value, curr_iter = update_v(m, val, state, hyperparams, Bswitch, iter = n, verbose = verbose)
+        if output_value.convergence_status
+            fit_value, _, fit_variables = update_v(m, val, state, hyperparams, Bswitch, iter = curr_iter, verbose = verbose)
+            return (value = fit_value, variables = fit_variables, iter = curr_iter)
+            break
+        end
+        val = output_value
+    end
+    return (value = val, variables = nothing, iter = curr_iter)
+end
 
 
 
 dV_Upwind(::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}, value::Value, variables::NamedTuple) = value.dVf[:, 1] .* variables.If .+ value.dVb[:, 1] .* variables.Ib .+ value.dV0 .* variables.I0
 V_err(m::Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.γ) / (1-m.γ) .+ dV_Upwind(m, value, variables) .* statespace_k_dot(m)(variables) .- m.ρ .* value.v
-
 

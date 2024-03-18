@@ -46,6 +46,9 @@ module GrowthModels
            StochasticSkibaModel,
            StochasticRamseyCassKoopmansModel
 
+
+       export solve_HJB_inplace, update_v!
+
     # Types
     abstract type Model{T <: Real} end
 
