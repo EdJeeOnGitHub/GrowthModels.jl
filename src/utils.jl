@@ -190,8 +190,8 @@ Check if statespace (non-negativity of capital) is satisfied even with 0 consump
 """
 function check_statespace_constraints(statespace::StateSpace, p)
     # Check state constraint satisfied and exit early if not 
-    max_statespace_constraint = statespace.aux_state.y[end] - p.δ * maximum(statespace.k)
-    min_statespace_constraint = statespace.aux_state.y[1] - p.δ * minimum(statespace.k)
+    max_statespace_constraint = statespace.aux_state.y[end] - p.δ * maximum(statespace[:k])
+    min_statespace_constraint = statespace.aux_state.y[1] - p.δ * minimum(statespace[:k])
     if max_statespace_constraint < 0 || min_statespace_constraint < 0
         throw(DomainError(p, "State space constraint violated"))
     end
