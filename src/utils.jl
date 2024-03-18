@@ -213,7 +213,7 @@ Solves the growth model using the specified model and initial value.
 """
 function solve_growth_model(model::Model, init_value::Value; update = false, verbose = true) 
     m = model
-    hyper_params = HyperParams(m, N = 1000)
+    hyper_params = StateSpaceHyperParams(m)
     check_statespace_constraints(StateSpace(m, hyper_params), m)
     res = solve_HJB(m, hyper_params, init_value = init_value, verbose = verbose)
     if update
@@ -240,7 +240,7 @@ Solves the growth model using the specified model, initial value, and hyperparam
 - `res::Result`: The result of solving the growth model.
 
 """
-function solve_growth_model(model::Model, init_value::Value, hyper_params::HyperParams; update = false, verbose = true)
+function solve_growth_model(model::Model, init_value::Value, hyper_params::StateSpaceHyperParams; update = false, verbose = true)
     m = model
     check_statespace_constraints(StateSpace(m, hyper_params), m)
     res = solve_HJB(m, hyper_params, init_value = init_value, verbose = verbose)
