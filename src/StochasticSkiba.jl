@@ -19,7 +19,8 @@ function StateSpace(m::StochasticSkibaModel, statespacehyperparams::StateSpaceHy
     z_hps = statespacehyperparams[:z]
     k = collect(range(k_hps.xmin, k_hps.xmax, length = k_hps.N))
     z = collect(range(z_hps.xmin, z_hps.xmax, length = z_hps.N))
-    y = production_function(m, k, z)
+    # z' creates Nk x Nz matrix
+    y = production_function(m, k, z')
     StateSpace((k = k, z = z), (y = y,))
 end
 
@@ -53,13 +54,13 @@ end
 end
 
 
-@inline production_function(::StochasticSkibaModel, k::Union{Real,Vector{<:Real}}, z::Union{Real,Vector{<:Real}}, α::Real, A_H::Real, A_L::Real, κ::Real) = stochastic_skiba_production_function(k, z', α, A_H, A_L, κ)
-@inline production_function(::StochasticSkibaModel, k::Union{Real,Vector{<:Real}}, z::Union{Real,Vector{<:Real}}, params::Vector) = stochastic_skiba_production_function(k, z', params[1], params[2], params[3], params[4])
-@inline production_function(m::StochasticSkibaModel, k::Union{Real,Vector{<:Real}}, z::Union{Real,Vector{<:Real}}) = stochastic_skiba_production_function(k, z', m.α, m.A_H, m.A_L, m.κ)
+@inline production_function(::StochasticSkibaModel, k, z, α::Real, A_H::Real, A_L::Real, κ::Real) = stochastic_skiba_production_function(k, z, α, A_H, A_L, κ)
+@inline production_function(::StochasticSkibaModel, k, z, params::Vector) = stochastic_skiba_production_function(k, z, params[1], params[2], params[3], params[4])
+@inline production_function(m::StochasticSkibaModel, k, z) = stochastic_skiba_production_function(k, z, m.α, m.A_H, m.A_L, m.κ)
 
-@inline production_function_prime(::StochasticSkibaModel, k::Union{Real,Vector{<:Real}}, z::Union{Real,Vector{<:Real}}, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function_prime(k, z', α, A_H, A_L, κ)
-@inline production_function_prime(::StochasticSkibaModel, k::Union{Real,Vector{<:Real}}, z::Union{Real,Vector{<:Real}}, params::Vector) = skiba_production_function_prime(k, z', params[1], params[2], params[3], params[4])
-@inline production_function_prime(m::StochasticSkibaModel, k::Union{Real,Vector{<:Real}}, z::Union{Real,Vector{<:Real}}) = skiba_production_function_prime.(k, z', m.α, m.A_H, m.A_L, m.κ)
+@inline production_function_prime(::StochasticSkibaModel, k, z, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function_prime(k, z, α, A_H, A_L, κ)
+@inline production_function_prime(::StochasticSkibaModel, k, z, params::Vector) = skiba_production_function_prime(k, z, params[1], params[2], params[3], params[4])
+@inline production_function_prime(m::StochasticSkibaModel, k, z) = skiba_production_function_prime(k, z, m.α, m.A_H, m.A_L, m.κ)
 
 
 

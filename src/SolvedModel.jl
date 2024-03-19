@@ -1,6 +1,6 @@
 
 function plot_production_function(m::StochasticModel, k, z)
-    y = production_function(m, collect(k), collect(z))
+    y = production_function(m, collect(k), collect(z)')
     plot(k, y, label="")
     xlabel!("\$k\$")
     ylabel!("\$f(k)\$")
@@ -12,7 +12,6 @@ function plot_model(m::StochasticModel, value::Value, variables::NamedTuple)
     kstar = k_star(m)
     fit_kdot = GrowthModels.statespace_k_dot(m)(variables)
 
-    # subplot = plot(layout = (2, 2), size = (800, 600))
     p1 =  plot_production_function(m, k[:, 1], z[1, :])
     scatter!(p1, [kstar], [production_function(m, kstar, sum(z[:])/length(z[:]) )], label="kstar", markersize=4)
 
@@ -39,7 +38,7 @@ function plot_model(m::StochasticModel, value::Value, variables::NamedTuple)
     return subplot
 end
 
-function plot_model(m::Union{SkibaModel, SmoothSkibaModel, RamseyCassKoopmansModel}, value::Value, variables::NamedTuple)
+function plot_model(m::DeterministicModel, value::Value, variables::NamedTuple)
     (; k, y, c) = variables
     (; v, dVf, dVb, dV0, dist) = value
     kstar = k_star(m)
@@ -381,12 +380,25 @@ function plot_timepath(ode_result::EnsembleSolution, r::SolvedModel{T}; N = size
     return p_all
 end
 
-function show(io::IO, r::SolvedModel)
+function show(io::IO, r::SolvedModel{T})  where {T <: DeterministicModel}
     print(
         io,
         lineplot(
             r.variables.k[:],
             r.variables.c[:],
+            xlabel = "k(t)",
+            ylabel = "c(t)"
+        )
+    )
+end
+
+function show(io::IO, r::SolvedModel{T})  where {T <: StochasticModel}
+    median_idx = round(Int, size(r.variables.k, 2) / 2)
+    print(
+        io,
+        lineplot(
+            r.variables.k[:, median_idx],
+            r.variables.c[:, median_idx],
             xlabel = "k(t)",
             ylabel = "c(t)"
         )
