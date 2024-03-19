@@ -123,7 +123,7 @@ function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union
 end
 
 
-function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union{StochasticRamseyCassKoopmansModel,StochasticSkibaModel}
+function SolvedModel(m::StochasticModel, value::Value, variables::NamedTuple) 
     c_interpolation = interpolate(
         (variables.k[:, 1], variables.z[1, :]),
         variables.c,
@@ -132,7 +132,9 @@ function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union
     c_policy_function = extrapolate(c_interpolation, Line())
     prod_func = (k, z) -> production_function(m, k, z)
     prod_func_prime = (k, z) -> production_function_prime(m, k, z)
-    kdot_function = (k, z) -> prod_func(k, z) - m.δ*k - c_policy_function(k, z)    
+    # need to .dot the policy function or it will give a matrix (Nk x Nz) even 
+    # if Nk == Nz
+    kdot_function = (k, z) -> prod_func(k, z) - m.δ*k - c_policy_function.(k, z)    
     ydot_function = (k, z, kdot) -> throw("Not yet implemented - need to add z evolution")
     ydot_function = k -> throw("Not yet implemented - need to add z evolution")
 
