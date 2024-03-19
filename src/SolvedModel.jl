@@ -88,11 +88,12 @@ end
 #### Model Specific Dispatch ####
 # Can probably dispatch on just model here but will see in future
 function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}
-    c_policy_function = CubicSpline(
+    c_interpolation = interpolate(
+        (variables.k[:, 1], ),
         variables.c,
-        variables.k;
-       extrapolate = true 
-    );
+        Gridded(Linear())
+    )
+    c_policy_function = extrapolate(c_interpolation, Line())
     prod_func = x -> production_function(m, x)
     prod_func_prime = x -> production_function_prime(m, x)
     kdot_function = k -> prod_func(k) - m.δ*k - c_policy_function(k)    
