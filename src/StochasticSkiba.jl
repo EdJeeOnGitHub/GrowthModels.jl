@@ -30,11 +30,11 @@ end
 
 
 
-k_steady_state_hi_StochasticSkiba(α::Real, A_H::Real, ρ::Real, δ::Real, κ::Real, zmean::Real) = (α*A_H*zmean/(ρ + δ))^(1/(1-α)) + κ
-k_steady_state_lo_StochasticSkiba(α::Real, A_L::Real, ρ::Real, δ::Real, zmean::Real) = (α*A_L*zmean/(ρ + δ))^(1/(1-α))
+k_steady_state_hi_StochasticSkiba(α::Real, A_H::Real, ρ::Real, δ::Real, κ::Real, stationary_mean::Real) = (α*A_H*stationary_mean/(ρ + δ))^(1/(1-α)) + κ
+k_steady_state_lo_StochasticSkiba(α::Real, A_L::Real, ρ::Real, δ::Real, stationary_mean::Real) = (α*A_L*stationary_mean/(ρ + δ))^(1/(1-α))
 k_star_Skiba(α::Real, A_H::Real, A_L::Real) = κ/(1-(A_L/A_H)^(1/α))
-k_steady_state_hi(m::StochasticSkibaModel) = (m.α*m.A_H*m.stochasticprocess.zmean/(m.ρ + m.δ))^(1/(1-m.α)) + m.κ
-k_steady_state_lo(m::StochasticSkibaModel) = (m.α*m.A_L*m.stochasticprocess.zmean/(m.ρ + m.δ))^(1/(1-m.α))
+k_steady_state_hi(m::StochasticSkibaModel) = (m.α*m.A_H*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α)) + m.κ
+k_steady_state_lo(m::StochasticSkibaModel) = (m.α*m.A_L*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α))
 k_star(m::StochasticSkibaModel) = m.κ/(1-(m.A_L/m.A_H)^(1/m.α))
 
 y_H(m::StochasticSkibaModel) = (k, z) -> m.A_H*z*max(k - m.κ,0)^m.α

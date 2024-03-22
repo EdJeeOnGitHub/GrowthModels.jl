@@ -31,12 +31,12 @@ end
 
 
 
-k_steady_state_hi_StochasticRamseyCassKoopmans(α::Real, A::Real, ρ::Real, δ::Real, zmean::Real) = (α*A*zmean/(ρ + δ))^(1/(1-α))
-k_steady_state_lo_StochasticRamseyCassKoopmans(α::Real, A::Real, ρ::Real, δ::Real, zmean::Real) = (α*A*zmean/(ρ + δ))^(1/(1-α))
-k_star_StochasticRamseyCassKoopmans(α::Real, A::Real, ρ::Real, δ::Real, zmean::Real) = (α*A*zmean/(ρ + δ)) ^ (1/(1-α)) 
-k_steady_state_hi(m::StochasticRamseyCassKoopmansModel) = (m.α*m.A*m.stochasticprocess.zmean/(m.ρ + m.δ))^(1/(1-m.α)) 
-k_steady_state_lo(m::StochasticRamseyCassKoopmansModel) = (m.α*m.A*m.stochasticprocess.zmean/(m.ρ + m.δ))^(1/(1-m.α)) 
-k_star(m::StochasticRamseyCassKoopmansModel) = (m.α*m.A*m.stochasticprocess.zmean/(m.ρ + m.δ))^(1/(1-m.α))
+k_steady_state_hi_StochasticRamseyCassKoopmans(α::Real, A::Real, ρ::Real, δ::Real, stationary_mean::Real) = (α*A*stationary_mean/(ρ + δ))^(1/(1-α))
+k_steady_state_lo_StochasticRamseyCassKoopmans(α::Real, A::Real, ρ::Real, δ::Real, stationary_mean::Real) = (α*A*stationary_mean/(ρ + δ))^(1/(1-α))
+k_star_StochasticRamseyCassKoopmans(α::Real, A::Real, ρ::Real, δ::Real, stationary_mean::Real) = (α*A*stationary_mean/(ρ + δ)) ^ (1/(1-α)) 
+k_steady_state_hi(m::StochasticRamseyCassKoopmansModel) = (m.α*m.A*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α)) 
+k_steady_state_lo(m::StochasticRamseyCassKoopmansModel) = (m.α*m.A*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α)) 
+k_star(m::StochasticRamseyCassKoopmansModel) = (m.α*m.A*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α))
 
 
 

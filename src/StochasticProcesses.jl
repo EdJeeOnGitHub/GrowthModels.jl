@@ -1,33 +1,38 @@
 
 abstract type StochasticProcess end
 
-struct OrnsteinUhlenbeckProcess <: StochasticProcess
-    θ
-    σ
-    ρ
-    stationary_σ
-    zmean
+struct OrnsteinUhlenbeckProcess{T <: Real} <: StochasticProcess  
+    # y = log(z) ~ N(0, ln_stationary_σ)
+    # y ~ N(ln_mean, ln_stationary_σ)
+
+    # dlog(z) = -θ log(z) dt + σ^2 dW
+    # lognormal variance = exp(μ + σ^2 / 2) => exp(σ^2 / (2*θ) / 2 )
+    # ln_stationary_σ = σ^2 / (2θ)
+
+    θ::T  # Rate of mean reversion
+    σ::T  # Volatility
+    ρ::T  # autocorr
+    ln_stationary_μ::T  # Mean of lognormal 
 end
 
-function OrnsteinUhlenbeckProcess(; θ, σ)
-    stationary_σ = σ^2/(2*θ)
+function OrnsteinUhlenbeckProcess(;θ::T, σ::T) where T <: Real
+    ln_stationary_μ = exp((σ^2)/(2*θ)/2)
     ρ = exp(-θ)
-    zmean = exp(stationary_σ/2)
-    OrnsteinUhlenbeckProcess(θ, σ, ρ, stationary_σ, zmean)
+    OrnsteinUhlenbeckProcess(θ, σ, ρ, ln_stationary_μ)
 end
 
-
-function from_stationary_OrnsteinUhlenbeckProcess(; ρ, stationary_σ)
+function from_stationary_OrnsteinUhlenbeckProcess(; ρ::Float64, ln_stationary_μ::Float64)
     θ = -log(ρ)
-    σ = sqrt(2*θ*stationary_σ) 
-    zmean = exp(stationary_σ/2)
-    OrnsteinUhlenbeckProcess(θ, σ, ρ, stationary_σ, zmean)
+    σ = 2 * sqrt(θ * log(ln_stationary_μ))
+    OrnsteinUhlenbeckProcess(θ, σ, ρ, ln_stationary_μ)
 end
 
 
-OrnsteinUhlenbeckProcess(θ = 1, σ = 2)
-from_stationary_OrnsteinUhlenbeckProcess(ρ = 0.3678, stationary_σ = 2.0)
-process_mean(p::OrnsteinUhlenbeckProcess) = exp(p.stationary_σ/2) 
+
+# Adjusting the function to return the mean of the process correctly
+process_mean(p::OrnsteinUhlenbeckProcess) = p.ln_stationary_μ
+
+
 
 """
     sample(process::OrnsteinUhlenbeckProcess, x0, T, dt; seed=nothing)
@@ -176,5 +181,4 @@ function sample(process::OrnsteinUhlenbeckProcess, x0, T, dt, K; seed=nothing)
 
     return times, values
 end
-
 
