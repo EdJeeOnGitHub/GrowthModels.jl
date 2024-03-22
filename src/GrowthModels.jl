@@ -44,7 +44,8 @@ module GrowthModels
     # stochastic stuff
     export StochasticProcess,
            OrnsteinUhlenbeckProcess,
-           from_stationary_OrnsteinUhlenbeckProcess
+           from_stationary_OrnsteinUhlenbeckProcess,
+           sample
 
 
        export Model, DeterministicModel, StochasticModel
