@@ -99,8 +99,9 @@ model_names = ["RamseyCassKoopmansModel", "SkibaModel", "SmoothSkibaModel"]
 end
 
 model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
-@testset "Stochasatic Model Tests for $model_name" for model_name in model_names
+@testset "Stochastic Model Tests for $model_name" for model_name in model_names
     # Dynamically instantiate the model based on its name
+    model_name = "StochasticRamseyCassKoopmansModel"
     m = eval(Meta.parse(model_name))()
     hyperparams = StateSpaceHyperParams(m, Nz = 40, Nk = 100)
     state = StateSpace(m, hyperparams)

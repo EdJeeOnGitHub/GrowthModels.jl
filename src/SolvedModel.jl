@@ -1,6 +1,6 @@
 
 function plot_production_function(m::StochasticModel, k, z)
-    y = production_function(m, collect(k), collect(z))
+    y = production_function(m, collect(k), collect(z)')
     plot(k, y, label="")
     xlabel!("\$k\$")
     ylabel!("\$f(k)\$")
@@ -12,7 +12,6 @@ function plot_model(m::StochasticModel, value::Value, variables::NamedTuple)
     kstar = k_star(m)
     fit_kdot = GrowthModels.statespace_k_dot(m)(variables)
 
-    # subplot = plot(layout = (2, 2), size = (800, 600))
     p1 =  plot_production_function(m, k[:, 1], z[1, :])
     scatter!(p1, [kstar], [production_function(m, kstar, sum(z[:])/length(z[:]) )], label="kstar", markersize=4)
 
@@ -39,7 +38,7 @@ function plot_model(m::StochasticModel, value::Value, variables::NamedTuple)
     return subplot
 end
 
-function plot_model(m::Union{SkibaModel, SmoothSkibaModel, RamseyCassKoopmansModel}, value::Value, variables::NamedTuple)
+function plot_model(m::DeterministicModel, value::Value, variables::NamedTuple)
     (; k, y, c) = variables
     (; v, dVf, dVb, dV0, dist) = value
     kstar = k_star(m)
@@ -124,7 +123,7 @@ function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union
 end
 
 
-function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union{StochasticRamseyCassKoopmansModel,StochasticSkibaModel}
+function SolvedModel(m::StochasticModel, value::Value, variables::NamedTuple) 
     c_interpolation = interpolate(
         (variables.k[:, 1], variables.z[1, :]),
         variables.c,
@@ -133,7 +132,9 @@ function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union
     c_policy_function = extrapolate(c_interpolation, Line())
     prod_func = (k, z) -> production_function(m, k, z)
     prod_func_prime = (k, z) -> production_function_prime(m, k, z)
-    kdot_function = (k, z) -> prod_func(k, z) - m.δ*k - c_policy_function(k, z)    
+    # need to .dot the policy function or it will give a matrix (Nk x Nz) even 
+    # if Nk == Nz
+    kdot_function = (k, z) -> prod_func(k, z) - m.δ*k - c_policy_function.(k, z)    
     ydot_function = (k, z, kdot) -> throw("Not yet implemented - need to add z evolution")
     ydot_function = k -> throw("Not yet implemented - need to add z evolution")
 
@@ -381,12 +382,25 @@ function plot_timepath(ode_result::EnsembleSolution, r::SolvedModel{T}; N = size
     return p_all
 end
 
-function show(io::IO, r::SolvedModel)
+function show(io::IO, r::SolvedModel{T})  where {T <: DeterministicModel}
     print(
         io,
         lineplot(
             r.variables.k[:],
             r.variables.c[:],
+            xlabel = "k(t)",
+            ylabel = "c(t)"
+        )
+    )
+end
+
+function show(io::IO, r::SolvedModel{T})  where {T <: StochasticModel}
+    median_idx = round(Int, size(r.variables.k, 2) / 2)
+    print(
+        io,
+        lineplot(
+            r.variables.k[:, median_idx],
+            r.variables.c[:, median_idx],
             xlabel = "k(t)",
             ylabel = "c(t)"
         )

@@ -20,7 +20,8 @@ function StateSpace(m::StochasticRamseyCassKoopmansModel, statespacehyperparams:
     z_hps = statespacehyperparams[:z]
     k = collect(range(k_hps.xmin, k_hps.xmax, length = k_hps.N))
     z = collect(range(z_hps.xmin, z_hps.xmax, length = z_hps.N))
-    y = production_function(m, k, z)
+    # z' creates Nk x Nz matrix
+    y = production_function(m, k, z')
     StateSpace((k = k, z = z), (y = y,))
 end
 
@@ -48,17 +49,17 @@ end
      A .* z .* α .* pow.(k, α - 1)
 end
 
-@inline production_function(::StochasticRamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, z::Union{Real,Vector{<:Real}}, α::Real, A::Real) = stochastic_rck_production_function(k, z', α, A)
-@inline production_function(::StochasticRamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, z::Union{Real, Vector{<: Real}}, params::Vector) = stochastic_rck_production_function(k, z', params[1], params[2])
-@inline production_function(m::StochasticRamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, z::Union{Real, Vector{<: Real}}) = stochastic_rck_production_function(k, z', m.α, m.A)
+@inline production_function(::StochasticRamseyCassKoopmansModel, k, z, α::Real, A::Real) = stochastic_rck_production_function(k, z, α, A)
+@inline production_function(::StochasticRamseyCassKoopmansModel, k, z, params::Vector) = stochastic_rck_production_function(k, z, params[1], params[2])
+@inline production_function(m::StochasticRamseyCassKoopmansModel, k, z) = stochastic_rck_production_function(k, z, m.α, m.A)
 
-@inline production_function_prime(::StochasticRamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, z::Union{Real, Vector{<: Real}}, α::Real, A::Real, δ::Real) = stochastic_rck_production_function_prime(k, z', α, A)
-@inline production_function_prime(::StochasticRamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, z::Union{Real, Vector{<: Real}}, params::Vector) = stochastic_rck_production_function_prime(k, z', params[1], params[2])
-@inline production_function_prime(m::StochasticRamseyCassKoopmansModel, k::Union{Real,Vector{<:Real}}, z::Union{Real, Vector{<: Real}}) = stochastic_rck_production_function_prime(k, z', m.α, m.A)
+@inline production_function_prime(::StochasticRamseyCassKoopmansModel, k, z, α::Real, A::Real, δ::Real) = stochastic_rck_production_function_prime(k, z, α, A)
+@inline production_function_prime(::StochasticRamseyCassKoopmansModel, k, z, params::Vector) = stochastic_rck_production_function_prime(k, z, params[1], params[2])
+@inline production_function_prime(m::StochasticRamseyCassKoopmansModel, k, z) = stochastic_rck_production_function_prime(k, z, m.α, m.A)
 
 
 function plot_production_function(m::StochasticRamseyCassKoopmansModel, k, z)
-    y = production_function(m, collect(k), collect(z))
+    y = production_function(m, collect(k), collect(z)')
     plot(k, y, label="")
     xlabel!("\$k\$")
     ylabel!("\$f(k)\$")
