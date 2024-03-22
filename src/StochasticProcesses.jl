@@ -126,9 +126,6 @@ function sample(process::OrnsteinUhlenbeckProcess, x0s::Vector, T, dt; seed=noth
     return times, values
 end
 
-
-using Random
-
 """
     sample(process::OrnsteinUhlenbeckProcess, x0, T, dt, K; seed=nothing)
 
