@@ -54,7 +54,7 @@ dt = 1.0  # Time step
 
 times, values = sample(ou_process, x0, T, dt)
 """
-function sample(process::OrnsteinUhlenbeckProcess, x0, T, dt; seed=nothing)
+function sample(process::OrnsteinUhlenbeckProcess, x0::Float64, T, dt; seed=nothing)
     if seed !== nothing
         Random.seed!(seed)
     end
@@ -106,7 +106,7 @@ times, values = sample(ou_process, x0s, T, dt)
 plot(times, values')
 
 """
-function sample(process::OrnsteinUhlenbeckProcess, x0s, T, dt; seed=nothing)
+function sample(process::OrnsteinUhlenbeckProcess, x0s::Vector, T, dt; seed=nothing)
     if seed !== nothing
         Random.seed!(seed)
     end
@@ -125,3 +125,59 @@ function sample(process::OrnsteinUhlenbeckProcess, x0s, T, dt; seed=nothing)
 
     return times, values
 end
+
+
+using Random
+
+"""
+    sample(process::OrnsteinUhlenbeckProcess, x0, T, dt, K; seed=nothing)
+
+Sample trajectories from the Ornstein-Uhlenbeck process starting from an N-dimensional initial condition `x0`, K times, over a time period `T` with time step `dt`.
+
+# Arguments
+- `process`: Ornstein-Uhlenbeck process instance.
+- `x0`: N-dimensional initial value of the process.
+- `T`: Total time of simulation.
+- `dt`: Time step.
+- `K`: Number of trajectories to sample.
+- `seed`: Optional seed for random number generator.
+
+# Returns
+- `times`: Array of times at which the process is sampled.
+- `values`: 3D array of sampled values. Dimensions are [Dimension of x0, Time Steps, Number of Trajectories].
+# Example usage
+θ = 1.0
+σ = 2.0
+ou_process = OrnsteinUhlenbeckProcess(θ=θ, σ=σ)
+x0 = [0.0, 0.5]  # 2-dimensional initial condition
+T = 10.0  # Total time
+dt = 0.01  # Time step
+K = 100  # Number of trajectories
+
+times, values = sample(ou_process, x0, T, dt, K)
+
+# `times` is an array of sample times
+# `values` is a 3D array where dimensions are [Dimension of x0, Time Steps, Number of Trajectories]
+"""
+function sample(process::OrnsteinUhlenbeckProcess, x0, T, dt, K; seed=nothing)
+    if seed !== nothing
+        Random.seed!(seed)
+    end
+    N_dim = length(x0)  # Dimension of x0
+    N_time = round(Int, T/dt)  # Number of time steps
+    times = 0:dt:T
+    values = zeros(N_dim, N_time+1, K)
+    
+    for k in 1:K
+        current_x = copy(x0)  # Copy initial condition for this trajectory
+        for i in 2:N_time+1
+            dw = sqrt(dt) * randn(N_dim)  # Multidimensional Wiener process increment
+            current_x .= current_x .+ process.θ .* (-current_x) .* dt .+ process.σ .* dw
+            values[:, i, k] = current_x
+        end
+    end
+
+    return times, values
+end
+
+
