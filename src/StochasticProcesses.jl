@@ -1,4 +1,3 @@
-
 abstract type StochasticProcess end
 
 struct OrnsteinUhlenbeckProcess{T <: Real} <: StochasticProcess  
@@ -181,4 +180,3 @@ function sample(process::OrnsteinUhlenbeckProcess, x0, T, dt, K; seed=nothing)
 
     return times, values
 end
-
