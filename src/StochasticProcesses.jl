@@ -71,6 +71,7 @@ function sample(process::OrnsteinUhlenbeckProcess, x0::Float64, T, dt; seed=noth
         dw = sqrt(dt) * randn()  # Wiener process increment
         values[i] = values[i-1] + process.θ * (-values[i-1]) * dt + process.σ * dw
     end
+    values = exp.(values)
 
     return times, values
 end
@@ -126,6 +127,7 @@ function sample(process::OrnsteinUhlenbeckProcess, x0s::Vector, T, dt; seed=noth
             values[n, i] = values[n, i-1] + process.θ * (-values[n, i-1]) * dt + process.σ * dw
         end
     end
+    values = exp.(values)
 
     return times, values
 end
@@ -177,6 +179,7 @@ function sample(process::OrnsteinUhlenbeckProcess, x0, T, dt, K; seed=nothing)
             values[:, i, k] = current_x
         end
     end
+    values = exp.(value)
 
     return times, values
 end
