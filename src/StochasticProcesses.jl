@@ -179,7 +179,7 @@ function sample(process::OrnsteinUhlenbeckProcess, x0, T, dt, K; seed=nothing)
             values[:, i, k] = current_x
         end
     end
-    values = exp.(value)
+    values = exp.(values)
 
     return times, values
 end
