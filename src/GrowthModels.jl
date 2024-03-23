@@ -11,6 +11,9 @@ module GrowthModels
     using ForwardDiff
     using Random
     import Base:\
+    using StatsBase
+    import StatsBase: sample
+    
 
     # exports
     ## util exports
