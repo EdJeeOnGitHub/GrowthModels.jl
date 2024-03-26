@@ -53,6 +53,7 @@ using Plots
 
 end
 
+
 model_names = ["RamseyCassKoopmansModel", "SkibaModel", "SmoothSkibaModel"]
 @testset "Model Tests for $model_name" for model_name in model_names
     # Dynamically instantiate the model based on its name
@@ -98,9 +99,8 @@ model_names = ["RamseyCassKoopmansModel", "SkibaModel", "SmoothSkibaModel"]
     @test isa(time_plot, Plots.Plot)
 end
 
-# model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
-# @testset "Stochastic Model Tests for $model_name" for model_name in model_names
-    model_name = "StochasticRamseyCassKoopmansModel"
+model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
+@testset "Stochastic Model Tests for $model_name" for model_name in model_names
     # Dynamically instantiate the model based on its name
     m = eval(Meta.parse(model_name))()
     hyperparams = StateSpaceHyperParams(m, Nz = 40, Nk = 100)

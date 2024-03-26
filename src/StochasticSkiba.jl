@@ -35,13 +35,10 @@ function StochasticSkibaModel(
     StochasticSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, stochasticprocess)
 end
 
-function StochasticSkibaModel(;γ, α, ρ, δ, A_H, A_L, κ, θ, σ)
+function StochasticSkibaModel(;γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0, θ = -log(0.9), σ = 0.1)
     StochasticSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
 end
 
-function StochasticSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, θ, σ)
-    StochasticSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
-end
 
 
 k_steady_state_hi_StochasticSkiba(α::Real, A_H::Real, ρ::Real, δ::Real, κ::Real, stationary_mean::Real) = (α*A_H*stationary_mean/(ρ + δ))^(1/(1-α)) + κ
