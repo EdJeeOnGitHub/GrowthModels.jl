@@ -39,7 +39,7 @@ m = StochasticRamseyCassKoopmansModel(
     ρ = 0.05,
     α = 0.3,
     δ = 0.05,
-    stochasticprocess = from_stationary_OrnsteinUhlenbeckProcess(ρ = 0.9, ln_stationary_μ =  zmean)
+    from_stationary_OrnsteinUhlenbeckProcess(ρ = 0.9, ln_stationary_μ =  zmean)
 )
 hyperparams = StateSpaceHyperParams(
     (k = HyperParams(N = 10, xmin = kmin, xmax = kmax),

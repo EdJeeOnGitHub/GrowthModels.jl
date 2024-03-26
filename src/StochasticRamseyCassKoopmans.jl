@@ -28,10 +28,21 @@ function StateSpace(m::StochasticRamseyCassKoopmansModel, statespacehyperparams:
     StateSpace((k = k, z = z), (y = y,))
 end
 
-function StochasticRamseyCassKoopmansModel(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A = 0.6, stochasticprocess = OrnsteinUhlenbeckProcess(θ = -log(0.9), σ =  0.1))
+
+function StochasticRamseyCassKoopmansModel(
+    stochasticprocess::Union{StochasticProcess,Nothing}; 
+     γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A = 0.6)
+    if isnothing(stochasticprocess)
+        stochasticprocess = OrnsteinUhlenbeckProcess(θ = -log(0.9), σ =  0.1)
+    end
     StochasticRamseyCassKoopmansModel(γ, α, ρ, δ, A, stochasticprocess)
 end
 
+
+function StochasticRamseyCassKoopmansModel(;
+    γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A = 0.6, θ = -log(0.9), σ = 0.1)
+    StochasticRamseyCassKoopmansModel(γ, α, ρ, δ, A, OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
+end
 
 
 k_steady_state_hi_StochasticRamseyCassKoopmans(α::Real, A::Real, ρ::Real, δ::Real, stationary_mean::Real) = (α*A*stationary_mean/(ρ + δ))^(1/(1-α))
