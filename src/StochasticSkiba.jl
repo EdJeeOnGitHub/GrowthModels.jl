@@ -1,3 +1,9 @@
+
+function StochasticSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, θ, σ)
+    StochasticSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
+end
+
+
 #### Util Functions ####
 # Util functions to dispatch on for Skiba models
 # Create a HyperParams object from a SkibaModel

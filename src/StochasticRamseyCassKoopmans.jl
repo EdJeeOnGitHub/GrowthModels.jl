@@ -1,4 +1,7 @@
 
+function StochasticRamseyCassKoopmansModel(γ, α, ρ, δ, A, θ, σ)
+    StochasticRamseyCassKoopmansModel(γ, α, ρ, δ, A, OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
+end
 #### Util Functions ####
 # Util functions to dispatch on for Skiba models
 # Create a HyperParams object from a SkibaModel
