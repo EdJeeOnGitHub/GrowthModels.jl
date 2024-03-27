@@ -15,10 +15,10 @@
 # Util functions to dispatch on for Skiba models
 # Create a HyperParams object from a SkibaModel
 # use high steady state to guide grid formation
-function StateSpaceHyperParams(m::SmoothSkibaModel; N = 1000, kmax_f = 1.3, kmin_f = 0.001)
+function StateSpaceHyperParams(m::SmoothSkibaModel; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001)
     kssH = k_steady_state_hi(m)
     kmin, kmax = kmin_f*kssH, kmax_f*kssH
-    k_hps = HyperParams(N = N, xmax = kmax, xmin = kmin)
+    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin)
     return StateSpaceHyperParams((k = k_hps,))
 end
 
