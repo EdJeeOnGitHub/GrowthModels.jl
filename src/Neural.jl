@@ -16,14 +16,12 @@ struct PositiveDense{F1, F2} <: Lux.AbstractExplicitLayer
     init_weight::F1
     init_bias::F2
 end
-
 function PositiveDense(in_dims::Int, out_dims::Int; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
     return PositiveDense{typeof(init_weight), typeof(init_bias)}(in_dims, out_dims, init_weight, init_bias)
 end
 
 function Base.show(io::IO, d::PositiveDense)
     print(io, "PositiveDense($(d.in_dims) => $(d.out_dims))")
-    # (d.activation == identity) || print(io, ", $(d.activation)")
     return print(io, ")")
 end
 
@@ -39,14 +37,63 @@ Lux.statelength(::PositiveDense) = 0
 
 
 @inline function (l::PositiveDense)(x::AbstractVecOrMat, ps, st::NamedTuple)
+    # exp to ensure positive in input layer
     y = (exp.(ps.weight) * x) .+ ps.bias
     return y, st
 end
 
-@inline function skiba_production_function(k, α, A_H, A_L, κ)
-    max(A_H .* (max.(k .- κ, 0).^α), A_L .* k.^α)
+abstract type GrowthModelLayer <: Lux.AbstractExplicitLayer end
+
+struct MicawberLayer{F1, F2} <: GrowthModelLayer 
+    m::Model
+    in_dims::Int
+    out_dims::Int
+    init_weight::Function
+    init_bias::Function
 end
 
+struct SteadyStateLayer{F1, F2} <: GrowthModelLayer
+    m::Model
+    in_dims::Int
+    out_dims::Int
+    init_weight::Function
+    init_bias::Function
+end
+
+function MicawberLayer(in_dims::Int, out_dims::Int, m::Model; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
+    return MicawberLayer{typeof(init_weight), typeof(init_bias)}(m, in_dims, out_dims, init_weight, init_bias)
+end
+
+function SteadyStateLayer(in_dims::Int, out_dims::Int, m::Model; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
+    return SteadyStateLayer{typeof(init_weight), typeof(init_bias)}(m, in_dims, out_dims, init_weight, init_bias)
+end
+
+function Lux.initialparameters(rng::AbstractRNG, layer::GrowthModelLayer)
+    w = layer.init_weight(rng, layer.out_dims, layer.in_dims)
+    b = layer.init_bias(rng, layer.out_dims, 1)
+    return (weight = w, bias = b)
+end
+Lux.initialstates(::AbstractRNG, ::GrowthModelLayer) = NamedTuple()
+Lux.parameterlength(l::GrowthModelLayer) = l.out_dims * l.in_dims + l.out_dims
+
+function (l::MicawberLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
+    # exp to ensure positive in input layer
+    # difference between x and k_star
+    y = (exp.(ps.weight) * (x .- k_star(m))) .+ ps.bias
+    return y, st
+end
+
+function (l::SteadyStateLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
+    # exp to ensure positive in input layer
+    # difference between x and k_star
+    k_ss = k_steady_state(m)
+    diff = -1 .* (k_ss .- x)
+    abs_diff = abs.(diff)
+    distances = [diff[argmin(abs_diff[:, x]), x] for x in axes(diff, 2)]';
+
+    y = (exp.(ps.weight) * distances) .+ ps.bias
+    return y, st
+end
 
 function err_HJB(k, model, v_f_k, v_f_deriv_k, pol_f_k)
     (; ρ, δ, γ) = model
@@ -61,10 +108,11 @@ end
 
 
 
+a = SteadyStateLayer(1, 256, m)
+b = MicawberLayer(1, 256, m)
 
 
 
-m = SkibaModel()
 
 
 batch_size = 100
@@ -73,10 +121,21 @@ vals = reshape(collect(range(0.1, 2*k_star(m), length = batch_size)), (1, batch_
 vals = sort(vals, dims = 1) |> device
 vec_vals = sort(vec(vals))
 v_f_nn = Chain(
-    PositiveDense(1, 100),
+    # both read in simultaneously
+    Parallel(
+        nothing,
+        SteadyStateLayer(1, 24, m),
+        MicawberLayer(1, 24, m),
+        NoOpLayer()
+    ),
+    x -> vcat(x...),
+    PositiveDense(24*2 + 1, 100),
     PositiveDense(100, 100),
     PositiveDense(100, 1)
 )
+
+
+
 
 pol_f_nn = Chain(
     Dense(1 => 100, tanh),
@@ -203,6 +262,7 @@ sum(abs2, sm_p_err)
 sum(abs2, nn_h_err)
 sum(abs2, nn_p_err)
 
+vec_vals = vec(vals)
 
 plot(
     vec_vals,
@@ -220,6 +280,13 @@ plot(
     seriestype = :scatter,
     label = ""
 )
+plot!(
+    vec_vals,
+    sm_v_f_k,
+    seriestype = :scatter,
+    label ="",
+    colour = :red
+)
 plot(
     vec_vals, v_f_deriv_k, 
     xlabel = "K",
@@ -230,6 +297,14 @@ plot(
 )
 plot(
     vec_vals, pol_f_k,
+    xlabel = "K",
+    ylabel = "c(K)",
+    title = "Policy Function",
+    seriestype = :scatter,
+    label = ""
+)
+plot!(
+    vec_vals, sm_pol_f_k,
     #  label = "Policy Function",
     xlabel = "K",
     ylabel = "c(K)",
