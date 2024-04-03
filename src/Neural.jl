@@ -3,7 +3,11 @@ using ComponentArrays, Lux, Optimization, OptimizationOptimJL,
 using GrowthModels
 using Zygote
 using ForwardDiff, LinearAlgebra
-using NaNMath
+using LuxAMDGPU 
+
+device = cpu_device()
+
+
 
 
 struct PositiveDense{F1, F2} <: Lux.AbstractExplicitLayer
@@ -17,6 +21,11 @@ function PositiveDense(in_dims::Int, out_dims::Int; init_weight=Lux.glorot_unifo
     return PositiveDense{typeof(init_weight), typeof(init_bias)}(in_dims, out_dims, init_weight, init_bias)
 end
 
+function Base.show(io::IO, d::PositiveDense)
+    print(io, "PositiveDense($(d.in_dims) => $(d.out_dims))")
+    # (d.activation == identity) || print(io, ", $(d.activation)")
+    return print(io, ")")
+end
 
 function Lux.initialparameters(rng::AbstractRNG, layer::PositiveDense)
     w = layer.init_weight(rng, layer.out_dims, layer.in_dims)
@@ -29,31 +38,23 @@ Lux.parameterlength(l::PositiveDense) = l.out_dims * l.in_dims + l.out_dims
 Lux.statelength(::PositiveDense) = 0
 
 
-function (l::PositiveDense)(x::AbstractVecOrMat, ps, st::NamedTuple)
+@inline function (l::PositiveDense)(x::AbstractVecOrMat, ps, st::NamedTuple)
     y = (exp.(ps.weight) * x) .+ ps.bias
     return y, st
 end
 
-
+@inline function skiba_production_function(k, α, A_H, A_L, κ)
+    max(A_H .* (max.(k .- κ, 0).^α), A_L .* k.^α)
+end
 
 
 function err_HJB(k, model, v_f_k, v_f_deriv_k, pol_f_k)
     (; ρ, δ, γ) = model
     (; γ, α, ρ, δ, A_H, A_L, κ) = model
-    θ = [γ, α, ρ, δ, A_H, A_L, κ]
-
-    # c = max.(v_f_deriv_k, 1e-3) .^ (-1 / γ)
-    # c = NaNMath.pow.(v_f_deriv_k, -1 / γ)
-
-    # pos_deriv = v_f_deriv_k .> 0.0
-    # v_f_k = v_f_k[pos_deriv]
-    # v_f_deriv_k = v_f_deriv_k[pos_deriv]
-    # pol_f_k = pol_f_k[pos_deriv]
-    # k = k[pos_deriv]
-
+    # θ = [γ, α, ρ, δ, A_H, A_L, κ]
 
     c = v_f_deriv_k .^ (-1 / γ)
-    hjb_err = ρ .* v_f_k  .- (c .^ (1 - γ)) ./ (1 - γ) .- v_f_deriv_k .* (production_function(model, k) .- δ .* k .- pol_f_k)
+    hjb_err = ρ .* v_f_k  .- (c .^ (1 - γ)) ./ (1 - γ) .- v_f_deriv_k .* (production_function(m, k) .- δ .* k .- pol_f_k)
     pol_err = c .- pol_f_k
     return hjb_err, pol_err
 end
@@ -65,55 +66,55 @@ end
 
 m = SkibaModel()
 
-params = ComponentArray(nn = [1, 2], θ = [1, 2, 3, 4, 5, 6, 7])
 
-batch_size = 1000
+batch_size = 100
 # vals = randn(1, batch_size) .+ k_star(m)
 vals = reshape(collect(range(0.1, 2*k_star(m), length = batch_size)), (1, batch_size))
+vals = sort(vals, dims = 1) |> device
+vec_vals = sort(vec(vals))
 v_f_nn = Chain(
-    PositiveDense(1, 50),
-    PositiveDense(50, 1)
+    PositiveDense(1, 100),
+    PositiveDense(100, 100),
+    PositiveDense(100, 1)
 )
 
 pol_f_nn = Chain(
-    Dense(1 => 50, tanh),
-    Dense(50 => 1, softplus),
+    Dense(1 => 100, tanh),
+    Dense(100 => 100, tanh),
+    Dense(100 => 1, softplus),
 )
 
 rng = Random.default_rng()
-
-vf_ps, vf_st = Lux.setup(rng, v_f_nn)
-pol_ps, pol_st = Lux.setup(rng, pol_f_nn)
+vf_ps, vf_st = Lux.setup(rng, v_f_nn) .|> device
+pol_ps, pol_st = Lux.setup(rng, pol_f_nn) .|> device
 
 vf_y, vf_st = Lux.apply(v_f_nn, vals, vf_ps, vf_st)
 
 
 v_f(k, ps, st) = Lux.apply(v_f_nn, k, ps, st)[1]
 pol_f(k, ps, st) = Lux.apply(pol_f_nn, k, ps, st)[1]
-# v_f_deriv(k, ps, st) = Zygote.forwarddiff(x -> v_f(x, ps, st), k)
-v_f_deriv(k, ps, st) = Zygote.forwarddiff(z -> diag(ForwardDiff.jacobian(x -> v_f(x, ps, st), z)), k)
-
-
 v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> v_f([x], ps, st)[1], z), y) for y in k]
+# v_f_deriv(k, ps, st) = Zygote.forwarddiff(z -> diag(ForwardDiff.jacobian(x -> v_f(x, ps, st), z)), k)
+
+
 
 v_f(vals, vf_ps, vf_st)
 pol_f(vals, pol_ps, pol_st)
-v_f_deriv(vals, vf_ps, vf_st)
-
-plot(
-    vals,
-    v_f(vals, vf_ps, vf_st),
-    seriestype = :scatter,
-    label = "",
-    colour = :black
-)
-plot(
-    vals,
-    v_f_deriv(vals, vf_ps, vf_st),
-    seriestype = :scatter,
-    label = "",
-    colour = :red
-)
+# v_f_deriv(vals, vf_ps, vf_st)
+# plot(
+#     vec_vals,
+#     v_f(vals, vf_ps, vf_st)',
+#     seriestype = :scatter,
+#     label = "",
+#     colour = :black
+# )
+# plot(
+#     vec_vals,
+#     v_f_deriv(vals, vf_ps, vf_st),
+#     seriestype = :scatter,
+#     label = "",
+#     colour = :red
+# )
 
 
 using BenchmarkTools
@@ -156,8 +157,7 @@ loss_fn(vals, m, vf_ps, pol_ps, vf_st, pol_st)
 
 
 
-
-for epoch in 1:100_000
+for epoch in 1:500_000
     (loss, states...), back = Zygote.pullback(param_vec) do p
         loss_fn(vals, m, p.vf, p.pol, states[1], states[2])
     end
@@ -193,14 +193,19 @@ sm_v_f_k = sm_v_interp(vec(vals))
 sm_v_f_deriv_k = sm_v_deriv_interp(vec(vals))
 sm_pol_f_k = sm.policy_function(vec(vals))
 
-h_err, p_err = err_HJB(vec(vals), m, sm_v_f_k, sm_v_f_deriv_k, sm_pol_f_k)
+sm_h_err, sm_p_err = err_HJB(vec(vals), m, sm_v_f_k, sm_v_f_deriv_k, sm_pol_f_k)
 
-sum(abs2, h_err)
-sum(abs2, p_err)
+nn_h_err, nn_p_err = err_HJB(vec(vals), m, v_f_k, v_f_deriv_k, pol_f_k)
+
+sum(abs2, sm_h_err)
+sum(abs2, sm_p_err)
+
+sum(abs2, nn_h_err)
+sum(abs2, nn_p_err)
 
 
 plot(
-    vals,
+    vec_vals,
     sm_v_f_k,
     seriestype = :scatter,
     label =""
@@ -208,7 +213,7 @@ plot(
 
 using Plots
 plot(
-    vals, v_f_k, 
+    vec_vals, v_f_k, 
     xlabel = "K",
     ylabel = "Vf(K)",
     title = "Value Function",
@@ -216,7 +221,7 @@ plot(
     label = ""
 )
 plot(
-    vals, v_f_deriv_k, 
+    vec_vals, v_f_deriv_k, 
     xlabel = "K",
     ylabel = "Vf(K)",
     title = "Value Function",
@@ -224,8 +229,16 @@ plot(
     label = ""
 )
 plot(
-    vals, pol_f_k,
+    vec_vals, pol_f_k,
     #  label = "Policy Function",
+    xlabel = "K",
+    ylabel = "c(K)",
+    title = "Policy Function",
+    seriestype = :scatter,
+    label = ""
+)
+plot!(
+    vec_vals, sm_pol_f_k,
     xlabel = "K",
     ylabel = "c(K)",
     title = "Policy Function",
