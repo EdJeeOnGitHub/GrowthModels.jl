@@ -7,7 +7,11 @@ using LuxAMDGPU
 using Plots
 
 device = cpu_device()
-
+# Stuff for GPU
+GrowthModels.k_steady_state(m, device::Lux.AbstractLuxDevice) = device(k_steady_state(m))
+function SkibaModel{T}(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0) where {T<: Real}
+    SkibaModel{T}(γ, α, ρ, δ, A_H, A_L, κ)
+end
 
 
 
@@ -91,8 +95,8 @@ end
 function (l::SteadyStateLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
     # exp to ensure positive in input layer
     # difference between x and k_star
-    k_ss = k_steady_state(m)
-    diff = -1 .* (k_ss .- x)
+    k_ss = k_steady_state(m, device)
+    diff = -1.0f32 .* (k_ss .- x)
     abs_diff = abs.(diff)
     distances = [diff[argmin(abs_diff[:, x]), x] for x in axes(diff, 2)]';
 
@@ -111,6 +115,14 @@ function err_HJB(k, model, v_f_k, v_f_deriv_k, pol_f_k)
     return hjb_err, pol_err
 end
 
+function monotonicity_penalty(outputs)
+    penalty = 0.0
+    for i in 2:length(outputs)
+        # Assuming outputs are meant to be increasing
+        penalty += max(0.0, outputs[i-1] - outputs[i])
+    end
+    return penalty
+end
 function calculate_lipschitz_constant(xs, ys)
     n = length(xs)
     max_ratio = 0.0
@@ -130,47 +142,48 @@ function calculate_lipschitz_constant(xs, ys)
     return max_ratio
 end
 
-# Example usage
-xs = [1, 2, 4, 5]
-ys = [1, 4, 16, 25]
-
-lipschitz_constant = calculate_lipschitz_constant(xs, ys)
 
 
 
-m = SkibaModel()
+m = SkibaModel{Float32}() |> device
 batch_size = 100
 # vals = randn(1, batch_size) .+ k_star(m)
-vals = reshape(collect(range(0.1, 2*k_star(m), length = batch_size)), (1, batch_size))
+
+
+grid_vals = reshape(collect(range(0.1, 2*k_star(m), length = batch_size ÷ 4)), (1, batch_size ÷ 4))
+ss_lo_vals = randn(1, batch_size ÷ 4) .+ k_steady_state_lo(m)
+ss_hi_vals = randn(1, batch_size ÷ 4) .+ k_steady_state_hi(m)
+ss_star = randn(1, batch_size ÷ 4) .+ k_star(m)
+vals = hcat(grid_vals, ss_lo_vals, ss_hi_vals, ss_star) 
+vals = abs.(vals)
+cpu_vals = sort(vals, dims = 1)
 vals = sort(vals, dims = 1) |> device
-vec_vals = sort(vec(vals))
+vec_vals = vec(vals)
+c_size = 12
 v_f_nn = Chain(
     # both read in simultaneously
     Parallel(
         nothing,
-        SteadyStateLayer(1, 48, tanh, m),
-        MicawberLayer(1, 48, tanh, m),
+        SteadyStateLayer(1, c_size, tanh, m),
+        MicawberLayer(1, c_size, tanh, m),
         NoOpLayer()
-        # WrappedFunction(x -> fill(x, (1, 24)))
-        # ReshapeLayer((1, 24))
     ),
     x -> vcat(x...),
-    PositiveDense(48*2 + 1, 256),
-    # PositiveDense(100, 100),
-    PositiveDense(256, 1)
+    PositiveDense(c_size*2 + 1, 48),
+    PositiveDense(48, 1)
 )
 
 pol_f_nn = Chain(
     Parallel(
         nothing,
-        SteadyStateLayer(1, 48, tanh, m),
-        MicawberLayer(1, 48, tanh, m),
+        SteadyStateLayer(1, c_size, tanh, m),
+        MicawberLayer(1, c_size, tanh, m),
         NoOpLayer()
     ),
     x -> vcat(x...),
-    Dense(48*2 + 1 => 256, tanh),
+    Dense(c_size*2 + 1 => 48, tanh),
     # Dense(100 => 100, tanh),
-    Dense(256 => 1, softplus),
+    Dense(48 => 1, softplus),
 )
 
 rng = Random.default_rng()
@@ -180,11 +193,21 @@ pol_ps, pol_st = Lux.setup(rng, pol_f_nn) .|> device
 vf_y, vf_st = Lux.apply(v_f_nn, vals, vf_ps, vf_st)
 
 
+
+
+k_steady_state(m, device) .- vals
+
+m_cpu = SkibaModel{Float32}()
+k_ss = k_steady_state(m_cpu) |> device
+vals .- k_ss
+k_steady_state(m_cpu) 
+cpu_vals .- k_steady_state(m_cpu)
+k_steady_state_hi(m) .- vals
+k_steady_state(m) 
+
 v_f(k, ps, st) = Lux.apply(v_f_nn, k, ps, st)[1]
 pol_f(k, ps, st) = Lux.apply(pol_f_nn, k, ps, st)[1]
 v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> v_f([x], ps, st)[1], z), y) for y in k]
-# v_f_deriv(k, ps, st) = Zygote.forwarddiff(z -> diag(ForwardDiff.jacobian(x -> v_f(x, ps, st), z)), k)
-
 
 
 v_f(vals, vf_ps, vf_st)
@@ -229,18 +252,29 @@ end
 
 function loss_fn(x, m, vf_ps, pol_ps, vf_st, pol_st)
     v_f_k, v_f_deriv_k, pol_f_k = predict_fn(x, vf_ps, pol_ps, vf_st, pol_st)
-    hjb_err, pol_err = err_HJB(vec(x), m, v_f_k, v_f_deriv_k, pol_f_k)
-    loss = sum(abs2, hjb_err) + sum(abs2, pol_err) + 1e10 * sum(v_f_deriv_k .< 0.0)
-    loss += calculate_lipschitz_constant(vec(x), v_f_k) 
+    vec_x = vec(x)
+    hjb_err, pol_err = err_HJB(vec_x, m, v_f_k, v_f_deriv_k, pol_f_k)
+
+    kdot = production_function(m, vec_x) .- m.δ .* vec_x .- pol_f_k
+    kt1 = vec_x .+ kdot
+    loss = sum(abs2, hjb_err) + sum(abs2, pol_err) 
+    # enforce k > 0
+    loss += sum(abs2, 100*(kt1 .< 0))
+    # enforce value function monotonic
+    loss += monotonicity_penalty(v_f_k) * 1e4
     return loss, vf_st, pol_st
 end
+
+
+
+
 
 # using BenchmarkTools
 # @btime v_f(vals, vf_ps, vf_st);
 # @btime pol_f(vals, vf_ps, vf_st);
-
-
 v_f_k, v_f_deriv_k, pol_f_k = predict_fn(vals, vf_ps, pol_ps, vf_st, pol_st)
+
+
 
 function plot_pred_output(vals, v_f_k, v_f_deriv_k, pol_f_k)
     p1 = plot(
@@ -277,7 +311,7 @@ loss_fn(vals, m, vf_ps, pol_ps, vf_st, pol_st)
 
 epoch_list = []
 loss_list = []
-for epoch in 1:100_000
+for epoch in 1:1_000_000
     (loss, states...), back = Zygote.pullback(param_vec) do p
         loss_fn(vals, m, p.vf, p.pol, states[1], states[2])
     end
@@ -288,6 +322,8 @@ for epoch in 1:100_000
         push!(epoch_list, epoch)
         push!(loss_list, loss)
         v_f_k, v_f_deriv_k, pol_f_k = predict_fn(vals, param_vec.vf, param_vec.pol, states[1], states[2])
+        kdot = production_function(m, vec_vals) .- m.δ .* vec_vals .- pol_f_k
+
         p1, p2, p3 = plot_pred_output(vals, v_f_k, v_f_deriv_k, pol_f_k)
         p4 = plot(
             epoch_list, 
@@ -296,7 +332,15 @@ for epoch in 1:100_000
             seriestype = :scatter,
             yscale = :log10
             )
-        p_all = plot(p1, p2, p3, p4, layout = (2, 2), size = (800, 800))
+        p5 = plot(
+            vec_vals, 
+            kdot, 
+            seriestype = :scatter,
+            label = "",
+            xlabel = "\$k\$",
+            ylabel = "\$\\dot{k}\$",
+            )
+        p_all = plot(p1, p2, p3, p4, p5, layout = (3, 2), size = (800, 800))
         display(p_all)
     end
     # println("Epoch: $(epoch) | Loss: $(loss)")
@@ -429,30 +473,3 @@ pullback(v_f_deriv, [10.0], vf_ps, vf_st)
 
 pb((one(loss), vf_st, pol_st))
 
-?Zygote.pullback
-
-param_vec.vf[2]
-
-vf_ps[1]
-Zygote.pullback(vf_ps) do 
-    println("Hello")
-end
-
-vf_ps
-
-
-
-
-
-(a, b), c = pullback(
-    x -> Lux.apply(v_f_nn, x, ps, st),
-    [0.2]
-)
-
-gs = pb((one.(l), nothing))
-
-a
-c((one.(a), nothing))[1]
-a
-b
-c
