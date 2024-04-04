@@ -4,6 +4,7 @@ using GrowthModels
 using Zygote
 using ForwardDiff, LinearAlgebra
 using LuxAMDGPU 
+using Plots
 
 device = cpu_device()
 
@@ -11,17 +12,19 @@ device = cpu_device()
 
 
 struct PositiveDense{F1, F2} <: Lux.AbstractExplicitLayer
+    activation
     in_dims::Int
     out_dims::Int
     init_weight::F1
     init_bias::F2
 end
-function PositiveDense(in_dims::Int, out_dims::Int; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
-    return PositiveDense{typeof(init_weight), typeof(init_bias)}(in_dims, out_dims, init_weight, init_bias)
+function PositiveDense(in_dims::Int, out_dims::Int, activation = identity; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
+    return PositiveDense{typeof(init_weight), typeof(init_bias)}(activation, in_dims, out_dims, init_weight, init_bias)
 end
 
 function Base.show(io::IO, d::PositiveDense)
     print(io, "PositiveDense($(d.in_dims) => $(d.out_dims))")
+    (d.activation == identity) || print(io, ", $(d.activation)")
     return print(io, ")")
 end
 
@@ -39,12 +42,13 @@ Lux.statelength(::PositiveDense) = 0
 @inline function (l::PositiveDense)(x::AbstractVecOrMat, ps, st::NamedTuple)
     # exp to ensure positive in input layer
     y = (exp.(ps.weight) * x) .+ ps.bias
-    return y, st
+    return l.activation.(y), st
 end
 
 abstract type GrowthModelLayer <: Lux.AbstractExplicitLayer end
 
 struct MicawberLayer{F1, F2} <: GrowthModelLayer 
+    activation
     m::Model
     in_dims::Int
     out_dims::Int
@@ -53,6 +57,7 @@ struct MicawberLayer{F1, F2} <: GrowthModelLayer
 end
 
 struct SteadyStateLayer{F1, F2} <: GrowthModelLayer
+    activation
     m::Model
     in_dims::Int
     out_dims::Int
@@ -60,12 +65,12 @@ struct SteadyStateLayer{F1, F2} <: GrowthModelLayer
     init_bias::Function
 end
 
-function MicawberLayer(in_dims::Int, out_dims::Int, m::Model; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
-    return MicawberLayer{typeof(init_weight), typeof(init_bias)}(m, in_dims, out_dims, init_weight, init_bias)
+function MicawberLayer(in_dims::Int, out_dims::Int, activation, m::Model; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
+    return MicawberLayer{typeof(init_weight), typeof(init_bias)}(activation, m, in_dims, out_dims, init_weight, init_bias)
 end
 
-function SteadyStateLayer(in_dims::Int, out_dims::Int, m::Model; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
-    return SteadyStateLayer{typeof(init_weight), typeof(init_bias)}(m, in_dims, out_dims, init_weight, init_bias)
+function SteadyStateLayer(in_dims::Int, out_dims::Int, activation, m::Model; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
+    return SteadyStateLayer{typeof(init_weight), typeof(init_bias)}(activation, m, in_dims, out_dims, init_weight, init_bias)
 end
 
 function Lux.initialparameters(rng::AbstractRNG, layer::GrowthModelLayer)
@@ -80,7 +85,7 @@ function (l::MicawberLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
     # exp to ensure positive in input layer
     # difference between x and k_star
     y = (exp.(ps.weight) * (x .- k_star(m))) .+ ps.bias
-    return y, st
+    return l.activation.(y), st
 end
 
 function (l::SteadyStateLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
@@ -92,7 +97,7 @@ function (l::SteadyStateLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
     distances = [diff[argmin(abs_diff[:, x]), x] for x in axes(diff, 2)]';
 
     y = (exp.(ps.weight) * distances) .+ ps.bias
-    return y, st
+    return l.activation.(y), st
 end
 
 function err_HJB(k, model, v_f_k, v_f_deriv_k, pol_f_k)
@@ -106,15 +111,34 @@ function err_HJB(k, model, v_f_k, v_f_deriv_k, pol_f_k)
     return hjb_err, pol_err
 end
 
+function calculate_lipschitz_constant(xs, ys)
+    n = length(xs)
+    max_ratio = 0.0
+    
+    for i in 1:n-1
+        # Compute the difference ratio for adjacent pairs of points
+        y_diff = abs(ys[i+1] - ys[i])
+        x_diff = abs(xs[i+1] - xs[i])
+        
+        # Avoid division by zero
+        if x_diff != 0
+            ratio = y_diff / x_diff
+            max_ratio = max(max_ratio, ratio)
+        end
+    end
+    
+    return max_ratio
+end
+
+# Example usage
+xs = [1, 2, 4, 5]
+ys = [1, 4, 16, 25]
+
+lipschitz_constant = calculate_lipschitz_constant(xs, ys)
 
 
-a = SteadyStateLayer(1, 256, m)
-b = MicawberLayer(1, 256, m)
 
-
-
-
-
+m = SkibaModel()
 batch_size = 100
 # vals = randn(1, batch_size) .+ k_star(m)
 vals = reshape(collect(range(0.1, 2*k_star(m), length = batch_size)), (1, batch_size))
@@ -124,23 +148,29 @@ v_f_nn = Chain(
     # both read in simultaneously
     Parallel(
         nothing,
-        SteadyStateLayer(1, 24, m),
-        MicawberLayer(1, 24, m),
+        SteadyStateLayer(1, 48, tanh, m),
+        MicawberLayer(1, 48, tanh, m),
+        NoOpLayer()
+        # WrappedFunction(x -> fill(x, (1, 24)))
+        # ReshapeLayer((1, 24))
+    ),
+    x -> vcat(x...),
+    PositiveDense(48*2 + 1, 256),
+    # PositiveDense(100, 100),
+    PositiveDense(256, 1)
+)
+
+pol_f_nn = Chain(
+    Parallel(
+        nothing,
+        SteadyStateLayer(1, 48, tanh, m),
+        MicawberLayer(1, 48, tanh, m),
         NoOpLayer()
     ),
     x -> vcat(x...),
-    PositiveDense(24*2 + 1, 100),
-    PositiveDense(100, 100),
-    PositiveDense(100, 1)
-)
-
-
-
-
-pol_f_nn = Chain(
-    Dense(1 => 100, tanh),
-    Dense(100 => 100, tanh),
-    Dense(100 => 1, softplus),
+    Dense(48*2 + 1 => 256, tanh),
+    # Dense(100 => 100, tanh),
+    Dense(256 => 1, softplus),
 )
 
 rng = Random.default_rng()
@@ -159,27 +189,27 @@ v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> v_f(
 
 v_f(vals, vf_ps, vf_st)
 pol_f(vals, pol_ps, pol_st)
-# v_f_deriv(vals, vf_ps, vf_st)
-# plot(
-#     vec_vals,
-#     v_f(vals, vf_ps, vf_st)',
-#     seriestype = :scatter,
-#     label = "",
-#     colour = :black
-# )
-# plot(
-#     vec_vals,
-#     v_f_deriv(vals, vf_ps, vf_st),
-#     seriestype = :scatter,
-#     label = "",
-#     colour = :red
-# )
+v_f_deriv(vals, vf_ps, vf_st)
+plot(
+    vec_vals,
+    v_f(vals, vf_ps, vf_st)',
+    seriestype = :scatter,
+    label = "",
+    colour = :black
+)
+plot(
+    vec_vals,
+    v_f_deriv(vals, vf_ps, vf_st)',
+    seriestype = :scatter,
+    label = "",
+    colour = :red
+)
 
 
 using BenchmarkTools
-@btime v_f(vals, vf_ps, vf_st);
-@btime pol_f(vals, pol_ps, pol_st);
-@btime v_f_deriv(vals, vf_ps, vf_st);
+# @btime v_f(vals, vf_ps, vf_st);
+# @btime pol_f(vals, pol_ps, pol_st);
+# @btime v_f_deriv(vals, vf_ps, vf_st);
 
 
 param_vec = ComponentArray(vf = vf_ps, pol = pol_ps)
@@ -201,6 +231,7 @@ function loss_fn(x, m, vf_ps, pol_ps, vf_st, pol_st)
     v_f_k, v_f_deriv_k, pol_f_k = predict_fn(x, vf_ps, pol_ps, vf_st, pol_st)
     hjb_err, pol_err = err_HJB(vec(x), m, v_f_k, v_f_deriv_k, pol_f_k)
     loss = sum(abs2, hjb_err) + sum(abs2, pol_err) + 1e10 * sum(v_f_deriv_k .< 0.0)
+    loss += calculate_lipschitz_constant(vec(x), v_f_k) 
     return loss, vf_st, pol_st
 end
 
@@ -211,17 +242,63 @@ end
 
 v_f_k, v_f_deriv_k, pol_f_k = predict_fn(vals, vf_ps, pol_ps, vf_st, pol_st)
 
+function plot_pred_output(vals, v_f_k, v_f_deriv_k, pol_f_k)
+    p1 = plot(
+        vec(vals),
+        v_f_k,
+        seriestype = :scatter,
+        label = "",
+        xlabel = "\$k\$",
+        ylabel = "\$Vf(k)\$",
+        )
+    p2 = plot(
+        vec(vals),
+        v_f_deriv_k,
+        seriestype = :scatter,
+        label = "",
+        xlabel = "\$k\$",
+        ylabel = "\$Vf'(k)\$",
+        )
+    p3 = plot(
+        vec(vals),
+        pol_f_k,
+        seriestype = :scatter,
+        label = "",
+        xlabel = "\$k\$",
+        ylabel = "\$c(k)\$",
+        )
+    return p1, p2, p3
+end
+
+plot_pred_output(vals, v_f_k, v_f_deriv_k, pol_f_k)
 loss_fn(vals, m, vf_ps, pol_ps, vf_st, pol_st)
 
 
 
-
-for epoch in 1:500_000
+epoch_list = []
+loss_list = []
+for epoch in 1:100_000
     (loss, states...), back = Zygote.pullback(param_vec) do p
         loss_fn(vals, m, p.vf, p.pol, states[1], states[2])
     end
     grads = back((1.0, nothing, nothing))[1]
     epoch % 500 == 1 && println("Epoch: $(epoch) | Loss: $(loss)")
+
+    if epoch % 500 == 1
+        push!(epoch_list, epoch)
+        push!(loss_list, loss)
+        v_f_k, v_f_deriv_k, pol_f_k = predict_fn(vals, param_vec.vf, param_vec.pol, states[1], states[2])
+        p1, p2, p3 = plot_pred_output(vals, v_f_k, v_f_deriv_k, pol_f_k)
+        p4 = plot(
+            epoch_list, 
+            loss_list, 
+            label = "Loss", 
+            seriestype = :scatter,
+            yscale = :log10
+            )
+        p_all = plot(p1, p2, p3, p4, layout = (2, 2), size = (800, 800))
+        display(p_all)
+    end
     # println("Epoch: $(epoch) | Loss: $(loss)")
     Optimisers.update!(st_opt, param_vec, grads)
 end
