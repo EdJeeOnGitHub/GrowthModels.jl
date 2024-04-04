@@ -6,6 +6,7 @@ using ForwardDiff, LinearAlgebra
 using LuxAMDGPU 
 using Plots
 
+Random.seed!(1234)
 device = cpu_device()
 # Stuff for GPU
 GrowthModels.k_steady_state(m, device::Lux.AbstractLuxDevice) = device(k_steady_state(m))
@@ -88,7 +89,7 @@ Lux.parameterlength(l::GrowthModelLayer) = l.out_dims * l.in_dims + l.out_dims
 function (l::MicawberLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
     # exp to ensure positive in input layer
     # difference between x and k_star
-    y = (exp.(ps.weight) * (x .- k_star(m))) .+ ps.bias
+    y = (abs.(ps.weight) * (x .- k_star(m))) .+ ps.bias
     return l.activation.(y), st
 end
 
@@ -100,7 +101,7 @@ function (l::SteadyStateLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
     abs_diff = abs.(diff)
     distances = [diff[argmin(abs_diff[:, x]), x] for x in axes(diff, 2)]';
 
-    y = (exp.(ps.weight) * distances) .+ ps.bias
+    y = (abs.(ps.weight) * distances) .+ ps.bias
     return l.activation.(y), st
 end
 
@@ -150,16 +151,19 @@ batch_size = 100
 # vals = randn(1, batch_size) .+ k_star(m)
 
 
-grid_vals = reshape(collect(range(0.1, 2*k_star(m), length = batch_size ÷ 4)), (1, batch_size ÷ 4))
-ss_lo_vals = randn(1, batch_size ÷ 4) .+ k_steady_state_lo(m)
-ss_hi_vals = randn(1, batch_size ÷ 4) .+ k_steady_state_hi(m)
-ss_star = randn(1, batch_size ÷ 4) .+ k_star(m)
-vals = hcat(grid_vals, ss_lo_vals, ss_hi_vals, ss_star) 
+# grid_vals = reshape(collect(range(0.1, 2*k_star(m), length = batch_size ÷ 4)), (1, batch_size ÷ 4))
+grid_vals = reshape(collect(range(0.1, 2*k_star(m), length = batch_size)), (1, batch_size))
+# ss_lo_vals = randn(1, batch_size ÷ 4) .+ k_steady_state_lo(m)
+# ss_hi_vals = randn(1, batch_size ÷ 4) .+ k_steady_state_hi(m)
+# ss_star = randn(1, batch_size ÷ 4) .+ k_star(m)
+# vals = hcat(grid_vals, ss_lo_vals, ss_hi_vals, ss_star) 
+vals = grid_vals
 vals = abs.(vals)
 cpu_vals = sort(vals, dims = 1)
 vals = sort(vals, dims = 1) |> device
 vec_vals = vec(vals)
-c_size = 12
+c_size = 10
+n_size = 48
 v_f_nn = Chain(
     # both read in simultaneously
     Parallel(
@@ -169,8 +173,8 @@ v_f_nn = Chain(
         NoOpLayer()
     ),
     x -> vcat(x...),
-    PositiveDense(c_size*2 + 1, 48),
-    PositiveDense(48, 1)
+    PositiveDense(c_size*2 + 1, n_size),
+    PositiveDense(n_size, 1)
 )
 
 pol_f_nn = Chain(
@@ -181,9 +185,9 @@ pol_f_nn = Chain(
         NoOpLayer()
     ),
     x -> vcat(x...),
-    Dense(c_size*2 + 1 => 48, tanh),
+    Dense(c_size*2 + 1 => n_size, tanh),
     # Dense(100 => 100, tanh),
-    Dense(48 => 1, softplus),
+    Dense(n_size => 1, softplus),
 )
 
 rng = Random.default_rng()
@@ -255,13 +259,16 @@ function loss_fn(x, m, vf_ps, pol_ps, vf_st, pol_st)
     vec_x = vec(x)
     hjb_err, pol_err = err_HJB(vec_x, m, v_f_k, v_f_deriv_k, pol_f_k)
 
-    kdot = production_function(m, vec_x) .- m.δ .* vec_x .- pol_f_k
-    kt1 = vec_x .+ kdot
-    loss = sum(abs2, hjb_err) + sum(abs2, pol_err) 
+    # kdot = production_function(m, vec_x) .- m.δ .* vec_x .- pol_f_k
+    # kt1 = vec_x .+ kdot
+    n_k = length(vec_x)
+    loss = sqrt(sum(abs2, hjb_err) / n_k)  + sqrt(sum(abs2, pol_err)  / n_k)
     # enforce k > 0
-    loss += sum(abs2, 100*(kt1 .< 0))
+    # loss += sum(abs2, 1e3 .* (kt1 .< 0))
     # enforce value function monotonic
-    loss += monotonicity_penalty(v_f_k) * 1e4
+    # loss += monotonicity_penalty(v_f_k) 
+    # lipschitz cost
+    # loss += calculate_lipschitz_constant(vec_x, v_f_k) 
     return loss, vf_st, pol_st
 end
 
@@ -281,23 +288,26 @@ function plot_pred_output(vals, v_f_k, v_f_deriv_k, pol_f_k)
         vec(vals),
         v_f_k,
         seriestype = :scatter,
-        label = "",
+        colour = :blue,
+        label = "NN \$V(k)\$",
         xlabel = "\$k\$",
-        ylabel = "\$Vf(k)\$",
+        ylabel = "\$V(k)\$",
         )
     p2 = plot(
         vec(vals),
         v_f_deriv_k,
         seriestype = :scatter,
-        label = "",
+        colour = :blue,
+        label = "NN \$V'(k)\$",
         xlabel = "\$k\$",
-        ylabel = "\$Vf'(k)\$",
+        ylabel = "\$V'(k)\$",
         )
     p3 = plot(
         vec(vals),
         pol_f_k,
         seriestype = :scatter,
-        label = "",
+        colour = :blue,
+        label = "NN \$c(k)\$",
         xlabel = "\$k\$",
         ylabel = "\$c(k)\$",
         )
@@ -311,7 +321,7 @@ loss_fn(vals, m, vf_ps, pol_ps, vf_st, pol_st)
 
 epoch_list = []
 loss_list = []
-for epoch in 1:1_000_000
+for epoch in 1_000_001:2_000_000
     (loss, states...), back = Zygote.pullback(param_vec) do p
         loss_fn(vals, m, p.vf, p.pol, states[1], states[2])
     end
@@ -323,6 +333,8 @@ for epoch in 1:1_000_000
         push!(loss_list, loss)
         v_f_k, v_f_deriv_k, pol_f_k = predict_fn(vals, param_vec.vf, param_vec.pol, states[1], states[2])
         kdot = production_function(m, vec_vals) .- m.δ .* vec_vals .- pol_f_k
+        hjb_err, pol_err = err_HJB(vec(vals), m, v_f_k, v_f_deriv_k, pol_f_k)
+
 
         p1, p2, p3 = plot_pred_output(vals, v_f_k, v_f_deriv_k, pol_f_k)
         p4 = plot(
@@ -340,13 +352,30 @@ for epoch in 1:1_000_000
             xlabel = "\$k\$",
             ylabel = "\$\\dot{k}\$",
             )
-        p_all = plot(p1, p2, p3, p4, p5, layout = (3, 2), size = (800, 800))
+        p6 = plot(
+            vec_vals, 
+            hjb_err, 
+            seriestype = :scatter,
+            label = "",
+            xlabel = "\$k\$",
+            ylabel = "\$HJB Error\$",
+            )
+        p7 = plot(
+            vec_vals, 
+            pol_err, 
+            seriestype = :scatter,
+            label = "",
+            xlabel = "\$k\$",
+            ylabel = "\$Policy Error\$",
+            )
+        p_all = plot(p1, p2, p3, p4, p5, p6, p7, layout = (4, 2), size = (800, 800))
         display(p_all)
     end
     # println("Epoch: $(epoch) | Loss: $(loss)")
     Optimisers.update!(st_opt, param_vec, grads)
 end
 
+savefig("skiba-nn-fit.pdf")
 
 
 
@@ -383,14 +412,82 @@ sum(abs2, sm_p_err)
 sum(abs2, nn_h_err)
 sum(abs2, nn_p_err)
 
-vec_vals = vec(vals)
+v_f_k, v_f_deriv_k, pol_f_k = predict_fn(vals, param_vec.vf, param_vec.pol, states[1], states[2])
+kdot = production_function(m, vec_vals) .- m.δ .* vec_vals .- pol_f_k
+hjb_err, pol_err = err_HJB(vec(vals), m, v_f_k, v_f_deriv_k, pol_f_k)
 
-plot(
+
+p1, p2, p3 = plot_pred_output(vals, v_f_k, v_f_deriv_k, pol_f_k)
+## Adding upwind solution for comparison
+plot!(
+    p1, 
+    vec_vals, 
+    sm_v_f_k, 
+    seriestype = :scatter, 
+    label = "Upwind \$V(k)\$", 
+    colour = :red)
+plot!(
+    p2,
     vec_vals,
-    sm_v_f_k,
+    sm_v_f_deriv_k,
     seriestype = :scatter,
-    label =""
+    label = "Upwind \$V'(k)\$",
+    colour = :red
 )
+plot!(
+    p3,
+    vec_vals,
+    sm_pol_f_k,
+    seriestype = :scatter,
+    label = "Upwind \$c(k)\$",
+    colour = :red)
+
+p4 = plot(
+    epoch_list, 
+    loss_list, 
+    label = "Loss", 
+    seriestype = :scatter,
+    yscale = :log10,
+    ylabel = "MSE",
+    xlabel = "Epochs"
+    )
+p5 = plot(
+    vec_vals, 
+    kdot, 
+    seriestype = :scatter,
+    label = "NN \$\\dot{k}\$",
+    xlabel = "\$k\$",
+    ylabel = "\$\\dot{k}\$",
+    )
+plot!(
+    p5,
+    vec_vals,
+    sm.kdot_function(vec_vals),
+    seriestype = :scatter,
+    label = "Upwind \$\\dot{k}\$",
+    xlabel = "\$k\$",
+    ylabel = "\$\\dot{k}\$"
+)
+
+p6 = plot(
+    vec_vals, 
+    hjb_err, 
+    seriestype = :scatter,
+    label = "",
+    xlabel = "\$k\$",
+    ylabel = "\$HJB Error\$",
+    )
+p7 = plot(
+    vec_vals, 
+    pol_err, 
+    seriestype = :scatter,
+    label = "",
+    xlabel = "\$k\$",
+    ylabel = "\$Policy Error\$",
+    )
+p_all = plot(p1, p2, p3, p4, p5, p6, p7, layout = (4, 2), size = (800, 800))
+
+savefig(p_all, "skiba-nn-fit.pdf")
 
 using Plots
 plot(
