@@ -3,12 +3,16 @@ using ComponentArrays, Lux, Optimization, OptimizationOptimJL,
 using GrowthModels
 using Zygote
 using ForwardDiff, LinearAlgebra
-using LuxAMDGPU 
+using LuxCUDA
 using Plots
 
 Random.seed!(1234)
-device = cpu_device()
+device = gpu_device()
 # Stuff for GPU
+skiba_production_function(k, α, A_H, A_L, κ) = max(A_H .* max(k - κ, 0).^α, A_L .* (k .^ α))
+@inline GrowthModels.production_function(::SkibaModel, k::Union{Real,AbstractArray}, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function(k, α, A_H, A_L, κ)
+@inline GrowthModels.production_function(::SkibaModel, k::Union{Real,AbstractArray}, params::Vector) = skiba_production_function.(k, params[1], params[2], params[3], params[4])
+@inline GrowthModels.production_function(m::SkibaModel, k::Union{Real,AbstractArray}) = skiba_production_function.(k, m.α, m.A_H, m.A_L, m.κ)
 GrowthModels.k_steady_state(m, device::Lux.AbstractLuxDevice) = device(k_steady_state(m))
 function SkibaModel{T}(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0) where {T<: Real}
     SkibaModel{T}(γ, α, ρ, δ, A_H, A_L, κ)
@@ -46,7 +50,7 @@ Lux.statelength(::PositiveDense) = 0
 
 @inline function (l::PositiveDense)(x::AbstractVecOrMat, ps, st::NamedTuple)
     # exp to ensure positive in input layer
-    y = (exp.(ps.weight) * x) .+ ps.bias
+    y = (exp.(CUDA.cu(ps.weight)) * x) .+ CUDA.cu(ps.bias)
     return l.activation.(y), st
 end
 
@@ -86,24 +90,39 @@ end
 Lux.initialstates(::AbstractRNG, ::GrowthModelLayer) = NamedTuple()
 Lux.parameterlength(l::GrowthModelLayer) = l.out_dims * l.in_dims + l.out_dims
 
+# function (l::MicawberLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
+#     # exp to ensure positive in input layer
+#     # difference between x and k_star
+#     y = (abs.(ps.weight) * (x .- CUDA.cu(k_star(m)))) .+ ps.bias
+#     return l.activation.(y), st
+# end
 function (l::MicawberLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
-    # exp to ensure positive in input layer
-    # difference between x and k_star
-    y = (abs.(ps.weight) * (x .- k_star(m))) .+ ps.bias
+    # Ensure x is on the GPU
+    x_gpu = CUDA.cu(x)  
+    k_star_gpu = CUDA.cu(k_star(m))  # Pre-compute and ensure k_star is on the GPU
+
+    # Perform the operation entirely on the GPU
+    y = (abs.(CUDA.cu(ps.weight)) * (x_gpu .- k_star_gpu)) .+ CUDA.cu(ps.bias)
+
+    # Ensure activation function is compatible with GPU arrays
     return l.activation.(y), st
 end
-
 function (l::SteadyStateLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
     # exp to ensure positive in input layer
     # difference between x and k_star
     k_ss = k_steady_state(m, device)
     diff = -1.0f32 .* (k_ss .- x)
     abs_diff = abs.(diff)
-    distances = [diff[argmin(abs_diff[:, x]), x] for x in axes(diff, 2)]';
+    distances_indices = argmin(abs_diff, dims = 1)
+    distances = CUDA.cu(diff[distances_indices])
+    @show ps.weight
+    @show ps.bias
+    @show distances
 
     y = (abs.(ps.weight) * distances) .+ ps.bias
     return l.activation.(y), st
 end
+
 
 function err_HJB(k, model, v_f_k, v_f_deriv_k, pol_f_k)
     (; ρ, δ, γ) = model
@@ -145,7 +164,6 @@ end
 
 
 
-
 m = SkibaModel{Float32}() |> device
 batch_size = 100
 # vals = randn(1, batch_size) .+ k_star(m)
@@ -168,19 +186,21 @@ v_f_nn = Chain(
     # both read in simultaneously
     Parallel(
         nothing,
-        SteadyStateLayer(1, c_size, tanh, m),
+        # SteadyStateLayer(1, c_size, tanh, m),
+        MicawberLayer(1, c_size, tanh, m),
         MicawberLayer(1, c_size, tanh, m),
         NoOpLayer()
     ),
     x -> vcat(x...),
     PositiveDense(c_size*2 + 1, n_size),
     PositiveDense(n_size, 1)
-)
+) |> device
 
 pol_f_nn = Chain(
     Parallel(
         nothing,
-        SteadyStateLayer(1, c_size, tanh, m),
+        # SteadyStateLayer(1, c_size, tanh, m),
+        MicawberLayer(1, c_size, tanh, m),
         MicawberLayer(1, c_size, tanh, m),
         NoOpLayer()
     ),
@@ -188,7 +208,7 @@ pol_f_nn = Chain(
     Dense(c_size*2 + 1 => n_size, tanh),
     # Dense(100 => 100, tanh),
     Dense(n_size => 1, softplus),
-)
+)|> device
 
 rng = Random.default_rng()
 vf_ps, vf_st = Lux.setup(rng, v_f_nn) .|> device
@@ -196,27 +216,24 @@ pol_ps, pol_st = Lux.setup(rng, pol_f_nn) .|> device
 
 vf_y, vf_st = Lux.apply(v_f_nn, vals, vf_ps, vf_st)
 
+using CUDA
 
-
-
-k_steady_state(m, device) .- vals
-
-m_cpu = SkibaModel{Float32}()
-k_ss = k_steady_state(m_cpu) |> device
-vals .- k_ss
-k_steady_state(m_cpu) 
-cpu_vals .- k_steady_state(m_cpu)
-k_steady_state_hi(m) .- vals
-k_steady_state(m) 
-
-v_f(k, ps, st) = Lux.apply(v_f_nn, k, ps, st)[1]
+v_f(k, ps, st) = Lux.apply(v_f_nn, k, ps, st)[1] 
 pol_f(k, ps, st) = Lux.apply(pol_f_nn, k, ps, st)[1]
-v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> v_f([x], ps, st)[1], z), y) for y in k]
+# v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> v_f([x], ps, st)[1], z), y) for y in k]
+# gpu_v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> v_f(CuArray([x]), ps, st)[1], z), y) for y in k]
+# gpu_finite_difference(vals, Float32(1e-3),  vf_ps, vf_st)
+function v_f_deriv(xs::CUDA.CuArray{Float32}, ps, st; h::Float32=Float32(1e-4))
+    return (v_f(xs .+ h, ps, st) .- v_f(xs, ps, st)) ./ h
+end
+
+# @btime v_f_deriv(vals, vf_ps, vf_st)
 
 
 v_f(vals, vf_ps, vf_st)
 pol_f(vals, pol_ps, pol_st)
 v_f_deriv(vals, vf_ps, vf_st)
+
 plot(
     vec_vals,
     v_f(vals, vf_ps, vf_st)',
@@ -239,11 +256,11 @@ using BenchmarkTools
 # @btime v_f_deriv(vals, vf_ps, vf_st);
 
 
-param_vec = ComponentArray(vf = vf_ps, pol = pol_ps)
-states = (vf_st, pol_st)
-opt = Optimisers.ADAM()
+param_vec = ComponentArray(vf = vf_ps, pol = pol_ps) |> device
+states = (vf_st, pol_st) |> device
+opt = Optimisers.ADAM() 
 
-st_opt = Optimisers.setup(ADAM(), param_vec)
+st_opt = Optimisers.setup(ADAM(), param_vec) |> device
 
 
 
@@ -321,7 +338,7 @@ loss_fn(vals, m, vf_ps, pol_ps, vf_st, pol_st)
 
 epoch_list = []
 loss_list = []
-for epoch in 1_000_001:2_000_000
+for epoch in 1:1_000_000
     (loss, states...), back = Zygote.pullback(param_vec) do p
         loss_fn(vals, m, p.vf, p.pol, states[1], states[2])
     end
