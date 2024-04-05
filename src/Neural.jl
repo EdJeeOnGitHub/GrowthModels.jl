@@ -7,7 +7,7 @@ using LuxCUDA
 using Plots
 
 Random.seed!(1234)
-device = gpu_device()
+device = cpu_device()
 # Stuff for GPU
 skiba_production_function(k, α, A_H, A_L, κ) = max(A_H .* max(k - κ, 0).^α, A_L .* (k .^ α))
 @inline GrowthModels.production_function(::SkibaModel, k::Union{Real,AbstractArray}, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function(k, α, A_H, A_L, κ)
@@ -50,7 +50,7 @@ Lux.statelength(::PositiveDense) = 0
 
 @inline function (l::PositiveDense)(x::AbstractVecOrMat, ps, st::NamedTuple)
     # exp to ensure positive in input layer
-    y = (exp.(CUDA.cu(ps.weight)) * x) .+ CUDA.cu(ps.bias)
+    y = (exp.(ps.weight) * x) .+ ps.bias
     return l.activation.(y), st
 end
 
@@ -90,36 +90,22 @@ end
 Lux.initialstates(::AbstractRNG, ::GrowthModelLayer) = NamedTuple()
 Lux.parameterlength(l::GrowthModelLayer) = l.out_dims * l.in_dims + l.out_dims
 
-# function (l::MicawberLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
-#     # exp to ensure positive in input layer
-#     # difference between x and k_star
-#     y = (abs.(ps.weight) * (x .- CUDA.cu(k_star(m)))) .+ ps.bias
-#     return l.activation.(y), st
-# end
 function (l::MicawberLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
-    # Ensure x is on the GPU
-    x_gpu = CUDA.cu(x)  
-    k_star_gpu = CUDA.cu(k_star(m))  # Pre-compute and ensure k_star is on the GPU
-
-    # Perform the operation entirely on the GPU
-    y = (abs.(CUDA.cu(ps.weight)) * (x_gpu .- k_star_gpu)) .+ CUDA.cu(ps.bias)
-
-    # Ensure activation function is compatible with GPU arrays
+    # abs to ensure positive in input layer
+    # difference between x and k_star
+    y = (exp.(ps.weight) * (x .- k_star(m))) .+ ps.bias
     return l.activation.(y), st
 end
 function (l::SteadyStateLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
-    # exp to ensure positive in input layer
+    # abs to ensure positive in input layer
     # difference between x and k_star
     k_ss = k_steady_state(m, device)
     diff = -1.0f32 .* (k_ss .- x)
     abs_diff = abs.(diff)
     distances_indices = argmin(abs_diff, dims = 1)
-    distances = CUDA.cu(diff[distances_indices])
-    @show ps.weight
-    @show ps.bias
-    @show distances
+    distances = diff[distances_indices]
 
-    y = (abs.(ps.weight) * distances) .+ ps.bias
+    y = (exp.(ps.weight) * distances) .+ ps.bias
     return l.activation.(y), st
 end
 
@@ -165,7 +151,7 @@ end
 
 
 m = SkibaModel{Float32}() |> device
-batch_size = 100
+batch_size = 1_00
 # vals = randn(1, batch_size) .+ k_star(m)
 
 
@@ -193,61 +179,125 @@ v_f_nn = Chain(
     ),
     x -> vcat(x...),
     PositiveDense(c_size*2 + 1, n_size),
+    PositiveDense(n_size, n_size),
     PositiveDense(n_size, 1)
-) |> device
+)
+# v_f_nn = Chain(
+#     # both read in simultaneously
+#     PositiveDense(1, n_size),
+#     PositiveDense(n_size, n_size),
+#     PositiveDense(n_size, n_size),
+#     PositiveDense(n_size, 1)
+# )
+
+# pol_f_nn = Chain(
+#     Dense(1 => n_size, tanh),
+#     Dense(n_size => n_size, tanh),
+#     Dense(n_size => n_size, tanh),
+#     Dense(n_size => 1, softplus),
+# )
 
 pol_f_nn = Chain(
     Parallel(
         nothing,
-        # SteadyStateLayer(1, c_size, tanh, m),
-        MicawberLayer(1, c_size, tanh, m),
+        SteadyStateLayer(1, c_size, tanh, m),
         MicawberLayer(1, c_size, tanh, m),
         NoOpLayer()
     ),
     x -> vcat(x...),
     Dense(c_size*2 + 1 => n_size, tanh),
-    # Dense(100 => 100, tanh),
+    Dense(n_size => n_size, tanh),
     Dense(n_size => 1, softplus),
-)|> device
+)
 
 rng = Random.default_rng()
+cpu_vf_ps, cpu_vf_st = Lux.setup(rng, v_f_nn) 
+cpu_pol_ps, cpu_pol_st = Lux.setup(rng, pol_f_nn) 
+
 vf_ps, vf_st = Lux.setup(rng, v_f_nn) .|> device
 pol_ps, pol_st = Lux.setup(rng, pol_f_nn) .|> device
 
 vf_y, vf_st = Lux.apply(v_f_nn, vals, vf_ps, vf_st)
 
-using CUDA
 
-v_f(k, ps, st) = Lux.apply(v_f_nn, k, ps, st)[1] 
-pol_f(k, ps, st) = Lux.apply(pol_f_nn, k, ps, st)[1]
+v_f(k, ps, st) = first(Lux.apply(v_f_nn, k, ps, st))
+pol_f(k, ps, st) = first(Lux.apply(pol_f_nn, k, ps, st))
 # v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> v_f([x], ps, st)[1], z), y) for y in k]
 # gpu_v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> v_f(CuArray([x]), ps, st)[1], z), y) for y in k]
 # gpu_finite_difference(vals, Float32(1e-3),  vf_ps, vf_st)
-function v_f_deriv(xs::CUDA.CuArray{Float32}, ps, st; h::Float32=Float32(1e-4))
-    return (v_f(xs .+ h, ps, st) .- v_f(xs, ps, st)) ./ h
+function v_f(k::Array{Float64}, ps, st)
+    return first(Lux.apply(v_f_nn, k, ps, st))
 end
 
-# @btime v_f_deriv(vals, vf_ps, vf_st)
+function v_f_deriv(k::AbstractArray, ps, st)
+    df = Zygote.pullback(x -> v_f(x, ps, st), k)[2]
+    ones_vec = ones(size(k)) |> device
+    return first(df(ones_vec))
+end
+
+function cpu_v_f_deriv(k::AbstractArray, ps, st)
+    df = Zygote.pullback(x -> v_f(x, ps, st), k)[2]
+    ones_vec = ones(size(k)) 
+    return first(df(ones_vec))
+end
+
+using ZygoteRules
+ZygoteRules.@adjoint function ForwardDiff.Dual{T}(x, ẋ::Tuple) where T
+    @assert length(ẋ) == 1
+    ForwardDiff.Dual{T}(x, ẋ), ḋ -> (ḋ.partials[1], (ḋ.value,))
+  end
+  
+  ZygoteRules.@adjoint ZygoteRules.literal_getproperty(d::ForwardDiff.Dual{T}, ::Val{:partials}) where T =
+    d.partials, ṗ -> (ForwardDiff.Dual{T}(ṗ[1], 0),)
+  
+  ZygoteRules.@adjoint ZygoteRules.literal_getproperty(d::ForwardDiff.Dual{T}, ::Val{:value}) where T =
+    d.value, ẋ -> (ForwardDiff.Dual{T}(0, ẋ),)
+function v_f_deriv(k::AbstractArray, ps, st)
+    # df = Zygote.forwarddiff(z -> Zygote.pullback(x -> v_f(x, ps, st), z), k)[2]
+    # ones_vec = ones(size(k)) 
+    return diag(ForwardDiff.jacobian(x -> v_f(x, ps, st), k))
+    # return first(df(ones_vec))
+end
+
+Zygote.pullback(x -> v_f(x, vf_ps, vf_st), vals)[2]
+
+ed = Zygote.pushforward(x -> v_f(x, vf_ps, vf_st), vals)
+ed(ones(size(vals)))
+ed(1.0)
 
 
-v_f(vals, vf_ps, vf_st)
-pol_f(vals, pol_ps, pol_st)
 v_f_deriv(vals, vf_ps, vf_st)
 
-plot(
-    vec_vals,
-    v_f(vals, vf_ps, vf_st)',
-    seriestype = :scatter,
-    label = "",
-    colour = :black
-)
-plot(
-    vec_vals,
-    v_f_deriv(vals, vf_ps, vf_st)',
-    seriestype = :scatter,
-    label = "",
-    colour = :red
-)
+@btime fwd_v_f_deriv(vals, vf_ps, vf_st);
+
+using BenchmarkTools
+v_f(vals, vf_ps, vf_st)
+pol_f(vals, pol_ps, pol_st)
+@btime v_f_deriv(vals, vf_ps, vf_st);
+
+# @btime v_f(vals, vf_ps, vf_st);
+# @btime v_f(cpu_vals, cpu_vf_ps, cpu_vf_st)
+
+# @btime pol_f(vals, vf_ps, vf_st);
+# @btime pol_f(cpu_vals, cpu_vf_ps, cpu_vf_st)
+
+# @btime v_f_deriv(vals, vf_ps, vf_st);
+# @btime v_f_deriv(cpu_vals, cpu_vf_ps, cpu_vf_st)
+
+# plot(
+#     vec_vals,
+#     v_f(vals, vf_ps, vf_st)',
+#     seriestype = :scatter,
+#     label = "",
+#     colour = :black
+# )
+# plot(
+#     vec_vals,
+#     v_f_deriv(vals, vf_ps, vf_st)',
+#     seriestype = :scatter,
+#     label = "",
+#     colour = :red
+# )
 
 
 using BenchmarkTools
@@ -338,7 +388,9 @@ loss_fn(vals, m, vf_ps, pol_ps, vf_st, pol_st)
 
 epoch_list = []
 loss_list = []
-for epoch in 1:1_000_000
+# for epoch in 1:1_000_000
+epoch = 1
+
     (loss, states...), back = Zygote.pullback(param_vec) do p
         loss_fn(vals, m, p.vf, p.pol, states[1], states[2])
     end
@@ -587,3 +639,66 @@ pullback(v_f_deriv, [10.0], vf_ps, vf_st)
 
 pb((one(loss), vf_st, pol_st))
 
+
+
+
+using Enzyme
+
+x  = [2.0]
+bx = [0.0]
+y  = [0.0]
+
+x = fill(2.0, (1, 2))
+bx = fill(0.0, (1, 2))
+x = [2.0 2.0]
+bx = [0.0 0.0]
+
+using ComponentArrays, Lux, Random
+
+rng = Random.default_rng()
+Random.seed!(rng,100)
+dudt2 = Lux.Chain(x -> x.^3,
+                  Lux.Dense(1, 50, tanh),
+                  Lux.Dense(50, 1))
+p, st = Lux.setup(rng, dudt2)
+
+function f(x::Array{Float64})
+    return dudt2(x, p, st)[1]
+end
+
+f(x)
+
+Enzyme.autodiff(
+    Reverse, 
+    f, 
+    Active,
+    Duplicated([1.0 0.2], [0.0 0.0]))
+
+Enzyme.autodiff(
+    Reverse, 
+    f, 
+    Active,
+    Duplicated(x, bx))
+
+    x
+    bx
+bx
+
+function f2(x::Array{Float64})
+    dudt2(x, p, st)[1]
+end
+f2(x)
+using Zygote
+bx2 = Zygote.pullback(f2, x)[2](ones(size(x)))[1]
+
+bx2([1.0 1.0])[1]
+bx
+bx2
+
+@show bx - bx2
+
+#=
+2-element Vector{Float64}:
+ -9.992007221626409e-16
+ -1.7763568394002505e-15
+=#
