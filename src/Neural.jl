@@ -6,6 +6,84 @@ using ForwardDiff, LinearAlgebra
 using LuxCUDA
 using Plots
 
+
+using Zygote
+
+# Define the function f(x, p)
+function f(x, p)
+    n_x = length(x)
+    # return p[1:n_x] .* sin.(x) + x .* cos.(p[1:n_x]) .+ sum(p[n_x+1:end])
+    return -p[1:n_x] .* x 
+end
+
+# Assume f(x, p) is defined elsewhere
+
+# This function computes df/dx and the pullback function
+function compute_df_dx_and_pullback(x, p)
+    y, pullback_f = Zygote.pullback(f, x, p)
+    df_dx = pullback_f(1)[1]  # Correctly calling pullback with 1 to get df/dx
+    return df_dx, pullback_f
+end
+
+# Revised function to compute d^2f/dxdp
+function compute_d2f_dxdp(x, p, pullback_f)
+    # The error suggests a misuse of pullback, ensure correct application
+    df_dp = Zygote.gradient(p -> pullback_f(x, p), p)[1]  # Directly computing df/dp
+    
+    # Correctly utilize the gradient for df/dp to compute d2f/dxdp
+    # Note: This assumes the second derivative calculation might require further adjustment
+    # based on the specific form of f and how Zygote handles higher-order derivatives
+    d2f_dxdp = Zygote.gradient(() -> sum(df_dp), p)[1]
+    
+    return d2f_dxdp
+end
+
+# Example usage should follow, assuming x and p are defined
+
+# Example usage
+x = [1, 2, 3]
+p = [4, 5, 6, 10]
+
+f(x, p)
+y, pullback_f = Zygote.pullback(f, x, p)
+df_dx = pullback_f(ones(size(x)))[1]
+
+function test_df_dx(x, p)
+    y, pullback_f = Zygote.pullback(f, x, p)
+    df_dx_ = pullback_f(ones(size(x)))[1]
+    return df_dx_
+end
+
+function test_dfdx_dp(dfdx, x, p)
+    _, dfdxdp = Zygote.pullback(p -> dfdx(x, p), p)
+    return first(dfdxdp(ones(size(x))))
+end
+
+
+test_df_dx(x, p)
+test_dfdx_dp(test_df_dx, x, p)
+y_, dfx_dp = Zygote.pullback(x -> pullback_f(ones(size(x)))[2], x)
+
+a = dfx_dp(ones(size(p)))
+a
+
+
+# df_dx, pullback_f = compute_df_dx_and_pullback(x, p)
+# df_dx
+
+pullback_f(1.0)[2]
+
+pullback_f(x)[1]
+pullback_f(1.0)
+df_dp = Zygote.pullback(p -> pull(x, p), p)[1]
+d2f_dxdp = compute_d2f_dxdp(x, p, pullback_f)
+
+println("df/dx: ", df_dx)
+println("d²f/dxdp: ", d2f_dxdp)
+
+
+
+
 Random.seed!(1234)
 device = cpu_device()
 # Stuff for GPU
@@ -50,7 +128,7 @@ Lux.statelength(::PositiveDense) = 0
 
 @inline function (l::PositiveDense)(x::AbstractVecOrMat, ps, st::NamedTuple)
     # exp to ensure positive in input layer
-    y = (exp.(ps.weight) * x) .+ ps.bias
+    y = (abs.(ps.weight) * x) .+ ps.bias
     return l.activation.(y), st
 end
 
@@ -93,7 +171,7 @@ Lux.parameterlength(l::GrowthModelLayer) = l.out_dims * l.in_dims + l.out_dims
 function (l::MicawberLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
     # abs to ensure positive in input layer
     # difference between x and k_star
-    y = (exp.(ps.weight) * (x .- k_star(m))) .+ ps.bias
+    y = (abs.(ps.weight) * (x .- k_star(m))) .+ ps.bias
     return l.activation.(y), st
 end
 function (l::SteadyStateLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
@@ -105,7 +183,7 @@ function (l::SteadyStateLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
     distances_indices = argmin(abs_diff, dims = 1)
     distances = diff[distances_indices]
 
-    y = (exp.(ps.weight) * distances) .+ ps.bias
+    y = (abs.(ps.weight) * distances) .+ ps.bias
     return l.activation.(y), st
 end
 
@@ -229,35 +307,54 @@ function v_f(k::Array{Float64}, ps, st)
     return first(Lux.apply(v_f_nn, k, ps, st))
 end
 
-function v_f_deriv(k::AbstractArray, ps, st)
-    df = Zygote.pullback(x -> v_f(x, ps, st), k)[2]
-    ones_vec = ones(size(k)) |> device
-    return first(df(ones_vec))
+
+function v_f_deriv(k, p, st)
+    _, pullback_f = Zygote.pullback((a, b) -> v_f(a, b, st), k, p)
+    df_dx_ = pullback_f(ones(size(k)))[1]
+    return df_dx_
 end
 
-function cpu_v_f_deriv(k::AbstractArray, ps, st)
-    df = Zygote.pullback(x -> v_f(x, ps, st), k)[2]
-    ones_vec = ones(size(k)) 
-    return first(df(ones_vec))
+
+function v_f_deriv_deriv(dfdx, k, p, st)
+    _, dfdxdp = Zygote.pullback(p -> dfdx(k, p, st), p)
+    return first(dfdxdp(ones(size(k))))
 end
 
-using ZygoteRules
-ZygoteRules.@adjoint function ForwardDiff.Dual{T}(x, ẋ::Tuple) where T
-    @assert length(ẋ) == 1
-    ForwardDiff.Dual{T}(x, ẋ), ḋ -> (ḋ.partials[1], (ḋ.value,))
-  end
+v_f(vals, vf_ps, vf_st)
+v_f_deriv(vals, vf_ps, vf_st)
+v_f_deriv_deriv(v_f_deriv, vals, vf_ps, vf_st)
+
+
+
+# function v_f_deriv(k::AbstractArray, ps, st)
+#     df = Zygote.pullback(x -> v_f(x, ps, st), k)[2]
+#     ones_vec = ones(size(k)) |> device
+#     return first(df(ones_vec))
+# end
+
+# function cpu_v_f_deriv(k::AbstractArray, ps, st)
+#     df = Zygote.pullback(x -> v_f(x, ps, st), k)[2]
+#     ones_vec = ones(size(k)) 
+#     return first(df(ones_vec))
+# end
+
+# using ZygoteRules
+# ZygoteRules.@adjoint function ForwardDiff.Dual{T}(x, ẋ::Tuple) where T
+#     @assert length(ẋ) == 1
+#     ForwardDiff.Dual{T}(x, ẋ), ḋ -> (ḋ.partials[1], (ḋ.value,))
+#   end
   
-  ZygoteRules.@adjoint ZygoteRules.literal_getproperty(d::ForwardDiff.Dual{T}, ::Val{:partials}) where T =
-    d.partials, ṗ -> (ForwardDiff.Dual{T}(ṗ[1], 0),)
+#   ZygoteRules.@adjoint ZygoteRules.literal_getproperty(d::ForwardDiff.Dual{T}, ::Val{:partials}) where T =
+#     d.partials, ṗ -> (ForwardDiff.Dual{T}(ṗ[1], 0),)
   
-  ZygoteRules.@adjoint ZygoteRules.literal_getproperty(d::ForwardDiff.Dual{T}, ::Val{:value}) where T =
-    d.value, ẋ -> (ForwardDiff.Dual{T}(0, ẋ),)
-function v_f_deriv(k::AbstractArray, ps, st)
-    # df = Zygote.forwarddiff(z -> Zygote.pullback(x -> v_f(x, ps, st), z), k)[2]
-    # ones_vec = ones(size(k)) 
-    return diag(ForwardDiff.jacobian(x -> v_f(x, ps, st), k))
-    # return first(df(ones_vec))
-end
+#   ZygoteRules.@adjoint ZygoteRules.literal_getproperty(d::ForwardDiff.Dual{T}, ::Val{:value}) where T =
+#     d.value, ẋ -> (ForwardDiff.Dual{T}(0, ẋ),)
+# function v_f_deriv(k::AbstractArray, ps, st)
+#     # df = Zygote.forwarddiff(z -> Zygote.pullback(x -> v_f(x, ps, st), z), k)[2]
+#     # ones_vec = ones(size(k)) 
+#     return diag(ForwardDiff.jacobian(x -> v_f(x, ps, st), k))
+#     # return first(df(ones_vec))
+# end
 
 Zygote.pullback(x -> v_f(x, vf_ps, vf_st), vals)[2]
 
