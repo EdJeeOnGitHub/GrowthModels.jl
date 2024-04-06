@@ -253,3 +253,33 @@ end
 
 
 statespace_k_dot(m::Model) =  (variables::NamedTuple) -> variables.y .- m.δ .* variables.k .- variables.c
+
+
+function params(m::StochasticModel)
+    fields = fieldnames(typeof(m))
+    # Pre-allocate vector with size large enough to hold all fields plus specific fields from the stochasticprocess
+    params_vector = Vector{eltype(m)}(undef, 0) # Start with an empty vector since we don't know the final size yet
+
+    for field in fields
+        if field == :stochasticprocess
+            # Assuming stochasticprocess is a field, extract theta and sigma from it
+            sp = getfield(m, field) # Get the stochasticprocess struct
+            # Assuming theta and sigma are the names of the fields within stochasticprocess
+            push!(params_vector, getfield(sp, :θ))
+            push!(params_vector, getfield(sp, :σ))
+        else
+            # For all other fields, just append them to the vector
+            push!(params_vector, getfield(m, field))
+        end
+    end
+    return params_vector
+end
+
+function params(m::DeterministicModel)
+    fields = fieldnames(typeof(m))
+    params_vector = Vector{Real}(undef, length(fields))
+    for (i, field) in enumerate(fields)
+        params_vector[i] = getfield(m, field)
+    end
+    return params_vector
+end

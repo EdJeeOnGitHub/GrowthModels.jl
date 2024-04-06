@@ -91,13 +91,13 @@ end
 Lux.initialstates(::AbstractRNG, ::GrowthModelLayer) = NamedTuple()
 Lux.parameterlength(l::GrowthModelLayer) = l.out_dims * l.in_dims + l.out_dims
 
-function (l::MicawberLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
+function (l::MicawberLayer)(x::Union{AbstractVecOrMat, T}, ps, st::NamedTuple) where {T <: Real}
     # abs to ensure positive in input layer
     # difference between x and k_star
     y = (abs.(ps.weight) * (x .- k_star(m))) .+ ps.bias
     return l.activation.(y), st
 end
-function (l::SteadyStateLayer)(x::AbstractVecOrMat, ps, st::NamedTuple)
+function (l::SteadyStateLayer)(x::Union{AbstractVecOrMat, T}, ps, st::NamedTuple) where {T <: Real}
     # abs to ensure positive in input layer
     # difference between x and k_star
     k_ss = k_steady_state(m, device)
@@ -166,7 +166,7 @@ v_f_nn = Chain(
     Parallel(
         nothing,
         MicawberLayer(1, c_size, tanh, m),
-        MicawberLayer(1, c_size, tanh, m),
+        SteadyStateLayer(1, c_size, tanh, m),
         NoOpLayer()
     ),
     x -> vcat(x...),
@@ -220,20 +220,22 @@ function pol_f(k, ps, st)
     return first(Lux.apply(pol_f_nn, k, ps, st)) 
 end
 function v_f_scalar(k, ps, st)
-    v_f([k], ps, st)[1]
+    first(v_f(k, ps, st))
 end
 
-function v_f_deriv_scalar(k, ps, st)
-    v_ed(x) = v_f_scalar(x, ps, st)
-    d = Zygote.forwarddiff(k) do k_
-        ForwardDiff.derivative(v_ed, k_)
-    end
-    return d
-end
-function v_f_deriv(k, ps, st)
-    v_f_deriv_scalar.(k, Ref(ps), Ref(st))
-end
+# function v_f_deriv_scalar(k, ps, st)
+#     v_ed(x) = v_f_scalar(x, ps, st)
+#     # d = Zygote.forwarddiff(k) do k_
+#     #     ForwardDiff.derivative(v_ed, k_)
+#     # end
+#     d = ForwardDiff.derivative(v_ed, k)
+#     return d
+# end
+# function v_f_deriv(k, ps, st)
+#     v_f_deriv_scalar.(k, Ref(ps), Ref(st))
+# end
 
+v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> first(v_f(x, ps, st)), z), y) for y in k] |> device
 # v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> v_f([x], ps, st)[1], z), y) for y in k]
 using BenchmarkTools
 # v_f_deriv_scalar(1.0, vf_ps, vf_st)
@@ -242,9 +244,13 @@ using BenchmarkTools
 
 # @btime v_f_deriv(vals, vf_ps, vf_st);
 
-# @btime l, b = Zygote.pullback(vf_ps) do p
-#     v_f_deriv(vals, p, vf_st)
-# end;
+l, b = Zygote.pullback(vf_ps) do p
+    v_f_deriv(vals, p, vf_st)
+end;
+
+
+using Enzyme
+
 # l
 # b(vf_ps)
 
