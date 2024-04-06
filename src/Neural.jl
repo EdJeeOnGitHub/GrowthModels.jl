@@ -7,83 +7,6 @@ using LuxCUDA
 using Plots
 
 
-using Zygote
-
-# Define the function f(x, p)
-function f(x, p)
-    n_x = length(x)
-    # return p[1:n_x] .* sin.(x) + x .* cos.(p[1:n_x]) .+ sum(p[n_x+1:end])
-    return -p[1:n_x] .* x 
-end
-
-# Assume f(x, p) is defined elsewhere
-
-# This function computes df/dx and the pullback function
-function compute_df_dx_and_pullback(x, p)
-    y, pullback_f = Zygote.pullback(f, x, p)
-    df_dx = pullback_f(1)[1]  # Correctly calling pullback with 1 to get df/dx
-    return df_dx, pullback_f
-end
-
-# Revised function to compute d^2f/dxdp
-function compute_d2f_dxdp(x, p, pullback_f)
-    # The error suggests a misuse of pullback, ensure correct application
-    df_dp = Zygote.gradient(p -> pullback_f(x, p), p)[1]  # Directly computing df/dp
-    
-    # Correctly utilize the gradient for df/dp to compute d2f/dxdp
-    # Note: This assumes the second derivative calculation might require further adjustment
-    # based on the specific form of f and how Zygote handles higher-order derivatives
-    d2f_dxdp = Zygote.gradient(() -> sum(df_dp), p)[1]
-    
-    return d2f_dxdp
-end
-
-# Example usage should follow, assuming x and p are defined
-
-# Example usage
-x = [1, 2, 3]
-p = [4, 5, 6, 10]
-
-f(x, p)
-y, pullback_f = Zygote.pullback(f, x, p)
-df_dx = pullback_f(ones(size(x)))[1]
-
-function test_df_dx(x, p)
-    y, pullback_f = Zygote.pullback(f, x, p)
-    df_dx_ = pullback_f(ones(size(x)))[1]
-    return df_dx_
-end
-
-function test_dfdx_dp(dfdx, x, p)
-    _, dfdxdp = Zygote.pullback(p -> dfdx(x, p), p)
-    return first(dfdxdp(ones(size(x))))
-end
-
-
-test_df_dx(x, p)
-test_dfdx_dp(test_df_dx, x, p)
-y_, dfx_dp = Zygote.pullback(x -> pullback_f(ones(size(x)))[2], x)
-
-a = dfx_dp(ones(size(p)))
-a
-
-
-# df_dx, pullback_f = compute_df_dx_and_pullback(x, p)
-# df_dx
-
-pullback_f(1.0)[2]
-
-pullback_f(x)[1]
-pullback_f(1.0)
-df_dp = Zygote.pullback(p -> pull(x, p), p)[1]
-d2f_dxdp = compute_d2f_dxdp(x, p, pullback_f)
-
-println("df/dx: ", df_dx)
-println("d²f/dxdp: ", d2f_dxdp)
-
-
-
-
 Random.seed!(1234)
 device = cpu_device()
 # Stuff for GPU
@@ -191,7 +114,6 @@ end
 function err_HJB(k, model, v_f_k, v_f_deriv_k, pol_f_k)
     (; ρ, δ, γ) = model
     (; γ, α, ρ, δ, A_H, A_L, κ) = model
-    # θ = [γ, α, ρ, δ, A_H, A_L, κ]
 
     c = v_f_deriv_k .^ (-1 / γ)
     hjb_err = ρ .* v_f_k  .- (c .^ (1 - γ)) ./ (1 - γ) .- v_f_deriv_k .* (production_function(m, k) .- δ .* k .- pol_f_k)
@@ -230,27 +152,19 @@ end
 
 m = SkibaModel{Float32}() |> device
 batch_size = 1_00
-# vals = randn(1, batch_size) .+ k_star(m)
 
-
-# grid_vals = reshape(collect(range(0.1, 2*k_star(m), length = batch_size ÷ 4)), (1, batch_size ÷ 4))
 grid_vals = reshape(collect(range(0.1, 2*k_star(m), length = batch_size)), (1, batch_size))
-# ss_lo_vals = randn(1, batch_size ÷ 4) .+ k_steady_state_lo(m)
-# ss_hi_vals = randn(1, batch_size ÷ 4) .+ k_steady_state_hi(m)
-# ss_star = randn(1, batch_size ÷ 4) .+ k_star(m)
-# vals = hcat(grid_vals, ss_lo_vals, ss_hi_vals, ss_star) 
 vals = grid_vals
 vals = abs.(vals)
 cpu_vals = sort(vals, dims = 1)
 vals = sort(vals, dims = 1) |> device
 vec_vals = vec(vals)
-c_size = 10
+c_size = 24
 n_size = 48
 v_f_nn = Chain(
     # both read in simultaneously
     Parallel(
         nothing,
-        # SteadyStateLayer(1, c_size, tanh, m),
         MicawberLayer(1, c_size, tanh, m),
         MicawberLayer(1, c_size, tanh, m),
         NoOpLayer()
@@ -298,103 +212,105 @@ pol_ps, pol_st = Lux.setup(rng, pol_f_nn) .|> device
 vf_y, vf_st = Lux.apply(v_f_nn, vals, vf_ps, vf_st)
 
 
-v_f(k, ps, st) = first(Lux.apply(v_f_nn, k, ps, st))
-pol_f(k, ps, st) = first(Lux.apply(pol_f_nn, k, ps, st))
+function v_f(k, ps, st)
+    return first(Lux.apply(v_f_nn, k, ps, st)) 
+end
+
+function pol_f(k, ps, st)
+    return first(Lux.apply(pol_f_nn, k, ps, st)) 
+end
+function v_f_scalar(k, ps, st)
+    v_f([k], ps, st)[1]
+end
+
+function v_f_deriv_scalar(k, ps, st)
+    v_ed(x) = v_f_scalar(x, ps, st)
+    d = Zygote.forwarddiff(k) do k_
+        ForwardDiff.derivative(v_ed, k_)
+    end
+    return d
+end
+function v_f_deriv(k, ps, st)
+    v_f_deriv_scalar.(k, Ref(ps), Ref(st))
+end
+
 # v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> v_f([x], ps, st)[1], z), y) for y in k]
-# gpu_v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> v_f(CuArray([x]), ps, st)[1], z), y) for y in k]
-# gpu_finite_difference(vals, Float32(1e-3),  vf_ps, vf_st)
-function v_f(k::Array{Float64}, ps, st)
-    return first(Lux.apply(v_f_nn, k, ps, st))
-end
-
-
-function v_f_deriv(k, p, st)
-    _, pullback_f = Zygote.pullback((a, b) -> v_f(a, b, st), k, p)
-    df_dx_ = pullback_f(ones(size(k)))[1]
-    return df_dx_
-end
-
-
-function v_f_deriv_deriv(dfdx, k, p, st)
-    _, dfdxdp = Zygote.pullback(p -> dfdx(k, p, st), p)
-    return first(dfdxdp(ones(size(k))))
-end
-
-v_f(vals, vf_ps, vf_st)
-v_f_deriv(vals, vf_ps, vf_st)
-v_f_deriv_deriv(v_f_deriv, vals, vf_ps, vf_st)
-
-
-
-# function v_f_deriv(k::AbstractArray, ps, st)
-#     df = Zygote.pullback(x -> v_f(x, ps, st), k)[2]
-#     ones_vec = ones(size(k)) |> device
-#     return first(df(ones_vec))
-# end
-
-# function cpu_v_f_deriv(k::AbstractArray, ps, st)
-#     df = Zygote.pullback(x -> v_f(x, ps, st), k)[2]
-#     ones_vec = ones(size(k)) 
-#     return first(df(ones_vec))
-# end
-
-# using ZygoteRules
-# ZygoteRules.@adjoint function ForwardDiff.Dual{T}(x, ẋ::Tuple) where T
-#     @assert length(ẋ) == 1
-#     ForwardDiff.Dual{T}(x, ẋ), ḋ -> (ḋ.partials[1], (ḋ.value,))
-#   end
-  
-#   ZygoteRules.@adjoint ZygoteRules.literal_getproperty(d::ForwardDiff.Dual{T}, ::Val{:partials}) where T =
-#     d.partials, ṗ -> (ForwardDiff.Dual{T}(ṗ[1], 0),)
-  
-#   ZygoteRules.@adjoint ZygoteRules.literal_getproperty(d::ForwardDiff.Dual{T}, ::Val{:value}) where T =
-#     d.value, ẋ -> (ForwardDiff.Dual{T}(0, ẋ),)
-# function v_f_deriv(k::AbstractArray, ps, st)
-#     # df = Zygote.forwarddiff(z -> Zygote.pullback(x -> v_f(x, ps, st), z), k)[2]
-#     # ones_vec = ones(size(k)) 
-#     return diag(ForwardDiff.jacobian(x -> v_f(x, ps, st), k))
-#     # return first(df(ones_vec))
-# end
-
-Zygote.pullback(x -> v_f(x, vf_ps, vf_st), vals)[2]
-
-ed = Zygote.pushforward(x -> v_f(x, vf_ps, vf_st), vals)
-ed(ones(size(vals)))
-ed(1.0)
-
-
-v_f_deriv(vals, vf_ps, vf_st)
-
-@btime fwd_v_f_deriv(vals, vf_ps, vf_st);
-
 using BenchmarkTools
-v_f(vals, vf_ps, vf_st)
-pol_f(vals, pol_ps, pol_st)
-@btime v_f_deriv(vals, vf_ps, vf_st);
-
-# @btime v_f(vals, vf_ps, vf_st);
-# @btime v_f(cpu_vals, cpu_vf_ps, cpu_vf_st)
-
-# @btime pol_f(vals, vf_ps, vf_st);
-# @btime pol_f(cpu_vals, cpu_vf_ps, cpu_vf_st)
+# v_f_deriv_scalar(1.0, vf_ps, vf_st)
+# @btime v_f_deriv(vals, vf_ps, vf_st);
+# @btime old_v_f_deriv(vals, vf_ps, vf_st);
 
 # @btime v_f_deriv(vals, vf_ps, vf_st);
-# @btime v_f_deriv(cpu_vals, cpu_vf_ps, cpu_vf_st)
 
-# plot(
-#     vec_vals,
-#     v_f(vals, vf_ps, vf_st)',
-#     seriestype = :scatter,
-#     label = "",
-#     colour = :black
-# )
-# plot(
-#     vec_vals,
-#     v_f_deriv(vals, vf_ps, vf_st)',
-#     seriestype = :scatter,
-#     label = "",
-#     colour = :red
-# )
+# @btime l, b = Zygote.pullback(vf_ps) do p
+#     v_f_deriv(vals, p, vf_st)
+# end;
+# l
+# b(vf_ps)
+
+
+# @btime l, b = Zygote.pullback(vf_ps) do p
+#     old_v_f_deriv(vals, p, vf_st)
+# end;
+# l
+# b(vf_ps)
+
+# v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> v_f([x], ps, st)[1], z), y) for y in k]
+
+# function dfx(f, k, p, st)
+#     _, back = Zygote.pullback(k) do k_
+#         Zygote.forwarddiff(k_) do k_
+#             f(k_, p, st)
+#         end
+#     end
+#     return back(ones(size(k)))[1]
+# end
+# l, b = Zygote.pullback(vf_ps) do p
+#     dfx(v_f, vals, p, vf_st)
+# end;
+# b(ones(size(vals)))
+# function reverse_dfx(f, k, p, st)
+#     _, back = Zygote.pullback(k) do k_
+#             f(k_, p, st)
+#     end
+#     return back(ones(size(k)))[1] 
+# end
+
+# dfx(v_f, vals, vf_ps, vf_st)
+# using BenchmarkTools
+# @btime v_f(vals, vf_ps, vf_st);
+# @btime dfx(v_f, vals, vf_ps, vf_st);
+# @btime reverse_dfx(v_f, vals, vf_ps, vf_st);
+
+# v_f(vals, vf_ps, vf_st)
+# dfx(v_f, vals, vf_ps, vf_st)
+# reverse_dfx(v_f, vals, vf_ps, vf_st)
+
+# l, b = Zygote.pullback(vf_ps) do p
+#     dfx(v_f, vals, p, vf_st)
+# end;
+
+# l
+# b(vals)
+
+# @btime l, b = Zygote.pullback(vf_ps) do p
+#     dfx(v_f, vals, p, vf_st)
+# end;
+
+# @btime rev_l, rev_b = Zygote.pullback(vf_ps) do p
+#     reverse_dfx(v_f, vals, p, vf_st)
+# end;
+
+# b(ones(size(vals)))
+# rev_b(ones(size(vals)))
+
+# b(1.0)
+
+# using BenchmarkTools
+# v_f(vals, vf_ps, vf_st)
+# pol_f(vals, pol_ps, pol_st)
+# @btime v_f_deriv(vals, vf_ps, vf_st);
+
 
 
 using BenchmarkTools
@@ -403,11 +319,12 @@ using BenchmarkTools
 # @btime v_f_deriv(vals, vf_ps, vf_st);
 
 
-param_vec = ComponentArray(vf = vf_ps, pol = pol_ps) |> device
+# param_vec = ComponentArray(vf = vf_ps, pol = pol_ps) |> device
 states = (vf_st, pol_st) |> device
+params = (vf_ps, pol_ps) |> device
 opt = Optimisers.ADAM() 
 
-st_opt = Optimisers.setup(ADAM(), param_vec) |> device
+st_opt = Optimisers.setup(ADAM(), params) |> device
 
 
 
@@ -433,7 +350,7 @@ function loss_fn(x, m, vf_ps, pol_ps, vf_st, pol_st)
     # loss += monotonicity_penalty(v_f_k) 
     # lipschitz cost
     # loss += calculate_lipschitz_constant(vec_x, v_f_k) 
-    return loss, vf_st, pol_st
+    return loss
 end
 
 
@@ -482,22 +399,27 @@ plot_pred_output(vals, v_f_k, v_f_deriv_k, pol_f_k)
 loss_fn(vals, m, vf_ps, pol_ps, vf_st, pol_st)
 
 
+l, back = Zygote.pullback(params) do p
+    loss_fn(vals, m, p[1], p[2], states[1], states[2])
+end;
 
-epoch_list = []
-loss_list = []
-# for epoch in 1:1_000_000
-epoch = 1
+l
+back(1.0)
 
-    (loss, states...), back = Zygote.pullback(param_vec) do p
-        loss_fn(vals, m, p.vf, p.pol, states[1], states[2])
+epoch_list = [0]
+loss_list = [Inf]
+for epoch in epoch_list[end]:1_000_000
+# epoch = 1
+    loss, back = Zygote.pullback(params) do p
+        loss_fn(vals, m, p[1], p[2], states[1], states[2])
     end
-    grads = back((1.0, nothing, nothing))[1]
+    grads = back(1.0)[1]
     epoch % 500 == 1 && println("Epoch: $(epoch) | Loss: $(loss)")
 
     if epoch % 500 == 1
         push!(epoch_list, epoch)
         push!(loss_list, loss)
-        v_f_k, v_f_deriv_k, pol_f_k = predict_fn(vals, param_vec.vf, param_vec.pol, states[1], states[2])
+        v_f_k, v_f_deriv_k, pol_f_k = predict_fn(vals, params[1], params[2], states[1], states[2])
         kdot = production_function(m, vec_vals) .- m.δ .* vec_vals .- pol_f_k
         hjb_err, pol_err = err_HJB(vec(vals), m, v_f_k, v_f_deriv_k, pol_f_k)
 
@@ -538,7 +460,7 @@ epoch = 1
         display(p_all)
     end
     # println("Epoch: $(epoch) | Loss: $(loss)")
-    Optimisers.update!(st_opt, param_vec, grads)
+    Optimisers.update!(st_opt, params, grads)
 end
 
 savefig("skiba-nn-fit.pdf")
