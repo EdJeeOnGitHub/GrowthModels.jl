@@ -91,17 +91,31 @@ end
 Lux.initialstates(::AbstractRNG, ::GrowthModelLayer) = NamedTuple()
 Lux.parameterlength(l::GrowthModelLayer) = l.out_dims * l.in_dims + l.out_dims
 
-function (l::MicawberLayer)(x::Union{AbstractVecOrMat, T}, ps, st::NamedTuple) where {T <: Real}
+m = SkibaModel()
+isa(m, SkibaModel)
+params(m)
+
+
+function (l::MicawberLayer)(x::Union{AbstractVecOrMat, T}, ps, st::NamedTuple, m::Model) where {T <: Real}
+    k = x[1, :]
+    γ, α, ρ, δ, A_H, A_L, κ = x[2, :], x[3, :], x[4, :], x[5, :], x[6, :], x[7, :], x[8, :]
+    k_s = κ ./ (1 .- (A_L ./ A_H).^(1 ./ α))
+
     # abs to ensure positive in input layer
     # difference between x and k_star
-    y = (abs.(ps.weight) * (x .- k_star(m))) .+ ps.bias
+    y = (abs.(ps.weight) * (k .- k_s)) .+ ps.bias
     return l.activation.(y), st
 end
-function (l::SteadyStateLayer)(x::Union{AbstractVecOrMat, T}, ps, st::NamedTuple) where {T <: Real}
+
+function (l::SteadyStateLayer)(x::Union{AbstractVecOrMat, T}, ps, st::NamedTuple, m::Model) where {T <: Real}
+    k = x[1, :]
+    γ, α, ρ, δ, A_H, A_L, κ = x[2, :], x[3, :], x[4, :], x[5, :], x[6, :], x[7, :], x[8, :]
     # abs to ensure positive in input layer
     # difference between x and k_star
-    k_ss = k_steady_state(m, device)
-    diff = -1.0f32 .* (k_ss .- x)
+    k_ss_hi = k_steady_state_hi_Skiba.(α, A_H, ρ, δ, κ)
+    k_ss_lo = k_steady_state_lo_Skiba.(α, A_L, ρ, δ)
+    k_ss = [k_ss_lo, k_ss_hi] |> device
+    diff = -1.0f32 .* (k_ss .- k)
     abs_diff = abs.(diff)
     distances_indices = argmin(abs_diff, dims = 1)
     distances = diff[distances_indices]
@@ -151,22 +165,28 @@ end
 
 
 m = SkibaModel{Float32}() |> device
+model_params = params(m)
+n_params = length(model_params)
+
 batch_size = 1_00
 
 grid_vals = reshape(collect(range(0.1, 2*k_star(m), length = batch_size)), (1, batch_size))
-vals = grid_vals
+grid_vals = sort(grid_vals, dims =1)
+param_grid = repeat(model_params, 1, batch_size)
+vals = vcat(grid_vals, param_grid)
 vals = abs.(vals)
-cpu_vals = sort(vals, dims = 1)
-vals = sort(vals, dims = 1) |> device
-vec_vals = vec(vals)
+cpu_vals = vals
+vals = vals |> device
+vec_vals = vec(vals[1, :])
 c_size = 24
 n_size = 48
+
 v_f_nn = Chain(
     # both read in simultaneously
     Parallel(
         nothing,
-        MicawberLayer(1, c_size, tanh, m),
-        SteadyStateLayer(1, c_size, tanh, m),
+        MicawberLayer(1 + n_params, c_size, tanh, m),
+        SteadyStateLayer(1 + n_params, c_size, tanh, m),
         NoOpLayer()
     ),
     x -> vcat(x...),
@@ -174,26 +194,12 @@ v_f_nn = Chain(
     PositiveDense(n_size, n_size),
     PositiveDense(n_size, 1)
 )
-# v_f_nn = Chain(
-#     # both read in simultaneously
-#     PositiveDense(1, n_size),
-#     PositiveDense(n_size, n_size),
-#     PositiveDense(n_size, n_size),
-#     PositiveDense(n_size, 1)
-# )
-
-# pol_f_nn = Chain(
-#     Dense(1 => n_size, tanh),
-#     Dense(n_size => n_size, tanh),
-#     Dense(n_size => n_size, tanh),
-#     Dense(n_size => 1, softplus),
-# )
 
 pol_f_nn = Chain(
     Parallel(
         nothing,
-        SteadyStateLayer(1, c_size, tanh, m),
-        MicawberLayer(1, c_size, tanh, m),
+        SteadyStateLayer(1 + n_params, c_size, tanh, m),
+        MicawberLayer(1 + n_params, c_size, tanh, m),
         NoOpLayer()
     ),
     x -> vcat(x...),
