@@ -11,21 +11,32 @@
 # Util functions to dispatch on for Skiba models
 # Create a HyperParams object from a SkibaModel
 # use high steady state to guide grid formation
-function StateSpaceHyperParams(m::SkibaModel{T}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001) where {T <: Real}
+function StateSpaceHyperParams(m::SkibaModel{T}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001) where {T <: Real} 
     kssH = k_steady_state_hi(m)
     kmin, kmax = kmin_f*kssH, kmax_f*kssH
-    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin)
+    k_hps = HyperParams{T}(N = Nk, xmax = kmax, xmin = kmin)
     return StateSpaceHyperParams((k = k_hps,))
 end
 
-function StateSpace(m::SkibaModel, statespacehyperparams::StateSpaceHyperParams)
+function StateSpace(m::SkibaModel{T}, statespacehyperparams::StateSpaceHyperParams{T}) where {T <: Real}
     k_hps = statespacehyperparams[:k]
     k = collect(range(k_hps.xmin, k_hps.xmax, length = k_hps.N))
     y = production_function(m, k)
     StateSpace((k = k,), (y = y,))
 end
 
+# If passed Float32, return create arrays on GPU 
+function StateSpace(m::SkibaModel{Float32}, statespacehyperparams::StateSpaceHyperParams{Float32}) 
+    k_hps = statespacehyperparams[:k]
+    k = CUDA.LinRange(k_hps.xmin, k_hps.xmax, k_hps.N) |> CuArray
+    y = production_function(m, k) # Assume this function is also GPU-compatible
+    StateSpace((k = k,), (y = y,))
+end
 
+
+function SkibaModel{T}(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0) where {T<: Real}
+    SkibaModel{T}(γ, α, ρ, δ, A_H, A_L, κ)
+end
 
 function SkibaModel(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0)
     SkibaModel(γ, α, ρ, δ, A_H, A_L, κ)
@@ -45,26 +56,27 @@ y_H(m::SkibaModel) = (k) -> m.A_H*max(k - m.κ,0)^m.α
 y_L(m::SkibaModel) = (k) -> m.A_L*k^m.α 
 
 # Skiba production function
-@inline function skiba_production_function(k, α, A_H, A_L, κ)
-    max(A_H * pow(max(k - κ, 0), α), A_L * pow(k, α))
-end
+# @inline function skiba_production_function(k, α, A_H, A_L, κ)
+#     max(A_H * pow(max(k - κ, 0), α), A_L * pow(k, α))
+# end
+@inline skiba_production_function(k, α, A_H, A_L, κ) = max(A_H .* max(k - κ, 0).^α, A_L .* (k .^ α))
 # derivative of skiba production function
 @inline function skiba_production_function_prime(k, α, A_H, A_L, κ)
     if k > κ
-        A_H * α * pow(k - κ, α - 1)
+        A_H * α * (k - κ) ^ ( α - 1)
     else
-        A_L * α * pow(k, α - 1)
+        A_L * α * k ^ (α - 1)
     end
 end
 
 
-@inline production_function(::SkibaModel, k::Union{Real,Vector{<:Real}}, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function.(k, α, A_H, A_L, κ)
-@inline production_function(::SkibaModel, k::Union{Real,Vector{<:Real}}, params::Vector) = skiba_production_function.(k, params[1], params[2], params[3], params[4])
-@inline production_function(m::SkibaModel, k::Union{Real,Vector{<:Real}}) = skiba_production_function.(k, m.α, m.A_H, m.A_L, m.κ)
+@inline production_function(::SkibaModel, k, α::T, A_H::T, A_L::T, κ::T) where {T <: Real} = skiba_production_function.(k, α, A_H, A_L, κ)
+@inline production_function(::SkibaModel, k, params::AbstractArray) = skiba_production_function.(k, params[1], params[2], params[3], params[4])
+@inline production_function(m::SkibaModel, k) = skiba_production_function.(k, m.α, m.A_H, m.A_L, m.κ)
 
-@inline production_function_prime(::SkibaModel, k::Union{Real,Vector{<:Real}}, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function_prime.(k, α, A_H, A_L, κ)
-@inline production_function_prime(::SkibaModel, k::Union{Real,Vector{<:Real}}, params::Vector) = skiba_production_function_prime.(k, params[1], params[2], params[3], params[4])
-@inline production_function_prime(m::SkibaModel, k::Union{Real,Vector{<:Real}}) = skiba_production_function_prime.(k, m.α, m.A_H, m.A_L, m.κ)
+@inline production_function_prime(::SkibaModel, k, α::T, A_H::T, A_L::T, κ::T) where {T <: Real} = skiba_production_function_prime.(k, α, A_H, A_L, κ)
+@inline production_function_prime(::SkibaModel, k, params::AbstractArray) = skiba_production_function_prime.(k, params[1], params[2], params[3], params[4])
+@inline production_function_prime(m::SkibaModel, k) = skiba_production_function_prime.(k, m.α, m.A_H, m.A_L, m.κ)
 
 
 

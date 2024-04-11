@@ -36,7 +36,7 @@ end
 # ensures each state variable is a vector with same dimension
 # probably not a great modification but makes things easier for me 
 # when I create a struct to hold value functions
-struct StateSpace{T, N, D, C <: NamedTuple, A <: NamedTuple} 
+struct StateSpace{T, N, D, C, A} 
     state::C
     aux_state::A
 end
@@ -60,24 +60,24 @@ function Base.getindex(statespace::StateSpace, args::CartesianIndex)
 end
 Base.getindex(statespace::StateSpace, x::Symbol) = statespace.state[x]
 
-struct HyperParams
-    N::Int64
-    dx::Real
-    xmin::Real
-    xmax::Real
-    function HyperParams(; N = 1000, xmin = 0.001, xmax = 10.0)
+struct HyperParams{T <: Real} 
+    N::Int
+    dx::T
+    xmin::T
+    xmax::T
+    function HyperParams{T}(; N = 1000, xmin = 0.001, xmax = 10.0) where {T <: Real}
         dx = (xmax - xmin) / (N - 1) 
-        new(N, dx, xmin, xmax)
+        new{T}(N, dx, xmin, xmax)
     end
 end
 
-struct StateSpaceHyperParams{N, D}
+struct StateSpaceHyperParams{T, N, D}
     hyperparams::NamedTuple
 end
 
-function StateSpaceHyperParams(hyperparams::NamedTuple{Names, <: NTuple{N, <: HyperParams}}) where {Names, N}
+function StateSpaceHyperParams(hyperparams::NamedTuple{Names, <: NTuple{N, <: HyperParams{T}}}) where {Names, N, T}
     D = ntuple(i -> hyperparams[i].N, N)
-    StateSpaceHyperParams{N,D}(hyperparams)
+    StateSpaceHyperParams{T, N, D}(hyperparams)
 end
 Base.getindex(statespacehyperparams::StateSpaceHyperParams, x::Symbol) = statespacehyperparams.hyperparams[x]
 Base.size(::StateSpaceHyperParams{N, D}) where {N, D} = D
@@ -88,14 +88,13 @@ Base.size(h::HyperParams) = (h.N,)
 
 
 
-function StateSpace(statespacehyperparams::StateSpaceHyperParams{N, D}, aux_state::NamedTuple) where {N, D}
+function StateSpace(statespacehyperparams::StateSpaceHyperParams{T, N, D}, aux_state::NamedTuple) where {T, N, D}
     names = keys(statespacehyperparams.hyperparams)
     values = map(
         x -> collect(
             range(x.xmin, x.xmax, length = x.N)
         ), statespacehyperparams.hyperparams)
     state = NamedTuple(zip(names, values))
-    T = typeof(first(values))
     StateSpace{T, N, D, typeof(state), typeof(aux_state)}(state, aux_state)
 end
 
@@ -103,13 +102,26 @@ end
 
 # Struct to hold value function, its derivatives, and convergence diagnostics
 struct Value{T, D} 
-    v::Array{T, D}
-    dVf::Array{T, D}
-    dVb::Array{T, D}
-    dV0::Array{T, D}
-    dist::Vector{Float64}
+    v::AbstractArray{T, D}
+    dVf::AbstractArray{T, D}
+    dVb::AbstractArray{T, D}
+    dV0::AbstractArray{T, D}
+    dist::Union{AbstractVector{Float64},AbstractVector{Float32}}
     convergence_status::Bool
-    iter::Int64
+    iter::Int
+end
+
+
+function Value(::StateSpace{Float32, N, D, C}) where {N, D, C <: NamedTuple}
+    v = CUDA.zeros(Float32, D)
+    dVf = CUDA.zeros(Float32, D)
+    dVb = CUDA.zeros(Float32, D)
+    dV0 = CUDA.zeros(Float32, D)
+
+    dist = [Float32(Inf)]
+    convergence_status = false
+    iter = 0
+    Value(v, dVf, dVb, dV0, dist, convergence_status, iter)
 end
 
 function Value(::StateSpace{T, N, D, C }) where {T, N, D, C <: NamedTuple}

@@ -9,6 +9,7 @@ module GrowthModels
     using OrdinaryDiffEq, Interpolations
     using NaNMath: pow
     using ForwardDiff
+    using CUDA
     using Random
     import Base:\
     using StatsBase
