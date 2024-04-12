@@ -28,12 +28,12 @@ m = SkibaModel{Float32}() |> device
 model_params = Float32.(params(m))
 n_params = length(model_params)
 
-batch_size = 1000
+batch_size = 500
 using BenchmarkTools
 
 
-c_size = 24
-n_size = 48
+c_size = 12
+n_size = 24
 
 v_f_nn = Chain(
     # both read in simultaneously
