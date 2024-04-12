@@ -5,179 +5,33 @@ using Zygote
 using ForwardDiff, LinearAlgebra
 using LuxCUDA
 using Plots
+using Sobol
 
+include("SolveNeuralModel.jl")
+using .NeuralGrowthModel
+benchmark = false
+CUDA.allowscalar(false)
 
 Random.seed!(1234)
-device = cpu_device()
+cpu_dev = cpu_device()
+device = gpu_device()
 # Stuff for GPU
-skiba_production_function(k, α, A_H, A_L, κ) = max(A_H .* max(k - κ, 0).^α, A_L .* (k .^ α))
-@inline GrowthModels.production_function(::SkibaModel, k::Union{Real,AbstractArray}, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function(k, α, A_H, A_L, κ)
-@inline GrowthModels.production_function(::SkibaModel, k::Union{Real,AbstractArray}, params::Vector) = skiba_production_function.(k, params[1], params[2], params[3], params[4])
-@inline GrowthModels.production_function(m::SkibaModel, k::Union{Real,AbstractArray}) = skiba_production_function.(k, m.α, m.A_H, m.A_L, m.κ)
-GrowthModels.k_steady_state(m, device::Lux.AbstractLuxDevice) = device(k_steady_state(m))
+# @inline GrowthModels.production_function(::SkibaModel, k::Union{Real,AbstractArray}, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function(k, α, A_H, A_L, κ)
+# @inline GrowthModels.production_function(::SkibaModel, k::Union{Real,AbstractArray}, params::Vector) = skiba_production_function.(k, params[1], params[2], params[3], params[4])
+# @inline GrowthModels.production_function(m::SkibaModel, k::Union{Real,AbstractArray}) = skiba_production_function.(k, m.α, m.A_H, m.A_L, m.κ)
+# GrowthModels.k_steady_state(m, device::Lux.AbstractLuxDevice) = device(k_steady_state(m))
 function SkibaModel{T}(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0) where {T<: Real}
     SkibaModel{T}(γ, α, ρ, δ, A_H, A_L, κ)
 end
 
-
-
-struct PositiveDense{F1, F2} <: Lux.AbstractExplicitLayer
-    activation
-    in_dims::Int
-    out_dims::Int
-    init_weight::F1
-    init_bias::F2
-end
-function PositiveDense(in_dims::Int, out_dims::Int, activation = identity; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
-    return PositiveDense{typeof(init_weight), typeof(init_bias)}(activation, in_dims, out_dims, init_weight, init_bias)
-end
-
-function Base.show(io::IO, d::PositiveDense)
-    print(io, "PositiveDense($(d.in_dims) => $(d.out_dims))")
-    (d.activation == identity) || print(io, ", $(d.activation)")
-    return print(io, ")")
-end
-
-function Lux.initialparameters(rng::AbstractRNG, layer::PositiveDense)
-    w = layer.init_weight(rng, layer.out_dims, layer.in_dims)
-    b = layer.init_bias(rng, layer.out_dims, 1)
-    return (weight = w, bias = b)
-end
-
-Lux.initialstates(::AbstractRNG, ::PositiveDense) = NamedTuple()
-Lux.parameterlength(l::PositiveDense) = l.out_dims * l.in_dims + l.out_dims
-Lux.statelength(::PositiveDense) = 0
-
-
-@inline function (l::PositiveDense)(x::AbstractVecOrMat, ps, st::NamedTuple)
-    # exp to ensure positive in input layer
-    y = (abs.(ps.weight) * x) .+ ps.bias
-    return l.activation.(y), st
-end
-
-abstract type GrowthModelLayer <: Lux.AbstractExplicitLayer end
-
-struct MicawberLayer{F1, F2} <: GrowthModelLayer 
-    activation
-    m::Model
-    in_dims::Int
-    out_dims::Int
-    init_weight::Function
-    init_bias::Function
-end
-
-struct SteadyStateLayer{F1, F2} <: GrowthModelLayer
-    activation
-    m::Model
-    in_dims::Int
-    out_dims::Int
-    init_weight::Function
-    init_bias::Function
-end
-
-function MicawberLayer(in_dims::Int, out_dims::Int, activation, m::Model; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
-    return MicawberLayer{typeof(init_weight), typeof(init_bias)}(activation, m, in_dims, out_dims, init_weight, init_bias)
-end
-
-function SteadyStateLayer(in_dims::Int, out_dims::Int, activation, m::Model; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
-    return SteadyStateLayer{typeof(init_weight), typeof(init_bias)}(activation, m, in_dims, out_dims, init_weight, init_bias)
-end
-
-function Lux.initialparameters(rng::AbstractRNG, layer::GrowthModelLayer)
-    w = layer.init_weight(rng, layer.out_dims, layer.in_dims)
-    b = layer.init_bias(rng, layer.out_dims, 1)
-    return (weight = w, bias = b)
-end
-Lux.initialstates(::AbstractRNG, ::GrowthModelLayer) = NamedTuple()
-Lux.parameterlength(l::GrowthModelLayer) = l.out_dims * l.in_dims + l.out_dims
-
-m = SkibaModel()
-isa(m, SkibaModel)
-params(m)
-
-
-function (l::MicawberLayer)(x::Union{AbstractVecOrMat, T}, ps, st::NamedTuple, m::Model) where {T <: Real}
-    k = x[1, :]
-    γ, α, ρ, δ, A_H, A_L, κ = x[2, :], x[3, :], x[4, :], x[5, :], x[6, :], x[7, :], x[8, :]
-    k_s = κ ./ (1 .- (A_L ./ A_H).^(1 ./ α))
-
-    # abs to ensure positive in input layer
-    # difference between x and k_star
-    y = (abs.(ps.weight) * (k .- k_s)) .+ ps.bias
-    return l.activation.(y), st
-end
-
-function (l::SteadyStateLayer)(x::Union{AbstractVecOrMat, T}, ps, st::NamedTuple, m::Model) where {T <: Real}
-    k = x[1, :]
-    γ, α, ρ, δ, A_H, A_L, κ = x[2, :], x[3, :], x[4, :], x[5, :], x[6, :], x[7, :], x[8, :]
-    # abs to ensure positive in input layer
-    # difference between x and k_star
-    k_ss_hi = k_steady_state_hi_Skiba.(α, A_H, ρ, δ, κ)
-    k_ss_lo = k_steady_state_lo_Skiba.(α, A_L, ρ, δ)
-    k_ss = [k_ss_lo, k_ss_hi] |> device
-    diff = -1.0f32 .* (k_ss .- k)
-    abs_diff = abs.(diff)
-    distances_indices = argmin(abs_diff, dims = 1)
-    distances = diff[distances_indices]
-
-    y = (abs.(ps.weight) * distances) .+ ps.bias
-    return l.activation.(y), st
-end
-
-
-function err_HJB(k, model, v_f_k, v_f_deriv_k, pol_f_k)
-    (; ρ, δ, γ) = model
-    (; γ, α, ρ, δ, A_H, A_L, κ) = model
-
-    c = v_f_deriv_k .^ (-1 / γ)
-    hjb_err = ρ .* v_f_k  .- (c .^ (1 - γ)) ./ (1 - γ) .- v_f_deriv_k .* (production_function(m, k) .- δ .* k .- pol_f_k)
-    pol_err = c .- pol_f_k
-    return hjb_err, pol_err
-end
-
-function monotonicity_penalty(outputs)
-    penalty = 0.0
-    for i in 2:length(outputs)
-        # Assuming outputs are meant to be increasing
-        penalty += max(0.0, outputs[i-1] - outputs[i])
-    end
-    return penalty
-end
-function calculate_lipschitz_constant(xs, ys)
-    n = length(xs)
-    max_ratio = 0.0
-    
-    for i in 1:n-1
-        # Compute the difference ratio for adjacent pairs of points
-        y_diff = abs(ys[i+1] - ys[i])
-        x_diff = abs(xs[i+1] - xs[i])
-        
-        # Avoid division by zero
-        if x_diff != 0
-            ratio = y_diff / x_diff
-            max_ratio = max(max_ratio, ratio)
-        end
-    end
-    
-    return max_ratio
-end
-
-
-
 m = SkibaModel{Float32}() |> device
-model_params = params(m)
+model_params = Float32.(params(m))
 n_params = length(model_params)
 
-batch_size = 1_00
+batch_size = 1000
+using BenchmarkTools
 
-grid_vals = reshape(collect(range(0.1, 2*k_star(m), length = batch_size)), (1, batch_size))
-grid_vals = sort(grid_vals, dims =1)
-param_grid = repeat(model_params, 1, batch_size)
-vals = vcat(grid_vals, param_grid)
-vals = abs.(vals)
-cpu_vals = vals
-vals = vals |> device
-vec_vals = vec(vals[1, :])
+
 c_size = 24
 n_size = 48
 
@@ -185,295 +39,242 @@ v_f_nn = Chain(
     # both read in simultaneously
     Parallel(
         nothing,
-        MicawberLayer(1 + n_params, c_size, tanh, m),
-        SteadyStateLayer(1 + n_params, c_size, tanh, m),
+        MicawberLayer(1 + n_params, c_size, relu, m),
+        SteadyStateLayer(1 + n_params, c_size, relu, m),
         NoOpLayer()
     ),
     x -> vcat(x...),
-    PositiveDense(c_size*2 + 1, n_size),
-    PositiveDense(n_size, n_size),
-    PositiveDense(n_size, 1)
+    Dense(c_size*2 + 1 + n_params, n_size, relu),
+    Dense(n_size, n_size, relu),
+    Dense(n_size, 1)
 )
 
 pol_f_nn = Chain(
     Parallel(
         nothing,
-        SteadyStateLayer(1 + n_params, c_size, tanh, m),
-        MicawberLayer(1 + n_params, c_size, tanh, m),
+        SteadyStateLayer(1 + n_params, c_size, relu, m),
+        MicawberLayer(1 + n_params, c_size, relu, m),
         NoOpLayer()
     ),
     x -> vcat(x...),
-    Dense(c_size*2 + 1 => n_size, tanh),
-    Dense(n_size => n_size, tanh),
+    Dense(c_size*2 + 1 + n_params => n_size, relu),
+    Dense(n_size => n_size, relu),
     Dense(n_size => 1, softplus),
 )
 
+# v_f_nn = Chain(PositiveDense(1 + n_params, 1))
+# pol_f_nn = Chain(Dense(1 + n_params, 1, softplus))
+
+
+# Creating input variables for testing
+vals = generate_grid_values(m, batch_size)
+cpu_vals = deepcopy(vals)
+cpu_k_vals = vec(cpu_vals[1, :])
+cpu_param_vals = cpu_vals[2:end, :]
+vals = vals |> device
+k_vals = vec(vals[1, :])
+param_vals = vals[2:end, :]
+
+# Setting up NN params
 rng = Random.default_rng()
+# Version on the CPU
 cpu_vf_ps, cpu_vf_st = Lux.setup(rng, v_f_nn) 
 cpu_pol_ps, cpu_pol_st = Lux.setup(rng, pol_f_nn) 
 
 vf_ps, vf_st = Lux.setup(rng, v_f_nn) .|> device
 pol_ps, pol_st = Lux.setup(rng, pol_f_nn) .|> device
 
-vf_y, vf_st = Lux.apply(v_f_nn, vals, vf_ps, vf_st)
-
-
-function v_f(k, ps, st)
-    return first(Lux.apply(v_f_nn, k, ps, st)) 
-end
-
-function pol_f(k, ps, st)
-    return first(Lux.apply(pol_f_nn, k, ps, st)) 
-end
-function v_f_scalar(k, ps, st)
-    first(v_f(k, ps, st))
-end
-
-# function v_f_deriv_scalar(k, ps, st)
-#     v_ed(x) = v_f_scalar(x, ps, st)
-#     # d = Zygote.forwarddiff(k) do k_
-#     #     ForwardDiff.derivative(v_ed, k_)
-#     # end
-#     d = ForwardDiff.derivative(v_ed, k)
-#     return d
-# end
-# function v_f_deriv(k, ps, st)
-#     v_f_deriv_scalar.(k, Ref(ps), Ref(st))
-# end
-
-v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> first(v_f(x, ps, st)), z), y) for y in k] |> device
-# v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> v_f([x], ps, st)[1], z), y) for y in k]
-using BenchmarkTools
-# v_f_deriv_scalar(1.0, vf_ps, vf_st)
-# @btime v_f_deriv(vals, vf_ps, vf_st);
-# @btime old_v_f_deriv(vals, vf_ps, vf_st);
-
-# @btime v_f_deriv(vals, vf_ps, vf_st);
-
-l, b = Zygote.pullback(vf_ps) do p
-    v_f_deriv(vals, p, vf_st)
-end;
-
-
-using Enzyme
-
-# l
-# b(vf_ps)
-
-
-# @btime l, b = Zygote.pullback(vf_ps) do p
-#     old_v_f_deriv(vals, p, vf_st)
-# end;
-# l
-# b(vf_ps)
-
-# v_f_deriv(k, ps, st) = [Zygote.forwarddiff(z -> ForwardDiff.derivative(x -> v_f([x], ps, st)[1], z), y) for y in k]
-
-# function dfx(f, k, p, st)
-#     _, back = Zygote.pullback(k) do k_
-#         Zygote.forwarddiff(k_) do k_
-#             f(k_, p, st)
-#         end
-#     end
-#     return back(ones(size(k)))[1]
-# end
-# l, b = Zygote.pullback(vf_ps) do p
-#     dfx(v_f, vals, p, vf_st)
-# end;
-# b(ones(size(vals)))
-# function reverse_dfx(f, k, p, st)
-#     _, back = Zygote.pullback(k) do k_
-#             f(k_, p, st)
-#     end
-#     return back(ones(size(k)))[1] 
-# end
-
-# dfx(v_f, vals, vf_ps, vf_st)
-# using BenchmarkTools
-# @btime v_f(vals, vf_ps, vf_st);
-# @btime dfx(v_f, vals, vf_ps, vf_st);
-# @btime reverse_dfx(v_f, vals, vf_ps, vf_st);
-
-# v_f(vals, vf_ps, vf_st)
-# dfx(v_f, vals, vf_ps, vf_st)
-# reverse_dfx(v_f, vals, vf_ps, vf_st)
-
-# l, b = Zygote.pullback(vf_ps) do p
-#     dfx(v_f, vals, p, vf_st)
-# end;
-
-# l
-# b(vals)
-
-# @btime l, b = Zygote.pullback(vf_ps) do p
-#     dfx(v_f, vals, p, vf_st)
-# end;
-
-# @btime rev_l, rev_b = Zygote.pullback(vf_ps) do p
-#     reverse_dfx(v_f, vals, p, vf_st)
-# end;
-
-# b(ones(size(vals)))
-# rev_b(ones(size(vals)))
-
-# b(1.0)
-
-# using BenchmarkTools
-# v_f(vals, vf_ps, vf_st)
-# pol_f(vals, pol_ps, pol_st)
-# @btime v_f_deriv(vals, vf_ps, vf_st);
-
-
-
-using BenchmarkTools
-# @btime v_f(vals, vf_ps, vf_st);
-# @btime pol_f(vals, pol_ps, pol_st);
-# @btime v_f_deriv(vals, vf_ps, vf_st);
-
-
-# param_vec = ComponentArray(vf = vf_ps, pol = pol_ps) |> device
 states = (vf_st, pol_st) |> device
-params = (vf_ps, pol_ps) |> device
+nn_params = (vf_ps, pol_ps) |> device
 opt = Optimisers.ADAM() 
-
-st_opt = Optimisers.setup(ADAM(), params) |> device
-
+st_opt = Optimisers.setup(ADAM(), nn_params) |> device
 
 
-function predict_fn(x, vf_ps, pol_ps, vf_st, pol_st)
-    v_f_k = v_f(x, vf_ps, vf_st)
-    v_f_deriv_k = v_f_deriv(x, vf_ps, vf_st)
-    pol_f_k = pol_f(x, pol_ps, pol_st)
-    return  vec(v_f_k), vec(v_f_deriv_k), vec(pol_f_k)
+fns = (v_f, v_f_deriv, pol_f)
+nets = (v_f_nn, pol_f_nn)
+
+
+v_f_k, v_f_deriv_k, pol_f_k = predict_fn(fns, nets, k_vals, param_vals, vf_ps, pol_ps, vf_st, pol_st)
+
+
+
+
+plot(
+    Array(k_vals), Array(v_f_k),
+    seriestype = :scatter,
+    colour = :blue,
+    label = "NN \$V(k)\$",
+    xlabel = "\$k\$",
+    ylabel = "\$V(k)\$",
+    )
+plot!(
+    Array(k_vals), Array(v_f_deriv_k),
+    seriestype = :scatter,
+    colour = :blue,
+    label = "NN \$V(k)\$",
+    xlabel = "\$k\$",
+    ylabel = "\$V(k)\$",
+    )
+k_vals
+
+hjb_err, pol_err = err_HJB(k_vals, param_vals, v_f_k, v_f_deriv_k, pol_f_k)
+
+
+neg_deriv_cost = max.(0, -v_f_deriv_k)
+
+n_k = length(k_vals)
+loss = sqrt(sum(abs2, hjb_err) / n_k)  + 
+        sqrt(sum(abs2, pol_err)  / n_k) +
+        sqrt(sum(abs2, neg_deriv_cost) / n_k)
+
+
+
+# l, back = Zygote.pullback(nn_params) do p
+#     loss_fn(fns, nets, k_vals, param_vals, p[1], p[2], states[1], states[2])
+# end;
+
+
+skiba_sobol_seq = generate_model_values("SkibaModel")
+
+# make sure A_H > A_L
+param_reshuffle = function(p)
+    new_p = copy(p)
+    new_p[5] = p[5] + p[6]
+    return new_p
 end
 
-function loss_fn(x, m, vf_ps, pol_ps, vf_st, pol_st)
-    v_f_k, v_f_deriv_k, pol_f_k = predict_fn(x, vf_ps, pol_ps, vf_st, pol_st)
-    vec_x = vec(x)
-    hjb_err, pol_err = err_HJB(vec_x, m, v_f_k, v_f_deriv_k, pol_f_k)
+function check_statespace(m)
+    hps = StateSpaceHyperParams(m)
+    statespace = StateSpace(m, hps)
+    max_statespace_constraint = statespace.aux_state.y[end] - m.δ * maximum(statespace[:k])
+    min_statespace_constraint = statespace.aux_state.y[1] - m.δ * minimum(statespace[:k])
+    state_error =  max_statespace_constraint < 0 || min_statespace_constraint < 0
+    return state_error
+end
 
-    # kdot = production_function(m, vec_x) .- m.δ .* vec_x .- pol_f_k
-    # kt1 = vec_x .+ kdot
-    n_k = length(vec_x)
-    loss = sqrt(sum(abs2, hjb_err) / n_k)  + sqrt(sum(abs2, pol_err)  / n_k)
-    # enforce k > 0
-    # loss += sum(abs2, 1e3 .* (kt1 .< 0))
-    # enforce value function monotonic
-    # loss += monotonicity_penalty(v_f_k) 
-    # lipschitz cost
-    # loss += calculate_lipschitz_constant(vec_x, v_f_k) 
+    
+epoch_list = [1]
+loss_list = [Inf]
+
+
+function loss_fn(fns, nets, k, model_params, vf_ps, pol_ps, vf_st, pol_st)
+    v_f_k, v_f_deriv_k, pol_f_k = predict_fn(fns, nets, k, model_params, vf_ps, pol_ps, vf_st, pol_st)
+    hjb_err, pol_err = err_HJB(k, model_params, v_f_k, v_f_deriv_k, pol_f_k)
+    n_k = length(k)
+    neg_deriv_penalty = sum(exp.(min.(v_f_deriv_k, 0)))
+    loss = sqrt(sum(abs, pol_err) / n_k) + sqrt(sum(abs, hjb_err) / n_k) + sqrt(sum(abs, neg_deriv_penalty) / n_k)
     return loss
 end
 
 
-
-
-
-# using BenchmarkTools
-# @btime v_f(vals, vf_ps, vf_st);
-# @btime pol_f(vals, vf_ps, vf_st);
-v_f_k, v_f_deriv_k, pol_f_k = predict_fn(vals, vf_ps, pol_ps, vf_st, pol_st)
-
-
-
-function plot_pred_output(vals, v_f_k, v_f_deriv_k, pol_f_k)
-    p1 = plot(
-        vec(vals),
-        v_f_k,
-        seriestype = :scatter,
-        colour = :blue,
-        label = "NN \$V(k)\$",
-        xlabel = "\$k\$",
-        ylabel = "\$V(k)\$",
-        )
-    p2 = plot(
-        vec(vals),
-        v_f_deriv_k,
-        seriestype = :scatter,
-        colour = :blue,
-        label = "NN \$V'(k)\$",
-        xlabel = "\$k\$",
-        ylabel = "\$V'(k)\$",
-        )
-    p3 = plot(
-        vec(vals),
-        pol_f_k,
-        seriestype = :scatter,
-        colour = :blue,
-        label = "NN \$c(k)\$",
-        xlabel = "\$k\$",
-        ylabel = "\$c(k)\$",
-        )
-    return p1, p2, p3
+function surrogate_loss(upwind_v, upwind_pol, upwind_kdot, v_f_k, pol_f_k, kdot)
+    n_k = length(upwind_v)
+    upwind_v_err = sqrt(sum(abs2, upwind_v - v_f_k) / n_k)
+    upwind_pol_err = sqrt(sum(abs2, upwind_pol - pol_f_k) / n_k)
+    upwind_kdot_err = sqrt(sum(abs2, upwind_kdot - kdot) / n_k)
+    return upwind_v_err + upwind_pol_err + upwind_kdot_err
 end
 
-plot_pred_output(vals, v_f_k, v_f_deriv_k, pol_f_k)
-loss_fn(vals, m, vf_ps, pol_ps, vf_st, pol_st)
+
+function composite_loss(fns, 
+                        nets, 
+                        k, 
+                        model_params, 
+                        vf_ps, 
+                        pol_ps, 
+                        vf_st, 
+                        pol_st,
+                        upwind_v,
+                        upwind_pol,
+                        upwind_kdot,
+                        m
+                        )
+    v_f_k, v_f_deriv_k, pol_f_k = predict_fn(fns, nets, k, model_params, vf_ps, pol_ps, vf_st, pol_st)
+    kdot = production_function(m, k_vals) .- m.δ .* k_vals .- pol_f_k
+    # hjb_err, pol_err = err_HJB(k, model_params, v_f_k, v_f_deriv_k, pol_f_k)
+    # n_k = length(k)
+    # neg_deriv_penalty = sum(exp.(min.(v_f_deriv_k, 0)))
+    # projection_loss = sqrt(sum(abs, pol_err) / n_k) + 
+    #     sqrt(sum(abs, hjb_err) / n_k) + 
+    #     sqrt(sum(abs, neg_deriv_penalty) / n_k) 
+    s_loss = surrogate_loss(upwind_v, upwind_pol, upwind_kdot, v_f_k, pol_f_k, kdot)
+    # return  projection_loss^2 + s_loss^2
+    # return projection_loss + s_loss^2
+    return s_loss
+end
+
+m 
 
 
-l, back = Zygote.pullback(params) do p
-    loss_fn(vals, m, p[1], p[2], states[1], states[2])
-end;
 
-l
-back(1.0)
 
-epoch_list = [0]
-loss_list = [Inf]
+
+n_redraw = 33
 for epoch in epoch_list[end]:1_000_000
 # epoch = 1
-    loss, back = Zygote.pullback(params) do p
-        loss_fn(vals, m, p[1], p[2], states[1], states[2])
+# epoch = epoch_list[end] + 1
+    if epoch % n_redraw == 0 || epoch == 1
+        m = SkibaModel(param_reshuffle(next!(skiba_sobol_seq))...) 
+        max_ss = maximum(k_steady_state(m))
+        state_constraint = check_statespace(m)
+        successful_vfi = false
+        while !(max_ss < 25) && !state_constraint && !successful_vfi
+            model_param_candidate = param_reshuffle(next!(skiba_sobol_seq))
+            m = SkibaModel(model_param_candidate...) 
+            max_ss = maximum(k_steady_state(m))
+            try 
+                sm, res = solve_growth_model(m)
+                successful_vfi = true
+            catch e
+                successful_vfi = false
+            end
+        end
+        m = m |> device
     end
-    grads = back(1.0)[1]
-    epoch % 500 == 1 && println("Epoch: $(epoch) | Loss: $(loss)")
+    random_vals = generate_grid_values(m, batch_size, seed = epoch) 
+    k_vals = random_vals[1, :]
+    param_vals = random_vals[2:end, :]
+    cpu_k_vals = deepcopy(k_vals)
+    cpu_param_vals = deepcopy(param_vals)
+    k_vals = k_vals |> device
+    param_vals = param_vals |> device
 
-    if epoch % 500 == 1
-        push!(epoch_list, epoch)
-        push!(loss_list, loss)
-        v_f_k, v_f_deriv_k, pol_f_k = predict_fn(vals, params[1], params[2], states[1], states[2])
-        kdot = production_function(m, vec_vals) .- m.δ .* vec_vals .- pol_f_k
-        hjb_err, pol_err = err_HJB(vec(vals), m, v_f_k, v_f_deriv_k, pol_f_k)
+    upwind_v = sm.value_function(cpu_k_vals) |> device
+    upwind_pol = sm.policy_function(cpu_k_vals) |> device
+    upwind_kdot = sm.kdot_function(cpu_k_vals) |> device
 
+    loss, back = Zygote.pullback(nn_params) do p
+        composite_loss(fns, nets, k_vals, param_vals, p[1], p[2], states[1], states[2], upwind_v, upwind_pol, upwind_kdot, m)
+    end;
 
-        p1, p2, p3 = plot_pred_output(vals, v_f_k, v_f_deriv_k, pol_f_k)
-        p4 = plot(
-            epoch_list, 
-            loss_list, 
-            label = "Loss", 
-            seriestype = :scatter,
-            yscale = :log10
-            )
-        p5 = plot(
-            vec_vals, 
-            kdot, 
-            seriestype = :scatter,
-            label = "",
-            xlabel = "\$k\$",
-            ylabel = "\$\\dot{k}\$",
-            )
-        p6 = plot(
-            vec_vals, 
-            hjb_err, 
-            seriestype = :scatter,
-            label = "",
-            xlabel = "\$k\$",
-            ylabel = "\$HJB Error\$",
-            )
-        p7 = plot(
-            vec_vals, 
-            pol_err, 
-            seriestype = :scatter,
-            label = "",
-            xlabel = "\$k\$",
-            ylabel = "\$Policy Error\$",
-            )
-        p_all = plot(p1, p2, p3, p4, p5, p6, p7, layout = (4, 2), size = (800, 800))
-        display(p_all)
+    if epoch % 100 == 1
+        println("Epoch: $epoch, Loss: $loss")
     end
-    # println("Epoch: $(epoch) | Loss: $(loss)")
-    Optimisers.update!(st_opt, params, grads)
-end
+    push!(epoch_list, epoch)
+    push!(loss_list, loss)
+  
+
+    if epoch % 100 == 1
+        try 
+            p_model_output = plot_nn_output(fns, nets, k_vals, param_vals, nn_params, states, epoch_list, loss_list, upwind_v, upwind_pol, upwind_kdot, cpu_dev)
+            display(p_model_output)
+        catch e 
+            println(e)
+        end
+    end
+    if !isnan(loss)
+        grads = back(1.0)[1]
+        if any(isnan, grads[1][1][1].weight)
+            println("NaN Gradients")
+        else
+            Optimisers.update!(st_opt, nn_params, grads)
+        end
+    end;
+end;
+
+
+random_vals
+m
 
 savefig("skiba-nn-fit.pdf")
 
@@ -638,98 +439,28 @@ plot!(
     seriestype = :scatter,
     label = ""
 )
-
-
 using BenchmarkTools
-@btime loss_fn([10.0], m, param_vec.vf, param_vec.pol, states[1], states[2])
-
-loss_fn(x) = loss_fn([x], m, vf_ps, pol_ps, vf_st, pol_st)
-
-loss_fn.([0.2, 0.1])
-
-
-for epoch in 1:2
-    global vf_st, pol_st
-    (loss, vf_st, pol_st), pb = Zygote.pullback(vf_ps) do p
-        v_f_k, vf_st_ = Lux.apply(v_f_nn, [10.0], p, vf_st)
-        pol_f_k, pol_st_ = Lux.apply(pol_f_nn, [10.0], pol_ps, pol_st)
-        v_f_deriv_k = v_f_deriv([10.0], p, vf_st) 
-        hjb_err, pol_err = err_HJB([10.0], m, v_f_k, v_f_deriv_k, pol_f_k)
-        loss = sum(hjb_err .^ 2) + sum(pol_err .^ 2)
-        return loss, vf_st_, pol_st_
-    end 
-    gs = only(pb((one(loss), nothing, nothing)))
-    epoch % 100 == 1 && println("Epoch: $(epoch) | Loss: $(loss)")
-    Optimisers.update!(vf_opt, vf_ps, gs)
+if benchmark
+    @btime v_f(v_f_nn, k_vals, param_vals, vf_ps, vf_st);
+    @btime v_f(v_f_nn, vals, vf_ps, vf_st);
+    @btime v_f_deriv(v_f_nn, k_vals, param_vals, vf_ps, vf_st);
+    @btime dfx(v_f, k_vals, param_vals, vf_ps, vf_st);
 end
 
 
-v_f_deriv([10.0], vf_ps, vf_st)
-
-pullback(v_f_deriv, [10.0], vf_ps, vf_st)
-
-pb((one(loss), vf_st, pol_st))
 
 
-
-
-using Enzyme
-
-x  = [2.0]
-bx = [0.0]
-y  = [0.0]
-
-x = fill(2.0, (1, 2))
-bx = fill(0.0, (1, 2))
-x = [2.0 2.0]
-bx = [0.0 0.0]
-
-using ComponentArrays, Lux, Random
-
-rng = Random.default_rng()
-Random.seed!(rng,100)
-dudt2 = Lux.Chain(x -> x.^3,
-                  Lux.Dense(1, 50, tanh),
-                  Lux.Dense(50, 1))
-p, st = Lux.setup(rng, dudt2)
-
-function f(x::Array{Float64})
-    return dudt2(x, p, st)[1]
+if benchmark
+    @btime l, b = Zygote.pullback(vf_ps) do p
+        v_f_deriv(v_f_nn, k_vals, param_vals, p, vf_st)
+    end;
+    @btime l, b = Zygote.pullback(vf_ps) do p
+        dfx(v_f, k_vals, param_vals, p, vf_st)
+    end;
 end
 
-f(x)
-
-Enzyme.autodiff(
-    Reverse, 
-    f, 
-    Active,
-    Duplicated([1.0 0.2], [0.0 0.0]))
-
-Enzyme.autodiff(
-    Reverse, 
-    f, 
-    Active,
-    Duplicated(x, bx))
-
-    x
-    bx
-bx
-
-function f2(x::Array{Float64})
-    dudt2(x, p, st)[1]
+if benchmark
+    @btime l, back = Zygote.pullback(nn_params) do p
+        loss_fn(fns, nets, k_vals, param_vals, p[1], p[2], states[1], states[2])
+    end;
 end
-f2(x)
-using Zygote
-bx2 = Zygote.pullback(f2, x)[2](ones(size(x)))[1]
-
-bx2([1.0 1.0])[1]
-bx
-bx2
-
-@show bx - bx2
-
-#=
-2-element Vector{Float64}:
- -9.992007221626409e-16
- -1.7763568394002505e-15
-=#

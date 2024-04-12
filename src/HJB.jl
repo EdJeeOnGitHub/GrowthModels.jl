@@ -335,11 +335,19 @@ function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams, state::StateSpa
     curr_iter = 0
     val = deepcopy(init_value)
     val.v[:] = initial_guess(m, state)
+    upwind_restart_counter = 0
+    @label start
     for n in 1:maxit
         curr_iter += 1
         output_value, curr_iter = update_v(m, val, state, hyperparams, iter = n, verbose = verbose)
         if output_value.convergence_status
             fit_value, _, fit_variables = update_v(m, val, state, hyperparams, iter = curr_iter, verbose = verbose)
+            max_upwind_err = maximum(V_err(m)(fit_value, fit_variables))
+            if max_upwind_err > 1 && upwind_restart_counter < 20
+                val.v[:] .= val.v[:] .+ randn(length(val.v)) .* 1e-6
+                upwind_restart_counter += 1
+                @goto start
+            end
             return (value = fit_value, variables = fit_variables, iter = curr_iter)
             break
         end
@@ -348,6 +356,7 @@ function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams, state::StateSpa
     return (value = val, variables = nothing, iter = curr_iter)
 end
 
+
 function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams; init_value = nothing, maxit = 1000, verbose = true)
     state = StateSpace(m, hyperparams)
     if isnothing(init_value)
@@ -355,6 +364,9 @@ function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams; init_value = no
     end
     return solve_HJB(m, hyperparams, state; init_value = init_value, maxit = maxit, verbose = verbose)
 end
+
+
+
 
 
 function solve_HJB(m::StochasticModel, hyperparams::StateSpaceHyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000, verbose = true)

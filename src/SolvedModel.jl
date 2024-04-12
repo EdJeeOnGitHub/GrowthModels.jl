@@ -77,6 +77,7 @@ struct SolvedModel{T<:Model}
     variables::NamedTuple
     production_function::Function
     production_function_prime::Function
+    value_function::Union{Function, Interpolations.Extrapolation}
     policy_function::Union{Function, Interpolations.Extrapolation}
     kdot_function::Function
     ydot_function::Function
@@ -86,12 +87,19 @@ end
 
 #### Model Specific Dispatch ####
 # Can probably dispatch on just model here but will see in future
-function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union{SkibaModel,SmoothSkibaModel,RamseyCassKoopmansModel}
+function SolvedModel(m::DeterministicModel, value::Value, variables::NamedTuple) 
     c_interpolation = interpolate(
         (variables.k[:, 1], ),
         variables.c,
         Gridded(Linear())
     )
+    value_interpolation = extrapolate(
+        interpolate(
+            (variables[:k], ),
+            value.v,
+            Gridded(Linear())
+        ),
+        Line())
     c_policy_function = extrapolate(c_interpolation, Line())
     prod_func = x -> production_function(m, x)
     prod_func_prime = x -> production_function_prime(m, x)
@@ -114,6 +122,7 @@ function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union
         variables,
         prod_func,
         prod_func_prime,
+        x -> value_interpolation(x),
         x -> c_policy_function(x),
         kdot_function,
         ydot_function,
@@ -123,12 +132,20 @@ function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union
 end
 
 
+
 function SolvedModel(m::StochasticModel, value::Value, variables::NamedTuple) 
     c_interpolation = interpolate(
         (variables.k[:, 1], variables.z[1, :]),
         variables.c,
         Gridded(Linear())
     )
+    value_interpolation = extrapolate(
+        interpolate(
+            (variables.k[:, 1], variables.z[1, :]),
+            value.v,
+            Gridded(Linear())
+        ),
+        Line())
     c_policy_function = extrapolate(c_interpolation, Line())
     prod_func = (k, z) -> production_function(m, k, z)
     prod_func_prime = (k, z) -> production_function_prime(m, k, z)
@@ -137,6 +154,8 @@ function SolvedModel(m::StochasticModel, value::Value, variables::NamedTuple)
     kdot_function = (k, z) -> prod_func(k, z) - m.δ*k - c_policy_function.(k, z)    
     ydot_function = (k, z, kdot) -> throw("Not yet implemented - need to add z evolution")
     ydot_function = k -> throw("Not yet implemented - need to add z evolution")
+
+
 
     function cdot_function(c, k, γ, ρ, δ) 
         # cdot = (c/γ) * (prod_func_prime(k) - ρ - δ)
@@ -155,6 +174,7 @@ function SolvedModel(m::StochasticModel, value::Value, variables::NamedTuple)
         variables,
         prod_func,
         prod_func_prime,
+        (x, y) -> value_interpolation(x, y),
         c_policy_function,
         kdot_function,
         ydot_function,
