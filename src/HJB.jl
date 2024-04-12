@@ -380,3 +380,131 @@ end
 dV_Upwind(::Model, value::Value, variables::NamedTuple) = value.dVf .* variables.If .+ value.dVb .* variables.Ib .+ value.dV0 .* variables.I0
 V_err(m::Model) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.γ) / (1-m.γ) .+ dV_Upwind(m, value, variables) .* statespace_k_dot(m)(variables) .- m.ρ .* value.v
 
+
+## GPU version for DeterministicModel -- not very fast, don't use
+function update_v(m::DeterministicModel, value::Value{Float32, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams; iter = 0, crit = Float32(10^(-6)), Delta = Float32(1000), verbose = true) where {N_v}
+    γ, ρ, δ = m.γ, m.ρ, m.δ
+    (; v, dVf, dVb, dV0, dist) = value
+    k, y = state[:k], state.aux_state[:y] # y isn't really a state but avoid computing it each iteration this way
+    (; N, dx, xmax, xmin) = hyperparams[:k]
+    dk, kmax, kmin = dx, xmax, xmin
+
+
+    V = v
+    # forward difference
+    dVf[:, 1] .= vcat((V[2:N, 1] .- V[1:(N-1), 1])/dk, (maximum(y) - δ * kmax) ^ (-γ))
+
+    # backward difference
+    dVb[:, 1] .= vcat((minimum(y) - δ * kmin)^(-γ), (V[2:N, 1] .- V[1:(N-1), 1])/dk)
+
+    # consumption and savings with forward difference
+    cf = max.(dVf[:, 1], Float32(1e-3)).^(-1/γ)
+    muf = y - δ .* k - cf
+    Hf = (cf.^(1-γ))/(1-γ) + dVf[:, 1].*muf
+
+    # consumption and savings with backward difference
+    cb = max.(dVb[:, 1],Float32(1e-3)).^(-1/γ)
+    mub = y - δ.*k - cb
+    Hb = (cb.^(1-γ))/(1-γ) + dVb[:, 1].*mub
+
+    # consumption and derivative of value function at steady state
+    c0 = y - δ.*k
+    dV0[:, 1] = max.(c0, Float32(1e-3)).^(-γ)
+    H0 = (c0.^(1-γ))/(1-γ)
+
+    # dV_upwind makes a choice of forward or backward differences based on
+    # the sign of the drift    
+    Ineither = (1 .- (muf .> 0)) .* (1 .- (mub .< 0))
+    Iunique = (mub .< 0) .* (1 .- (muf .> 0)) + (1 .- (mub .< 0)) .* (muf .> 0)
+    Iboth = (mub .< 0) .* (muf .> 0)
+    Ib = Iunique .* (mub .< 0) + Iboth .* (Hb .>= Hf)
+    If = Iunique .* (muf .> 0) + Iboth .* (Hf .>= Hb)
+    I0 = Ineither
+
+    # consumption
+    c  = cf .* If + cb .* Ib + c0 .* I0
+    u = (c.^(1-γ))/(1-γ)
+
+    # CONSTRUCT MATRIX
+    X = -Ib .* mub/dk
+    Y = -If .* muf/dk + Ib .* mub/dk
+    Z = If .* muf/dk
+
+    Y_rows = CuArray(1:N);
+    X_rows = CuArray(2:N);
+    Z_rows = CuArray(1:(N-1));
+
+    Y_cols = CuArray(1:N);
+    X_cols = CuArray(1:(N-1));
+    Z_cols = CuArray(2:N);
+
+    rows = vcat(Y_rows, X_rows, Z_rows);
+    cols = vcat(Y_cols, X_cols, Z_cols);
+    vals = vcat(Y, X[2:N], Z[1:(N-1)]);
+
+
+
+    sorted_indices = sortperm(rows)
+    sort_cols = cols[sorted_indices]
+    sort_vals = vals[sorted_indices]
+
+    rowptr = CuArray(vcat(1, 3:3:length(vals), length(vals) + 1))
+    A = CUSPARSE.CuSparseMatrixCSR(rowptr, sort_cols, sort_vals, (N, N));
+
+    I_vals = CuArray(ones(Int, N))
+    I_cols = CuArray(1:N)
+    I_ptr = CuArray(1:N+1)
+    sparse_I = CUSPARSE.CuSparseMatrixCSR(I_ptr, I_cols, I_vals, (N, N));
+    
+
+    A_err = abs.(sum(A, dims = 2))        
+    if maximum(A_err) > 10^(-6)
+        throw(ValueFunctionError("Improper Transition Matrix: $(maximum(A_err)) > 10^(-6)"))
+    end    
+
+    B = (ρ + 1/Delta) * sparse_I .- A;
+    b = u + V/Delta
+    gpu_x = similar(b)
+    V = CUSOLVER.csrlsvqr!(B, b, gpu_x, Float32(1e-4), one(Cint), 'O');
+    Vchange = V - v
+    # If using forward diff, want this just to be value part
+    distance = ForwardDiff.value(maximum(abs.(Vchange)))
+    push!(dist, distance)
+
+    if distance < crit
+        if verbose
+            println("Value Function Converged, Iteration = ", iter)
+        end
+        push!(dist, distance)
+        value = Value{T, N_v}(
+            v = V, 
+            dVf = dVf, 
+            dVb = dVb, 
+            dV0 = dV0, 
+            dist = dist,
+            convergence_status = true,
+            iter = iter
+            )
+        variables = (
+            y = y, 
+            k = k, 
+            c = c, 
+            If = If, 
+            Ib = Ib, 
+            I0 = I0
+            )
+        return value, iter, variables
+    end
+
+    value = Value(
+        v = V, 
+        dVf = dVf, 
+        dVb = dVb, 
+        dV0 = dV0, 
+        dist = dist,
+        convergence_status = false,
+        iter = iter
+        )
+
+    return value, iter
+end
