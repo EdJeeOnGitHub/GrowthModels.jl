@@ -115,23 +115,12 @@ plot!(
     xlabel = "\$k\$",
     ylabel = "\$V(k)\$",
     )
-k_vals
+
 
 hjb_err, pol_err = err_HJB(k_vals, param_vals, v_f_k, v_f_deriv_k, pol_f_k)
 
 
-neg_deriv_cost = max.(0, -v_f_deriv_k)
 
-n_k = length(k_vals)
-loss = sqrt(sum(abs2, hjb_err) / n_k)  + 
-        sqrt(sum(abs2, pol_err)  / n_k) +
-        sqrt(sum(abs2, neg_deriv_cost) / n_k)
-
-
-
-# l, back = Zygote.pullback(nn_params) do p
-#     loss_fn(fns, nets, k_vals, param_vals, p[1], p[2], states[1], states[2])
-# end;
 
 
 skiba_sobol_seq = generate_model_values("SkibaModel")
@@ -153,9 +142,22 @@ function check_statespace(m)
 end
 
     
-epoch_list = [1]
-loss_list = [Inf]
 
+
+
+function create_upwind_comparison(fns, nets, m, k, param_vals, vf_ps, vf_st, pol_ps, pol_st)
+    v_f, v_f_deriv, pol_f = fns
+    cu_sm_k = cu(k)
+    if size(param_vals, 2) != size(cu_sm_k, 1)
+        test_param_vals = generate_grid_values(m, size(cu_sm_k, 1))[2:end, :]
+    else
+        test_param_vals = param_vals
+    end
+    u_v_f_k = v_f(nets[1], cu_sm_k, test_param_vals, vf_ps, vf_st)
+    u_pol_f_k = pol_f(nets[2], cu_sm_k, test_param_vals, pol_ps, pol_st)
+    u_kdot_k = production_function(m, cu_sm_k) .- m.δ .* cu_sm_k .- pol_f_k
+    return vec(u_v_f_k), vec(u_pol_f_k), vec(u_kdot_k)
+end
 
 function loss_fn(fns, nets, k, model_params, vf_ps, pol_ps, vf_st, pol_st)
     v_f_k, v_f_deriv_k, pol_f_k = predict_fn(fns, nets, k, model_params, vf_ps, pol_ps, vf_st, pol_st)
@@ -184,37 +186,31 @@ function composite_loss(fns,
                         pol_ps, 
                         vf_st, 
                         pol_st,
+                        upwind_k,
                         upwind_v,
                         upwind_pol,
                         upwind_kdot,
                         m
                         )
     v_f_k, v_f_deriv_k, pol_f_k = predict_fn(fns, nets, k, model_params, vf_ps, pol_ps, vf_st, pol_st)
-    kdot = production_function(m, k_vals) .- m.δ .* k_vals .- pol_f_k
-    # hjb_err, pol_err = err_HJB(k, model_params, v_f_k, v_f_deriv_k, pol_f_k)
-    # n_k = length(k)
-    # neg_deriv_penalty = sum(exp.(min.(v_f_deriv_k, 0)))
-    # projection_loss = sqrt(sum(abs, pol_err) / n_k) + 
-    #     sqrt(sum(abs, hjb_err) / n_k) + 
-    #     sqrt(sum(abs, neg_deriv_penalty) / n_k) 
-    s_loss = surrogate_loss(upwind_v, upwind_pol, upwind_kdot, v_f_k, pol_f_k, kdot)
-    # return  projection_loss^2 + s_loss^2
-    # return projection_loss + s_loss^2
-    return s_loss
+    hjb_err, pol_err = err_HJB(k, model_params, v_f_k, v_f_deriv_k, pol_f_k)
+    n_k = length(k)
+    neg_deriv_penalty = sum(exp.(min.(v_f_deriv_k, 0)))
+    projection_loss = sqrt(sum(abs, pol_err) / n_k) + 
+        sqrt(sum(abs, hjb_err) / n_k) + 
+        sqrt(sum(abs, neg_deriv_penalty) / n_k) 
+    
+    nn_upwind_v_f_k, nn_upwind_pol_f_k, nn_upwind_kdot = create_upwind_comparison(fns, nets, m, upwind_k,  model_params, vf_ps, vf_st, pol_ps, pol_st)
+
+    s_loss = surrogate_loss(upwind_v, upwind_pol, upwind_kdot, nn_upwind_v_f_k, nn_upwind_pol_f_k, nn_upwind_kdot)
+    return projection_loss/3 + s_loss/3
 end
 
-m 
 
 
-
-
-
-n_redraw = 33
-for epoch in epoch_list[end]:1_000_000
-# epoch = 1
-# epoch = epoch_list[end] + 1
-    if epoch % n_redraw == 0 || epoch == 1
-        m = SkibaModel(param_reshuffle(next!(skiba_sobol_seq))...) 
+function draw_random_model(sobol_seq, epoch, n_redraw) 
+    if epoch % n_redraw  == 0 || epoch == 1
+        m = SkibaModel(param_reshuffle(next!(sobol_seq))...) 
         max_ss = maximum(k_steady_state(m))
         state_constraint = check_statespace(m)
         successful_vfi = false
@@ -222,15 +218,52 @@ for epoch in epoch_list[end]:1_000_000
             model_param_candidate = param_reshuffle(next!(skiba_sobol_seq))
             m = SkibaModel(model_param_candidate...) 
             max_ss = maximum(k_steady_state(m))
-            try 
-                sm, res = solve_growth_model(m)
+            sm, res = try 
+                solve_growth_model(m)
                 successful_vfi = true
             catch e
                 successful_vfi = false
             end
         end
-        m = m |> device
     end
+    return m, sm, res, max_ss
+end
+
+function draw_random_model(m, sobol_seq) 
+    max_ss = maximum(k_steady_state(m))
+    state_constraint = check_statespace(m)
+    successful_vfi = false
+    redraw = !(max_ss < 25) || state_constraint || !successful_vfi
+    while redraw
+        model_param_candidate = param_reshuffle(next!(sobol_seq))
+        m = SkibaModel(model_param_candidate...) 
+        max_ss = maximum(k_steady_state(m))
+        try 
+            sm, res = solve_growth_model(m)
+            successful_vfi = true
+        catch e
+            successful_vfi = false
+            continue
+        end
+        max_ss = maximum(k_steady_state(m))
+        state_constraint = check_statespace(m)
+        redraw = !(max_ss < 25) || state_constraint || !successful_vfi
+    end
+    sm, res = solve_growth_model(m)
+    return m, sm, res
+end
+
+epoch_list = [1]
+loss_list = [Inf]
+n_redraw = 1
+for epoch in epoch_list[end]:1_000_000
+# epoch = 1
+# epoch = epoch_list[end] + 1
+
+    if epoch % n_redraw  == 0 || epoch == 1
+        m, sm, res = draw_random_model(m, skiba_sobol_seq); 
+    end
+    m = m |> device
     random_vals = generate_grid_values(m, batch_size, seed = epoch) 
     k_vals = random_vals[1, :]
     param_vals = random_vals[2:end, :]
@@ -239,12 +272,13 @@ for epoch in epoch_list[end]:1_000_000
     k_vals = k_vals |> device
     param_vals = param_vals |> device
 
-    upwind_v = sm.value_function(cpu_k_vals) |> device
-    upwind_pol = sm.policy_function(cpu_k_vals) |> device
+    upwind_k = sm.variables[:k] |> device
+    upwind_v = res.value.v |> device
+    upwind_pol = sm.variables[:c] |> device
     upwind_kdot = sm.kdot_function(cpu_k_vals) |> device
-
+   
     loss, back = Zygote.pullback(nn_params) do p
-        composite_loss(fns, nets, k_vals, param_vals, p[1], p[2], states[1], states[2], upwind_v, upwind_pol, upwind_kdot, m)
+        composite_loss(fns, nets, k_vals, param_vals, p[1], p[2], states[1], states[2],  upwind_k, upwind_v, upwind_pol, upwind_kdot, m)
     end;
 
     if epoch % 100 == 1
@@ -256,7 +290,7 @@ for epoch in epoch_list[end]:1_000_000
 
     if epoch % 100 == 1
         try 
-            p_model_output = plot_nn_output(fns, nets, k_vals, param_vals, nn_params, states, epoch_list, loss_list, upwind_v, upwind_pol, upwind_kdot, cpu_dev)
+            p_model_output = plot_nn_output(fns, nets, k_vals, param_vals, nn_params, states, epoch_list, loss_list, upwind_k, upwind_v, upwind_pol, upwind_kdot, cpu_dev)
             display(p_model_output)
         catch e 
             println(e)
@@ -264,7 +298,7 @@ for epoch in epoch_list[end]:1_000_000
     end
     if !isnan(loss)
         grads = back(1.0)[1]
-        if any(isnan, grads[1][1][1].weight)
+        if any(isnan, grads[1][1][1].weight) || any(isnan, grads[2][1][1].weight)
             println("NaN Gradients")
         else
             Optimisers.update!(st_opt, nn_params, grads)
@@ -273,39 +307,40 @@ for epoch in epoch_list[end]:1_000_000
 end;
 
 
-random_vals
-m
-
 savefig("skiba-nn-fit.pdf")
 
 
 
-v_f_k, v_f_deriv_k, pol_f_k = predict_fn(vals, param_vec.vf, param_vec.pol, states[1], states[2])
+v_f_k, v_f_deriv_k, pol_f_k = predict_fn(fns, nets, cu(cpu_k_vals), cu(cpu_param_vals), nn_params[1], nn_params[2], states[1], states[2])
 
 
-skiba_hyperparams = StateSpaceHyperParams(m)
-skiba_state = StateSpace(m, skiba_hyperparams)
+
+kdot = production_function(m, k_vals) .- m.δ .* k_vals .- pol_f_k
+
+
+skiba_hyperparams = StateSpaceHyperParams(SkibaModel())
+skiba_state = StateSpace(SkibaModel(), skiba_hyperparams)
 skiba_init_value = Value(skiba_state);
 
 fit_value, fit_variables, fit_iter = solve_HJB(
-    m, 
+    SkibaModel(), 
     skiba_hyperparams, 
     init_value = skiba_init_value, maxit = 1000);
-
-sm = SolvedModel(m, fit_value, fit_variables)
+m = SkibaModel()
+sm = SolvedModel(SkibaModel(), fit_value, fit_variables)
 
 using DataInterpolations
 
 sm_v_interp = DataInterpolations.LinearInterpolation(fit_value.v, fit_variables.k)
 sm_v_deriv_interp = DataInterpolations.LinearInterpolation(fit_value.dVf, fit_variables.k)
 
-sm_v_f_k = sm_v_interp(vec(vals))
-sm_v_f_deriv_k = sm_v_deriv_interp(vec(vals))
-sm_pol_f_k = sm.policy_function(vec(vals))
+sm_v_f_k = sm_v_interp(vec(cpu_k_vals))
+sm_v_f_deriv_k = sm_v_deriv_interp(vec(cpu_k_vals))
+sm_pol_f_k = sm.policy_function(vec(cpu_k_vals))
 
-sm_h_err, sm_p_err = err_HJB(vec(vals), m, sm_v_f_k, sm_v_f_deriv_k, sm_pol_f_k)
+sm_h_err, sm_p_err = err_HJB(cpu_k_vals, cpu_param_vals , sm_v_f_k, sm_v_f_deriv_k, sm_pol_f_k)
 
-nn_h_err, nn_p_err = err_HJB(vec(vals), m, v_f_k, v_f_deriv_k, pol_f_k)
+nn_h_err, nn_p_err = err_HJB(vec(k_vals), param_vals, v_f_k, v_f_deriv_k, pol_f_k)
 
 sum(abs2, sm_h_err)
 sum(abs2, sm_p_err)
@@ -313,23 +348,20 @@ sum(abs2, sm_p_err)
 sum(abs2, nn_h_err)
 sum(abs2, nn_p_err)
 
-v_f_k, v_f_deriv_k, pol_f_k = predict_fn(vals, param_vec.vf, param_vec.pol, states[1], states[2])
-kdot = production_function(m, vec_vals) .- m.δ .* vec_vals .- pol_f_k
-hjb_err, pol_err = err_HJB(vec(vals), m, v_f_k, v_f_deriv_k, pol_f_k)
 
 
-p1, p2, p3 = plot_pred_output(vals, v_f_k, v_f_deriv_k, pol_f_k)
+p1, p2, p3 = plot_pred_output(cpu_k_vals, Array(v_f_k), Array(v_f_deriv_k), Array(pol_f_k))
 ## Adding upwind solution for comparison
 plot!(
     p1, 
-    vec_vals, 
+    cpu_k_vals, 
     sm_v_f_k, 
     seriestype = :scatter, 
     label = "Upwind \$V(k)\$", 
     colour = :red)
 plot!(
     p2,
-    vec_vals,
+    cpu_k_vals,
     sm_v_f_deriv_k,
     seriestype = :scatter,
     label = "Upwind \$V'(k)\$",
@@ -337,7 +369,7 @@ plot!(
 )
 plot!(
     p3,
-    vec_vals,
+    cpu_k_vals,
     sm_pol_f_k,
     seriestype = :scatter,
     label = "Upwind \$c(k)\$",
@@ -347,14 +379,13 @@ p4 = plot(
     epoch_list, 
     loss_list, 
     label = "Loss", 
-    seriestype = :scatter,
     yscale = :log10,
     ylabel = "MSE",
     xlabel = "Epochs"
     )
 p5 = plot(
-    vec_vals, 
-    kdot, 
+    cpu_k_vals, 
+    Array(kdot), 
     seriestype = :scatter,
     label = "NN \$\\dot{k}\$",
     xlabel = "\$k\$",
@@ -362,8 +393,8 @@ p5 = plot(
     )
 plot!(
     p5,
-    vec_vals,
-    sm.kdot_function(vec_vals),
+    cpu_k_vals,
+    sm.kdot_function(cpu_k_vals),
     seriestype = :scatter,
     label = "Upwind \$\\dot{k}\$",
     xlabel = "\$k\$",
@@ -371,16 +402,16 @@ plot!(
 )
 
 p6 = plot(
-    vec_vals, 
-    hjb_err, 
+    cpu_k_vals, 
+    Array(hjb_err), 
     seriestype = :scatter,
     label = "",
     xlabel = "\$k\$",
     ylabel = "\$HJB Error\$",
     )
 p7 = plot(
-    vec_vals, 
-    pol_err, 
+    cpu_k_vals, 
+    Array(pol_err), 
     seriestype = :scatter,
     label = "",
     xlabel = "\$k\$",
