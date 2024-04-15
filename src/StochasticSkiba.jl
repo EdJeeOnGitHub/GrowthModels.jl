@@ -46,12 +46,25 @@ end
 
 
 
-k_steady_state_hi_StochasticSkiba(α::Real, A_H::Real, ρ::Real, δ::Real, κ::Real, stationary_mean::Real) = (α*A_H*stationary_mean/(ρ + δ))^(1/(1-α)) + κ
-k_steady_state_lo_StochasticSkiba(α::Real, A_L::Real, ρ::Real, δ::Real, stationary_mean::Real) = (α*A_L*stationary_mean/(ρ + δ))^(1/(1-α))
-k_star_Skiba(α::Real, A_H::Real, A_L::Real) = κ/(1-(A_L/A_H)^(1/α))
+k_steady_state_hi_StochasticSkiba(α::T, A_H::T, ρ::T, δ::T, κ::T, stationary_mean::T) where {T <: Real} = (α*A_H*stationary_mean/(ρ + δ))^(1/(1-α)) + κ
+k_steady_state_lo_StochasticSkiba(α::T, A_L::T, ρ::T, δ::T, stationary_mean::T) where {T <: Real} = (α*A_L*stationary_mean/(ρ + δ))^(1/(1-α))
+k_star_Skiba(α::T, A_H::T, A_L::T, κ) where {T <: Real} = κ/(1-(A_L/A_H)^(1/α))
 k_steady_state_hi(m::StochasticSkibaModel) = (m.α*m.A_H*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α)) + m.κ
 k_steady_state_lo(m::StochasticSkibaModel) = (m.α*m.A_L*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α))
+k_steady_state(m::StochasticSkibaModel) = [k_steady_state_lo(m), k_steady_state_hi(m)]
+k_steady_state(::Type{M}, α::T, A_H::T, A_L::T, ρ::T, δ::T, κ::T, stationary_mean::T) where {M <: StochasticSkibaModel, T <: Real} = [k_steady_state_lo_StochasticSkiba(α, A_L, ρ, δ, stationary_mean), k_steady_state_hi_StochasticSkiba(α, A_H, ρ, δ, κ, stationary_mean)]
 k_star(m::StochasticSkibaModel) = m.κ/(1-(m.A_L/m.A_H)^(1/m.α))
+k_star(::Type{M}, α::T, A_H::T, A_L::T) where {M <: StochasticSkibaModel, T <: Real} = κ/(1-(A_L/A_H)^(1/α))
+
+
+k_star(::Type{M}; α, A_H, A_L, κ, kwargs...) where {M <: StochasticSkibaModel} = κ ./ (1 .- (A_L ./ A_H) .^ (1 ./ α))
+k_steady_state(::Type{M}; α, A_H, A_L, ρ, δ, κ, stationary_mean, kwargs...) where {M <: StochasticSkibaModel} = [k_steady_state_lo_StochasticSkiba.(α, A_L, ρ, δ, stationary_mean), k_steady_state_hi_StochasticSkiba.(α, A_H, ρ, δ, κ, stationary_mean)]
+k_steady_state(::Type{M}; α, A_H, A_L, ρ, δ, κ, θ, σ, kwargs...) where {M <: StochasticSkibaModel} = [k_steady_state_lo_StochasticSkiba.(α, A_L, ρ, δ, stationary_mean), k_steady_state_hi_StochasticSkiba.(α, A_H, ρ, δ, κ, stationary_mean)]
+
+function k_steady_state(::Type{M}; α, A_H, A_L, ρ, δ, κ, θ, σ,  kwargs...) where {M <: StochasticSkibaModel}
+    stationary_mean = exp.((σ .^ 2) ./ (2 .* θ) ./ 2)
+    [k_steady_state_lo_StochasticSkiba.(α, A_L, ρ, δ, stationary_mean), k_steady_state_hi_StochasticSkiba.(α, A_H, ρ, δ, κ, stationary_mean)]
+end
 
 y_H(m::StochasticSkibaModel) = (k, z) -> m.A_H*z*max(k - m.κ,0)^m.α
 y_L(m::StochasticSkibaModel) = (k, z) -> m.A_L*z*k^m.α 
@@ -70,12 +83,13 @@ end
 end
 
 
-@inline production_function(::StochasticSkibaModel, k, z, α::Real, A_H::Real, A_L::Real, κ::Real) = stochastic_skiba_production_function(k, z, α, A_H, A_L, κ)
-@inline production_function(::StochasticSkibaModel, k, z, params::Vector) = stochastic_skiba_production_function(k, z, params[1], params[2], params[3], params[4])
+@inline production_function(::Type{M}; k, z, α, A_H, A_L, κ, kwargs...) where {M <: StochasticSkibaModel} = stochastic_skiba_production_function(k, z, α, A_H, A_L, κ)
+@inline production_function(::Type{M}, k, z, α::T, A_H::T, A_L::T, κ::T) where {M <: StochasticSkibaModel, T <: Real} = stochastic_skiba_production_function(k, z, α, A_H, A_L, κ)
+@inline production_function(::Type{M}, k, z, params::Vector{T}) where {M <: StochasticSkibaModel, T <: Real} = stochastic_skiba_production_function(k, z, params[1], params[2], params[3], params[4])
 @inline production_function(m::StochasticSkibaModel, k, z) = stochastic_skiba_production_function(k, z, m.α, m.A_H, m.A_L, m.κ)
 
-@inline production_function_prime(::StochasticSkibaModel, k, z, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function_prime(k, z, α, A_H, A_L, κ)
-@inline production_function_prime(::StochasticSkibaModel, k, z, params::Vector) = skiba_production_function_prime(k, z, params[1], params[2], params[3], params[4])
+@inline production_function_prime(::Type{M}, k, z, α::T, A_H::T, A_L::T, κ::T) where {M <: StochasticSkibaModel, T <: Real} = skiba_production_function_prime(k, z, α, A_H, A_L, κ)
+@inline production_function_prime(::Type{M}, k, z, params::Vector{T}) where {M <: StochasticSkibaModel, T <: Real} = skiba_production_function_prime(k, z, params[1], params[2], params[3], params[4])
 @inline production_function_prime(m::StochasticSkibaModel, k, z) = skiba_production_function_prime(k, z, m.α, m.A_H, m.A_L, m.κ)
 
 

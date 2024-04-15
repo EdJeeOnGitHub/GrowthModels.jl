@@ -42,12 +42,15 @@ function StochasticRamseyCassKoopmansModel(
     StochasticRamseyCassKoopmansModel(γ, α, ρ, δ, A, OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
 end
 
-k_steady_state_hi_StochasticRamseyCassKoopmans(α::Real, A::Real, ρ::Real, δ::Real, stationary_mean::Real) = (α*A*stationary_mean/(ρ + δ))^(1/(1-α))
-k_steady_state_lo_StochasticRamseyCassKoopmans(α::Real, A::Real, ρ::Real, δ::Real, stationary_mean::Real) = (α*A*stationary_mean/(ρ + δ))^(1/(1-α))
-k_star_StochasticRamseyCassKoopmans(α::Real, A::Real, ρ::Real, δ::Real, stationary_mean::Real) = (α*A*stationary_mean/(ρ + δ)) ^ (1/(1-α)) 
+k_steady_state_hi_StochasticRamseyCassKoopmans(α::T, A::T, ρ::T, δ::T, stationary_mean::T) where {T <: Real} = (α*A*stationary_mean/(ρ + δ))^(1/(1-α))
+k_steady_state_lo_StochasticRamseyCassKoopmans(α::T, A::T, ρ::T, δ::T, stationary_mean::T) where {T <: Real} = (α*A*stationary_mean/(ρ + δ))^(1/(1-α))
+k_star_StochasticRamseyCassKoopmans(α::T, A::T, ρ::T, δ::T, stationary_mean::T) where {T <: Real} = (α*A*stationary_mean/(ρ + δ)) ^ (1/(1-α)) 
 k_steady_state_hi(m::StochasticRamseyCassKoopmansModel) = (m.α*m.A*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α)) 
 k_steady_state_lo(m::StochasticRamseyCassKoopmansModel) = (m.α*m.A*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α)) 
 k_star(m::StochasticRamseyCassKoopmansModel) = (m.α*m.A*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α))
+k_star(::Type{M}, α::T, A::T, ρ::T, δ::T, stationary_mean::T) where {M <: StochasticRamseyCassKoopmansModel, T <: Real} = (α*A*stationary_mean/(ρ + δ)) ^ (1/(1-α)) 
+k_steady_state(::Type{M}, α::T, A::T, ρ::T, δ::T, stationary_mean::T) where {M <: StochasticRamseyCassKoopmansModel, T <: Real} = [k_steady_state_lo_StochasticRamseyCassKoopmans(α, A, ρ, δ, stationary_mean), k_steady_state_hi_StochasticRamseyCassKoopmans(α, A, ρ, δ, stationary_mean)]
+
 
 
 
@@ -60,12 +63,12 @@ end
      A .* z .* α .* pow.(k, α - 1)
 end
 
-@inline production_function(::StochasticRamseyCassKoopmansModel, k, z, α::Real, A::Real) = stochastic_rck_production_function(k, z, α, A)
-@inline production_function(::StochasticRamseyCassKoopmansModel, k, z, params::Vector) = stochastic_rck_production_function(k, z, params[1], params[2])
+@inline production_function(::Type{M}, k, z, α::T, A::T) where {M <: StochasticRamseyCassKoopmansModel, T <: Real} = stochastic_rck_production_function(k, z, α, A)
+@inline production_function(::Type{M}, k, z, params::Vector{T}) where {M <: StochasticRamseyCassKoopmansModel, T <: Real} = stochastic_rck_production_function(k, z, params[1], params[2])
 @inline production_function(m::StochasticRamseyCassKoopmansModel, k, z) = stochastic_rck_production_function(k, z, m.α, m.A)
 
-@inline production_function_prime(::StochasticRamseyCassKoopmansModel, k, z, α::Real, A::Real, δ::Real) = stochastic_rck_production_function_prime(k, z, α, A)
-@inline production_function_prime(::StochasticRamseyCassKoopmansModel, k, z, params::Vector) = stochastic_rck_production_function_prime(k, z, params[1], params[2])
+@inline production_function_prime(::Type{M}, k, z, α::T, A::T, δ::T) where {M <: StochasticRamseyCassKoopmansModel, T <: Real} = stochastic_rck_production_function_prime(k, z, α, A)
+@inline production_function_prime(::Type{M}, k, z, params::Vector{T}) where {M <: StochasticRamseyCassKoopmansModel, T <: Real} = stochastic_rck_production_function_prime(k, z, params[1], params[2])
 @inline production_function_prime(m::StochasticRamseyCassKoopmansModel, k, z) = stochastic_rck_production_function_prime(k, z, m.α, m.A)
 
 

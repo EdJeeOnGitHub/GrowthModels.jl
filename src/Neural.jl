@@ -14,67 +14,85 @@ CUDA.allowscalar(false)
 
 Random.seed!(1234)
 cpu_dev = cpu_device()
-device = gpu_device()
+device = cpu_device()
 # Stuff for GPU
-# @inline GrowthModels.production_function(::SkibaModel, k::Union{Real,AbstractArray}, α::Real, A_H::Real, A_L::Real, κ::Real) = skiba_production_function(k, α, A_H, A_L, κ)
-# @inline GrowthModels.production_function(::SkibaModel, k::Union{Real,AbstractArray}, params::Vector) = skiba_production_function.(k, params[1], params[2], params[3], params[4])
-# @inline GrowthModels.production_function(m::SkibaModel, k::Union{Real,AbstractArray}) = skiba_production_function.(k, m.α, m.A_H, m.A_L, m.κ)
-# GrowthModels.k_steady_state(m, device::Lux.AbstractLuxDevice) = device(k_steady_state(m))
 function SkibaModel{T}(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0) where {T<: Real}
     SkibaModel{T}(γ, α, ρ, δ, A_H, A_L, κ)
 end
 
-m = SkibaModel{Float32}() |> device
+function StochasticSkibaModel{T}(;γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0, θ = -log(0.9), σ = 0.1) where {T <: Real}
+    StochasticSkibaModel{T}(γ, α, ρ, δ, A_H, A_L, κ, OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
+end
+
+
+function RamseyCassKoopmansModel{T}(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A = 0.6) where {T <: Real}
+    RamseyCassKoopmansModel{T}(γ, α, ρ, δ, A)
+end
+
+m = StochasticSkibaModel{Float32}() |> device
 model_params = Float32.(params(m))
 n_params = length(model_params)
 
-batch_size = 500
+batch_size = 100
 using BenchmarkTools
 
 
+
+function ValueFunctionChain(m::Model, c_size, n_params)
+    state_size = ifelse(isa(m, StochasticModel), 2, 1)
+    v_f_nn = Chain(
+        # both read in simultaneously
+        Parallel(
+            nothing,
+            MicawberLayer(state_size + n_params, c_size, relu, m),
+            SteadyStateLayer(state_size + n_params, c_size, relu, m),
+            NoOpLayer()
+        ),
+        x -> vcat(x...),
+        Dense(c_size*2 + state_size + n_params, n_size, relu),
+        Dense(n_size, n_size, relu),
+        Dense(n_size, 1)
+    )
+    return v_f_nn
+end
+
+function PolicyFunctionChain(m::Model, c_size, n_params)
+    state_size = ifelse(isa(m, StochasticModel), 2, 1)
+    pol_f_nn = Chain(
+        Parallel(
+            nothing,
+            MicawberLayer(state_size + n_params, c_size, relu, m),
+            SteadyStateLayer(state_size + n_params, c_size, relu, m),
+            NoOpLayer()
+        ),
+        x -> vcat(x...),
+        Dense(c_size*2 + state_size + n_params, n_size, relu),
+        Dense(n_size, n_size, relu),
+        Dense(n_size, 1, softplus)
+    )
+    return pol_f_nn
+end
+
+
+state_size = ifelse(isa(m, StochasticModel), 2, 1)
 c_size = 24
 n_size = 48
 
-v_f_nn = Chain(
-    # both read in simultaneously
-    Parallel(
-        nothing,
-        MicawberLayer(1 + n_params, c_size, relu, m),
-        SteadyStateLayer(1 + n_params, c_size, relu, m),
-        NoOpLayer()
-    ),
-    x -> vcat(x...),
-    Dense(c_size*2 + 1 + n_params, n_size, relu),
-    Dense(n_size, n_size, relu),
-    Dense(n_size, 1)
-)
+v_f_nn = ValueFunctionChain(m, c_size, n_params)
+pol_f_nn = PolicyFunctionChain(m, c_size, n_params)
+state_size = ifelse(isa(m, StochasticModel), 2, 1)
 
-pol_f_nn = Chain(
-    Parallel(
-        nothing,
-        SteadyStateLayer(1 + n_params, c_size, relu, m),
-        MicawberLayer(1 + n_params, c_size, relu, m),
-        NoOpLayer()
-    ),
-    x -> vcat(x...),
-    Dense(c_size*2 + 1 + n_params => n_size, relu),
-    Dense(n_size => n_size, relu),
-    Dense(n_size => 1, softplus),
-)
-
-# v_f_nn = Chain(PositiveDense(1 + n_params, 1))
-# pol_f_nn = Chain(Dense(1 + n_params, 1, softplus))
-
-
+vals = generate_grid_values(m, batch_size)
 # Creating input variables for testing
 vals = generate_grid_values(m, batch_size)
 cpu_vals = deepcopy(vals)
-cpu_k_vals = vec(cpu_vals[1, :])
-cpu_param_vals = cpu_vals[2:end, :]
+cpu_k_vals = vec(cpu_vals[1:state_size, :])
+cpu_param_vals = cpu_vals[state_size + 1:end, :]
 vals = vals |> device
-k_vals = vec(vals[1, :])
-param_vals = vals[2:end, :]
-
+state_vals = vals[1:state_size, :]
+state_vals = ifelse(isa(state_vals, Vector), vec(state_vals), state_vals)
+k_vals = state_vals[1, :]
+param_vals = vals[state_size + 1:end, :]
 # Setting up NN params
 rng = Random.default_rng()
 # Version on the CPU
@@ -89,12 +107,11 @@ nn_params = (vf_ps, pol_ps) |> device
 opt = Optimisers.ADAM() 
 st_opt = Optimisers.setup(ADAM(), nn_params) |> device
 
-
 nets = (v_f_nn, pol_f_nn)
 
 
-v_f_k, v_f_deriv_k, pol_f_k = predict_fn(nets, k_vals, param_vals, nn_params, states)
 
+v_f_k, v_f_deriv_k, pol_f_k = predict_fn(nets, state_vals, param_vals, nn_params, states)
 
 
 plot(
@@ -115,13 +132,13 @@ plot!(
     )
 
 
-hjb_err, pol_err = err_HJB(k_vals, param_vals, v_f_k, v_f_deriv_k, pol_f_k)
+# hjb_err, pol_err = err_HJB(k_vals, param_vals, v_f_k, v_f_deriv_k, pol_f_k)
 
 
 
 
 
-skiba_sobol_seq = generate_model_values("SkibaModel")
+skiba_sobol_seq = generate_model_values("StochasticSkibaModel")
 
 # make sure A_H > A_L
 param_reshuffle = function(p)
@@ -152,8 +169,24 @@ function projection_loss(nets, k, model_params, nn_params, states)
     return loss
 end
 
+function GrowthModels.production_function(m::StochasticSkibaModel, state_vals::AbstractMatrix) 
+    production_function(m, state_vals[1, :], state_vals[2, :])
+end
 
-function upwind_loss(nets, model_params, nn_params, states, upwind_targets, m)
+function upwind_loss(nets, model_params, nn_params, states, upwind_targets, m::StochasticModel)
+    state_vals, upwind_v, upwind_pol, upwind_kdot = upwind_targets
+    v_f_k, _, pol_f_k = predict_fn(nets, state_vals, model_params, nn_params, states, derivative = false)
+    kdot = production_function(m, state_vals[1, :], state_vals[2, :]) .- m.δ .* state_vals[1, :] .- pol_f_k
+
+    n_k = length(v_f_k)
+    upwind_v_err = sqrt(sum(abs2, upwind_v - v_f_k) / n_k)
+    upwind_pol_err = sqrt(sum(abs2, upwind_pol - pol_f_k) / n_k)
+    upwind_kdot_err = sqrt(sum(abs2, upwind_kdot - kdot) / n_k)
+    return upwind_v_err + upwind_pol_err + upwind_kdot_err
+end
+
+
+function upwind_loss(nets, model_params, nn_params, states, upwind_targets, m::DeterministicModel)
     k, upwind_v, upwind_pol, upwind_kdot = upwind_targets
     v_f_k, _, pol_f_k = predict_fn(nets, k, model_params, nn_params, states, derivative = false)
     kdot = production_function(m, k) .- m.δ .* k .- pol_f_k
@@ -166,7 +199,8 @@ function upwind_loss(nets, model_params, nn_params, states, upwind_targets, m)
 end
 
 
-function create_upwind_targets(sm, res, model_params)
+
+function create_upwind_targets(sm::SolvedModel{T}, res, model_params) where {T <: DeterministicModel}
     upwind_v = res.value.v |> device
     upwind_pol = sm.variables[:c] |> device
     upwind_kdot = sm.kdot_function(sm.variables[:k]) |> device
@@ -175,28 +209,68 @@ function create_upwind_targets(sm, res, model_params)
     return  (upwind_k, upwind_v, upwind_pol, upwind_kdot), upwind_model_params
 end
 
+function create_upwind_targets(sm::SolvedModel{T}, res, model_params) where {T <: StochasticModel}
+    upwind_v = res.value.v[:] |> device
+    upwind_pol = sm.variables[:c][:] |> device
+    upwind_kdot = sm.kdot_function.(sm.variables[:k][:, 1], sm.variables[:z][1, :]')[:] |> device
+    upwind_k = sm.variables[:k][:] |> device
+    upwind_z = sm.variables[:z][:] |> device
+
+    upwind_state = vcat(upwind_k', upwind_z')
+    upwind_model_params = repeat(model_params[:, 1], 1, size(upwind_v, 1))
+
+    return  (upwind_state, upwind_v, upwind_pol, upwind_kdot), upwind_model_params
+end
+
+
 
 
 
 
 function composite_loss(nets, k, model_params, nn_params, states, upwind_targets, m)
     proj_l = projection_loss(nets, k, model_params, nn_params, states)
-    upwind_model_params = repeat(model_params[:, 1], 1, size(upwind_targets[1], 1))
+    upwind_model_params = repeat(model_params[:, 1], 1, size(upwind_targets[2], 1))
     upwind_l = upwind_loss(nets, upwind_model_params, nn_params, states, upwind_targets, m)
     return proj_l + upwind_l
 end
 
 
+ed = SkibaModel
 
-
-function draw_random_model(m, sobol_seq) 
+function draw_random_model(::Type{M}, sobol_seq) where {M <: StochasticModel}
+    m = M{Float32}()
     max_ss = maximum(k_steady_state(m))
     state_constraint = check_statespace(m)
     successful_vfi = false
     redraw = !(max_ss < 25) || state_constraint || !successful_vfi
     while redraw
         model_param_candidate = param_reshuffle(next!(sobol_seq))
-        m = SkibaModel(model_param_candidate...) 
+        m = M{Float32}(model_param_candidate...) 
+        max_ss = maximum(k_steady_state(m))
+        try 
+            sm, res = solve_growth_model(m, (Nk = 100,))
+            successful_vfi = true
+        catch e
+            successful_vfi = false
+            continue
+        end
+        max_ss = maximum(k_steady_state(m))
+        state_constraint = check_statespace(m)
+        redraw = !(max_ss < 25) || state_constraint || !successful_vfi
+    end
+    sm, res = solve_growth_model(m, (Nk = 100,))
+    return m, sm, res
+end
+
+function draw_random_model(::Type{M}, sobol_seq) where {M <: DeterministicModel}
+    m = M{Float32}()
+    max_ss = maximum(k_steady_state(m))
+    state_constraint = check_statespace(m)
+    successful_vfi = false
+    redraw = !(max_ss < 25) || state_constraint || !successful_vfi
+    while redraw
+        model_param_candidate = param_reshuffle(next!(sobol_seq))
+        m = M{Float32}(model_param_candidate...) 
         max_ss = maximum(k_steady_state(m))
         try 
             sm, res = solve_growth_model(m, (Nk = 100,))
@@ -215,6 +289,7 @@ end
 
 
 
+draw_random_model(StochasticSkibaModel, skiba_sobol_seq)
 
 epoch_list = [1]
 loss_list = [Inf]

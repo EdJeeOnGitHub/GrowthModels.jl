@@ -33,13 +33,19 @@ end
 
 
 
-k_steady_state_hi_Skiba(α::Real, A_H::Real, ρ::Real, δ::Real, κ::Real) = (α*A_H/(ρ + δ))^(1/(1-α)) + κ
-k_steady_state_lo_Skiba(α::Real, A_L::Real, ρ::Real, δ::Real) = (α*A_L/(ρ + δ))^(1/(1-α))
-k_star_Skiba(α::Real, A_H::Real, A_L::Real, κ::Real) = κ/(1-(A_L/A_H)^(1/α))
+k_steady_state_hi_Skiba(α::T, A_H::T, ρ::T, δ::T, κ::T) where {T <: Real} = (α*A_H/(ρ + δ))^(1/(1-α)) + κ
+k_steady_state_lo_Skiba(α::T, A_L::T, ρ::T, δ::T) where {T <: Real} = (α*A_L/(ρ + δ))^(1/(1-α))
+k_star_Skiba(α::T, A_H::T, A_L::T, κ::T) where {T <: Real} = κ/(1-(A_L/A_H)^(1/α))
 k_steady_state_hi(m::SkibaModel) = (m.α*m.A_H/(m.ρ + m.δ))^(1/(1-m.α)) + m.κ
 k_steady_state_lo(m::SkibaModel) = (m.α*m.A_L/(m.ρ + m.δ))^(1/(1-m.α))
 k_steady_state(m::SkibaModel) = [k_steady_state_lo(m), k_steady_state_hi(m)]
 k_star(m::SkibaModel) = m.κ/(1-(m.A_L/m.A_H)^(1/m.α))
+# dispatch on types
+k_star(::Type{M}, α, A_H, A_L, κ) where {M <: SkibaModel}  = κ/(1-(A_L/A_H)^(1/α))
+k_steady_state(::Type{M}, α, A_H, A_L, ρ, δ, κ) where {M <: SkibaModel}  = [k_steady_state_lo_Skiba.(α, A_L, ρ, δ), k_steady_state_hi_Skiba.(α, A_H, ρ, δ, κ)]
+
+k_star(::Type{M}; α, A_H, A_L, κ, kwargs...) where {M <: SkibaModel}  = κ ./ (1 .- (A_L ./ A_H) .^ (1 ./ α))
+k_steady_state(::Type{M}; α, A_H, A_L, ρ, δ, κ, kwargs...) where {M <: SkibaModel}  = [k_steady_state_lo_Skiba.(α, A_L, ρ, δ), k_steady_state_hi_Skiba.(α, A_H, ρ, δ, κ)]
 
 y_H(m::SkibaModel) = (k) -> m.A_H*max(k - m.κ,0)^m.α
 y_L(m::SkibaModel) = (k) -> m.A_L*k^m.α 
@@ -58,12 +64,13 @@ end
 end
 
 
-@inline production_function(::SkibaModel, k, α::T, A_H::T, A_L::T, κ::T) where {T <: Real} = skiba_production_function.(k, α, A_H, A_L, κ)
-@inline production_function(::SkibaModel, k, params::Vector) = skiba_production_function.(k, params[1], params[2], params[3], params[4])
+@inline production_function(::Type{M}; k, α, A_H, A_L, κ, kwargs...) where {M <: SkibaModel, T <: Real} = skiba_production_function.(k, α, A_H, A_L, κ)
+@inline production_function(::Type{M}, k, α::T, A_H::T, A_L::T, κ::T) where {M <: SkibaModel, T <: Real} = skiba_production_function.(k, α, A_H, A_L, κ)
+@inline production_function(::Type{M}, k, params::Vector) where {M <: SkibaModel} = skiba_production_function.(k, params[1], params[2], params[3], params[4])
 @inline production_function(m::SkibaModel, k) = skiba_production_function.(k, m.α, m.A_H, m.A_L, m.κ)
 
-@inline production_function_prime(::SkibaModel, k, α::T, A_H::T, A_L::T, κ::T) where {T <: Real} = skiba_production_function_prime.(k, α, A_H, A_L, κ)
-@inline production_function_prime(::SkibaModel, k, params::Vector) = skiba_production_function_prime.(k, params[1], params[2], params[3], params[4])
+@inline production_function_prime(::Type{M}, k, α::T, A_H::T, A_L::T, κ::T) where {M <: SkibaModel, T <: Real}  = skiba_production_function_prime.(k, α, A_H, A_L, κ)
+@inline production_function_prime(::Type{M}, k, params::Vector) where {M <: SkibaModel} = skiba_production_function_prime.(k, params[1], params[2], params[3], params[4])
 @inline production_function_prime(m::SkibaModel, k) = skiba_production_function_prime.(k, m.α, m.A_H, m.A_L, m.κ)
 
 

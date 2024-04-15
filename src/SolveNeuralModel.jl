@@ -24,6 +24,42 @@ export PositiveDense,
        plot_pred_output, 
        plot_nn_output
 
+
+
+
+
+
+
+function extract_nn_parameters(::Type{M}, x::AbstractVecOrMat) where {M <: SkibaModel}
+    γ, α, ρ, δ, A_H, A_L, κ = x[2, :], x[3, :], x[4, :], x[5, :], x[6, :], x[7, :], x[8, :]
+    return (γ = γ, α = α, ρ = ρ, δ = δ, A_H = A_H, A_L = A_L, κ = κ)
+end
+
+function extract_nn_parameters(::Type{M}, x::AbstractVecOrMat) where {M <: StochasticSkibaModel}
+    return (
+        γ = x[2, :], 
+        α = x[3, :], 
+        ρ = x[4, :], 
+        δ = x[5, :], 
+        A_H = x[6, :], 
+        A_L = x[7, :], 
+        κ = x[8, :], 
+        θ = x[9, :], 
+        σ = x[10, :]
+    )
+end
+
+function extract_nn_parameters(::Type{M}, x::AbstractVecOrMat) where {M <: SmoothSkibaModel}
+    γ, α, ρ, δ, A_H, A_L, κ, β = x[2, :], x[3, :], x[4, :], x[5, :], x[6, :], x[7, :], x[8, :], x[9, :]
+    return (γ = γ, α = α, ρ = ρ, δ = δ, A_H = A_H, A_L = A_L, κ = κ, β = β)
+end
+
+function extract_nn_parameters(::Type{M}, x::AbstractVecOrMat) where {M <: RamseyCassKoopmansModel}
+    γ, α, ρ, δ, A = x[2, :], x[3, :], x[4, :], x[5, :], x[6, :]
+    return (γ = γ, α = α, ρ = ρ, δ = δ, A = A)
+end
+
+
 struct PositiveDense{F1, F2} <: Lux.AbstractExplicitLayer
     activation
     in_dims::Int
@@ -62,6 +98,7 @@ abstract type GrowthModelLayer <: Lux.AbstractExplicitLayer end
 
 struct MicawberLayer{F1, F2, T <: Model} <: GrowthModelLayer 
     activation
+    state_size::Int
     m::T
     in_dims::Int
     out_dims::Int
@@ -71,6 +108,7 @@ end
 
 struct SteadyStateLayer{F1, F2, T <: Model} <: GrowthModelLayer
     activation
+    state_size::Int
     m::T
     in_dims::Int
     out_dims::Int
@@ -78,13 +116,13 @@ struct SteadyStateLayer{F1, F2, T <: Model} <: GrowthModelLayer
     init_bias::Function
 end
 
-function MicawberLayer(in_dims::Int, out_dims::Int, activation, m::Model; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
-    return MicawberLayer{typeof(init_weight), typeof(init_bias), typeof(m)}(activation, m, in_dims, out_dims, init_weight, init_bias)
+function MicawberLayer(in_dims::Int, out_dims::Int, activation, m::Model, state_size = 1; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
+    return MicawberLayer{typeof(init_weight), typeof(init_bias), typeof(m)}(activation, state_size, m, in_dims, out_dims, init_weight, init_bias)
 end
 
 
-function SteadyStateLayer(in_dims::Int, out_dims::Int, activation, m::Model; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
-    return SteadyStateLayer{typeof(init_weight), typeof(init_bias), typeof(m)}(activation, m, in_dims, out_dims, init_weight, init_bias)
+function SteadyStateLayer(in_dims::Int, out_dims::Int, activation, m::Model, state_size = 1; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
+    return SteadyStateLayer{typeof(init_weight), typeof(init_bias), typeof(m)}(activation, state_size, m, in_dims, out_dims, init_weight, init_bias)
 end
 
 function Lux.initialparameters(rng::AbstractRNG, layer::GrowthModelLayer)
@@ -95,33 +133,33 @@ end
 Lux.initialstates(::AbstractRNG, ::GrowthModelLayer) = NamedTuple()
 Lux.parameterlength(l::GrowthModelLayer) = l.out_dims * l.in_dims + l.out_dims
 
-m = SkibaModel()
 
-function (l::MicawberLayer{F1, F2, M})(x::Union{AbstractVecOrMat, T}, ps, st::NamedTuple) where {F1, F2, T <: Real, M <: SkibaModel}
-    k = x[1, :]
-    γ, α, ρ, δ, A_H, A_L, κ = x[2, :], x[3, :], x[4, :], x[5, :], x[6, :], x[7, :], x[8, :]
-    k_s = κ ./ (1 .- (A_L ./ A_H).^(1 ./ α))
+function (l::MicawberLayer{F1, F2, M})(x::Union{AbstractVecOrMat, T}, ps, st::NamedTuple) where {F1, F2, T <: Real, M <: Model}
+    states = x[1:l.state_size, :]
+    ## WARNING: Currently just taking first input, since we know model params 
+    # don't vary within batch
+    params = extract_nn_parameters(M, x[:, 1])
+    k_s = k_star(M; params...)
+    # k_s = κ ./ (1 .- (A_L ./ A_H).^(1 ./ α))
     # abs to ensure positive in input layer
     # difference between x and k_star
-    y = (ps.weight * (k .- k_s)') .+ ps.bias
+    y = (ps.weight * (states .- k_s)) .+ ps.bias
     return l.activation.(y), st
 end
 
 
-k_steady_state_hi_Skiba(α::Real, A_H::Real, ρ::Real, δ::Real, κ::Real) = (α*A_H/(ρ + δ))^(1/(1-α)) + κ
-k_steady_state_lo_Skiba(α::Real, A_L::Real, ρ::Real, δ::Real) = (α*A_L/(ρ + δ))^(1/(1-α))
 
-function (l::SteadyStateLayer{F1, F2, M})(x::Union{AbstractVecOrMat, T}, ps, st::NamedTuple) where {F1, F2, T <: Real, M <: SkibaModel}
-    k = x[1, :]
-    γ, α, ρ, δ, A_H, A_L, κ = x[2, :], x[3, :], x[4, :], x[5, :], x[6, :], x[7, :], x[8, :]
-    # abs to ensure positive in input layer
-    # difference between x and k_star
-    k_ss_hi = (α .* A_H ./ (ρ .+ δ)) .^ (1 ./ (1 .- α)) .+ κ
-    k_ss_lo = (α .* A_L ./ (ρ .+ δ)) .^ (1 ./ (1 .- α))
-    # k_ss_hi = GrowthModels.k_steady_state_hi_Skiba.(α, A_H, ρ, δ, κ)
-    # k_ss_lo = GrowthModels.k_steady_state_lo_Skiba.(α, A_L, ρ, δ)
-    k_ss = [k_ss_lo; k_ss_hi] 
-    diff = -1 *(k_ss .- k')
+
+# k_steady_state_hi_Skiba(α::Real, A_H::Real, ρ::Real, δ::Real, κ::Real) = (α*A_H/(ρ + δ))^(1/(1-α)) + κ
+# k_steady_state_lo_Skiba(α::Real, A_L::Real, ρ::Real, δ::Real) = (α*A_L/(ρ + δ))^(1/(1-α))
+
+function (l::SteadyStateLayer{F1, F2, M})(x::Union{AbstractVecOrMat, T}, ps, st::NamedTuple) where {F1, F2, T <: Real, M <: Model}
+    states = x[1:l.state_size, :]
+    ## WARNING: Currently just taking first input, since we know model params 
+    # don't vary within batch
+    params = extract_nn_parameters(M, x[:, 1])
+    k_ss = reduce(vcat, k_steady_state(M; params...))
+    diff = -1 *(k_ss .- states[1, :]')
 
     abs_diff = abs.(diff)
     distances_indices = argmin(abs_diff, dims = 1)
@@ -131,14 +169,21 @@ function (l::SteadyStateLayer{F1, F2, M})(x::Union{AbstractVecOrMat, T}, ps, st:
 end
 
 
-function err_HJB(k, model_params, v_f_k, v_f_deriv_k, pol_f_k)
-    γ, α, ρ, δ, A_H, A_L, κ = model_params[1, :], model_params[2, :], model_params[3, :], model_params[4, :], model_params[5, :], model_params[6, :], model_params[7, :]
+function err_HJB(::Type{M}, k, model_params, v_f_k, v_f_deriv_k, pol_f_k) where {M <: DeterministicModel}
+    params = extract_nn_parameters(M, model_params)
+    (; γ, α, ρ, δ, A_H, A_L, κ) = params
     v_f_deriv_k = max.(v_f_deriv_k, Float32(1e-4))
     c = v_f_deriv_k .^ (-1 ./ γ)
-    hjb_err = ρ .* v_f_k  .- (c .^ (1 .- γ)) ./ (1 .- γ) .- v_f_deriv_k .* (GrowthModels.skiba_production_function.(k, α, A_H, A_L, κ) .- δ .* k .- pol_f_k)
+    hjb_err = ρ .* v_f_k  .- (c .^ (1 .- γ)) ./ (1 .- γ) .- v_f_deriv_k .* (production_function(M, k, params...) .- δ .* k .- pol_f_k)
     pol_err = c .- pol_f_k
     return hjb_err, pol_err
 end
+
+function err_HJB(::Type{M}, k, z, model_params, v_f_k, v_f_deriv_k, pol_f_k) where {M <: StochasticModel}
+    error("not yet implemented")
+    return hjb_err, pol_err
+end
+
 
 function monotonicity_penalty(outputs)
     penalty = 0.0
@@ -177,7 +222,7 @@ function generate_model_values(model_name)
             # γ, α, ρ, δ, A_H, A_L, κ
             # "ub" => [10.0, 1.0, 1.0, 1.0, 20.0, 20.0, 20.0],
             # "lb" => [0.0,  0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-            "ub" => [3.0, 0.9, 0.9, 0.5, 1.0, 1.0, 5.0],
+            "ub" => [3.0, 0.9, 0.9, 0.5, 1.0, 1.0, 10.0],
             "lb" => [0.0,  0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         ),
         "SmoothSkibaModel" => Dict(
@@ -192,7 +237,7 @@ function generate_model_values(model_name)
     ),
         "StochasticSkibaModel" => Dict(
             # γ, α, ρ, δ, A_H, A_L, κ, θ, σ
-            "ub" => [10.0, 1.0, 1.0, 1.0, 20.0, 20.0, 20.0, 1.0, 3.0],
+            "ub" => [3.0, 0.9, 0.9, 0.5, 1.0, 1.0, 10.0, 1.0, 3.0],
             "lb" => [0.0,  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         )
     )
@@ -205,7 +250,25 @@ function generate_model_values(model_name)
     return sobol_seq
 end
 
-function generate_grid_values(m::Model, batch_size::Int; seed = 1234)
+function generate_grid_values(m::StochasticModel, batch_size::Int; seed = 1234)
+    Random.seed!(seed)
+    k_ss = k_steady_state(m)
+    # k_st = min(GrowthModels.k_star(m), maximum(k_ss))
+    k_st = maximum(k_ss);
+    # model_centers = sample([k_ss; k_st], batch_size ÷ 2, replace = true)
+    # model_points = abs.(randn(length(model_centers)) .* 0.01 .+ model_centers)
+    sob_seq = SobolSeq(1e-5, 1.3*maximum(k_ss))
+    grid_points = reduce(hcat, next!(sob_seq) for i = 1:(batch_size ÷ 2))
+    # points = sort(vcat(model_points, grid_points[1, :]))
+    points = sort(vcat(grid_points[1, :], grid_points[1, :]))
+    m_vals = params(m)
+    m_grid = repeat(m_vals, 1, batch_size)
+    zs = exp.(randn(batch_size))
+    vals = vcat(points', zs', m_grid)
+    return Float32.(vals)
+end
+
+function generate_grid_values(m::DeterministicModel, batch_size::Int; seed = 1234)
     Random.seed!(seed)
     k_ss = k_steady_state(m)
     # k_st = min(GrowthModels.k_star(m), maximum(k_ss))
@@ -222,8 +285,12 @@ function generate_grid_values(m::Model, batch_size::Int; seed = 1234)
     return Float32.(vals)
 end
 
-function f_nn(nn, k, model_params, ps, st)
+function f_nn(nn, k::AbstractVector, model_params, ps, st)
     return first(Lux.apply(nn, vcat(k', model_params), ps, st))
+end
+
+function f_nn(nn, k::AbstractMatrix, model_params, ps, st)
+    return first(Lux.apply(nn, vcat(k, model_params), ps, st))
 end
 
 
