@@ -207,6 +207,16 @@ function solve_growth_model(m::Model)
     return sm, res
 end
 
+function solve_growth_model(m::Model, args)
+    hyperparams = StateSpaceHyperParams(m; args...)
+    state = StateSpace(m, hyperparams)
+    init_value = Value(state)
+
+    res = solve_HJB(m, hyperparams, init_value = init_value, maxit = 1000, verbose = false)
+    sm = SolvedModel(m, res)
+    return sm, res
+end
+
 
 """
     solve_growth_model(model::GrowthModels.Model, init_value::GrowthModels.Value)

@@ -32,8 +32,8 @@ batch_size = 500
 using BenchmarkTools
 
 
-c_size = 12
-n_size = 24
+c_size = 24
+n_size = 48
 
 v_f_nn = Chain(
     # both read in simultaneously
@@ -90,12 +90,10 @@ opt = Optimisers.ADAM()
 st_opt = Optimisers.setup(ADAM(), nn_params) |> device
 
 
-fns = (v_f, v_f_deriv, pol_f)
 nets = (v_f_nn, pol_f_nn)
 
 
-v_f_k, v_f_deriv_k, pol_f_k = predict_fn(fns, nets, k_vals, param_vals, vf_ps, pol_ps, vf_st, pol_st)
-
+v_f_k, v_f_deriv_k, pol_f_k = predict_fn(nets, k_vals, param_vals, nn_params, states)
 
 
 
@@ -145,22 +143,8 @@ end
 
 
 
-function create_upwind_comparison(fns, nets, m, k, param_vals, vf_ps, vf_st, pol_ps, pol_st)
-    v_f, v_f_deriv, pol_f = fns
-    cu_sm_k = cu(k)
-    if size(param_vals, 2) != size(cu_sm_k, 1)
-        test_param_vals = generate_grid_values(m, size(cu_sm_k, 1))[2:end, :]
-    else
-        test_param_vals = param_vals
-    end
-    u_v_f_k = v_f(nets[1], cu_sm_k, test_param_vals, vf_ps, vf_st)
-    u_pol_f_k = pol_f(nets[2], cu_sm_k, test_param_vals, pol_ps, pol_st)
-    u_kdot_k = production_function(m, cu_sm_k) .- m.δ .* cu_sm_k .- pol_f_k
-    return vec(u_v_f_k), vec(u_pol_f_k), vec(u_kdot_k)
-end
-
-function loss_fn(fns, nets, k, model_params, vf_ps, pol_ps, vf_st, pol_st)
-    v_f_k, v_f_deriv_k, pol_f_k = predict_fn(fns, nets, k, model_params, vf_ps, pol_ps, vf_st, pol_st)
+function projection_loss(nets, k, model_params, nn_params, states)
+    v_f_k, v_f_deriv_k, pol_f_k = predict_fn(nets, k, model_params, nn_params, states)
     hjb_err, pol_err = err_HJB(k, model_params, v_f_k, v_f_deriv_k, pol_f_k)
     n_k = length(k)
     neg_deriv_penalty = sum(exp.(min.(v_f_deriv_k, 0)))
@@ -169,8 +153,12 @@ function loss_fn(fns, nets, k, model_params, vf_ps, pol_ps, vf_st, pol_st)
 end
 
 
-function surrogate_loss(upwind_v, upwind_pol, upwind_kdot, v_f_k, pol_f_k, kdot)
-    n_k = length(upwind_v)
+function upwind_loss(nets, model_params, nn_params, states, upwind_targets, m)
+    k, upwind_v, upwind_pol, upwind_kdot = upwind_targets
+    v_f_k, _, pol_f_k = predict_fn(nets, k, model_params, nn_params, states, derivative = false)
+    kdot = production_function(m, k) .- m.δ .* k .- pol_f_k
+
+    n_k = length(v_f_k)
     upwind_v_err = sqrt(sum(abs2, upwind_v - v_f_k) / n_k)
     upwind_pol_err = sqrt(sum(abs2, upwind_pol - pol_f_k) / n_k)
     upwind_kdot_err = sqrt(sum(abs2, upwind_kdot - kdot) / n_k)
@@ -178,56 +166,28 @@ function surrogate_loss(upwind_v, upwind_pol, upwind_kdot, v_f_k, pol_f_k, kdot)
 end
 
 
-function composite_loss(fns, 
-                        nets, 
-                        k, 
-                        model_params, 
-                        vf_ps, 
-                        pol_ps, 
-                        vf_st, 
-                        pol_st,
-                        upwind_k,
-                        upwind_v,
-                        upwind_pol,
-                        upwind_kdot,
-                        m
-                        )
-    v_f_k, v_f_deriv_k, pol_f_k = predict_fn(fns, nets, k, model_params, vf_ps, pol_ps, vf_st, pol_st)
-    hjb_err, pol_err = err_HJB(k, model_params, v_f_k, v_f_deriv_k, pol_f_k)
-    n_k = length(k)
-    neg_deriv_penalty = sum(exp.(min.(v_f_deriv_k, 0)))
-    projection_loss = sqrt(sum(abs, pol_err) / n_k) + 
-        sqrt(sum(abs, hjb_err) / n_k) + 
-        sqrt(sum(abs, neg_deriv_penalty) / n_k) 
-    
-    nn_upwind_v_f_k, nn_upwind_pol_f_k, nn_upwind_kdot = create_upwind_comparison(fns, nets, m, upwind_k,  model_params, vf_ps, vf_st, pol_ps, pol_st)
-
-    s_loss = surrogate_loss(upwind_v, upwind_pol, upwind_kdot, nn_upwind_v_f_k, nn_upwind_pol_f_k, nn_upwind_kdot)
-    return projection_loss/3 + s_loss/3
+function create_upwind_targets(sm, res, model_params)
+    upwind_v = res.value.v |> device
+    upwind_pol = sm.variables[:c] |> device
+    upwind_kdot = sm.kdot_function(sm.variables[:k]) |> device
+    upwind_model_params = repeat(model_params[:, 1], 1, size(upwind_v, 1))
+    upwind_k = sm.variables[:k] |> device
+    return  (upwind_k, upwind_v, upwind_pol, upwind_kdot), upwind_model_params
 end
 
 
 
-function draw_random_model(sobol_seq, epoch, n_redraw) 
-    if epoch % n_redraw  == 0 || epoch == 1
-        m = SkibaModel(param_reshuffle(next!(sobol_seq))...) 
-        max_ss = maximum(k_steady_state(m))
-        state_constraint = check_statespace(m)
-        successful_vfi = false
-        while !(max_ss < 25) && !state_constraint && !successful_vfi
-            model_param_candidate = param_reshuffle(next!(skiba_sobol_seq))
-            m = SkibaModel(model_param_candidate...) 
-            max_ss = maximum(k_steady_state(m))
-            sm, res = try 
-                solve_growth_model(m)
-                successful_vfi = true
-            catch e
-                successful_vfi = false
-            end
-        end
-    end
-    return m, sm, res, max_ss
+
+
+function composite_loss(nets, k, model_params, nn_params, states, upwind_targets, m)
+    proj_l = projection_loss(nets, k, model_params, nn_params, states)
+    upwind_model_params = repeat(model_params[:, 1], 1, size(upwind_targets[1], 1))
+    upwind_l = upwind_loss(nets, upwind_model_params, nn_params, states, upwind_targets, m)
+    return proj_l + upwind_l
 end
+
+
+
 
 function draw_random_model(m, sobol_seq) 
     max_ss = maximum(k_steady_state(m))
@@ -239,7 +199,7 @@ function draw_random_model(m, sobol_seq)
         m = SkibaModel(model_param_candidate...) 
         max_ss = maximum(k_steady_state(m))
         try 
-            sm, res = solve_growth_model(m)
+            sm, res = solve_growth_model(m, (Nk = 100,))
             successful_vfi = true
         catch e
             successful_vfi = false
@@ -249,36 +209,40 @@ function draw_random_model(m, sobol_seq)
         state_constraint = check_statespace(m)
         redraw = !(max_ss < 25) || state_constraint || !successful_vfi
     end
-    sm, res = solve_growth_model(m)
+    sm, res = solve_growth_model(m, (Nk = 100,))
     return m, sm, res
 end
+
+
+
 
 epoch_list = [1]
 loss_list = [Inf]
 n_redraw = 1
 for epoch in epoch_list[end]:1_000_000
-# epoch = 1
-# epoch = epoch_list[end] + 1
 
     if epoch % n_redraw  == 0 || epoch == 1
         m, sm, res = draw_random_model(m, skiba_sobol_seq); 
     end
     m = m |> device
     random_vals = generate_grid_values(m, batch_size, seed = epoch) 
-    k_vals = random_vals[1, :]
-    param_vals = random_vals[2:end, :]
+
+    k_vals, param_vals = random_vals[1, :], random_vals[2:end, :]
+
     cpu_k_vals = deepcopy(k_vals)
     cpu_param_vals = deepcopy(param_vals)
+
     k_vals = k_vals |> device
     param_vals = param_vals |> device
 
-    upwind_k = sm.variables[:k] |> device
-    upwind_v = res.value.v |> device
-    upwind_pol = sm.variables[:c] |> device
-    upwind_kdot = sm.kdot_function(cpu_k_vals) |> device
-   
+    upwind_targets, upwind_model_params = create_upwind_targets(sm, res, param_vals)
+
+
+
+
     loss, back = Zygote.pullback(nn_params) do p
-        composite_loss(fns, nets, k_vals, param_vals, p[1], p[2], states[1], states[2],  upwind_k, upwind_v, upwind_pol, upwind_kdot, m)
+        # composite_loss(nets, k_vals, param_vals, p, states, upwind_targets, m)
+        upwind_loss(nets, upwind_model_params, p, states, upwind_targets, m)
     end;
 
     if epoch % 100 == 1
@@ -288,9 +252,9 @@ for epoch in epoch_list[end]:1_000_000
     push!(loss_list, loss)
   
 
-    if epoch % 100 == 1
+    if epoch % 1000 == 1
         try 
-            p_model_output = plot_nn_output(fns, nets, k_vals, param_vals, nn_params, states, epoch_list, loss_list, upwind_k, upwind_v, upwind_pol, upwind_kdot, cpu_dev)
+            p_model_output = plot_nn_output(nets, k_vals, param_vals, nn_params, states, epoch_list, loss_list, upwind_targets, cpu_dev)
             display(p_model_output)
         catch e 
             println(e)
@@ -307,7 +271,10 @@ for epoch in epoch_list[end]:1_000_000
 end;
 
 
+length(epoch_list)
 savefig("skiba-nn-fit.pdf")
+
+
 
 
 

@@ -17,10 +17,9 @@ export PositiveDense,
        calculate_lipschitz_constant, 
        generate_model_values, 
        generate_grid_values, 
-       v_f, 
-       pol_f, 
+       f_nn,
+       f_nn_deriv,
        dfx, 
-       v_f_deriv, 
        predict_fn, 
        plot_pred_output, 
        plot_nn_output
@@ -133,16 +132,8 @@ end
 
 
 function err_HJB(k, model_params, v_f_k, v_f_deriv_k, pol_f_k)
-    non_neg_deriv_k = v_f_deriv_k .> 0
-
-
-    v_f_k = v_f_k[non_neg_deriv_k]
-    v_f_deriv_k = v_f_deriv_k[non_neg_deriv_k]
-    pol_f_k = pol_f_k[non_neg_deriv_k]
-    k = k[non_neg_deriv_k]
-
-    γ, α, ρ, δ, A_H, A_L, κ = model_params[1, non_neg_deriv_k], model_params[2, non_neg_deriv_k], model_params[3, non_neg_deriv_k], model_params[4, non_neg_deriv_k], model_params[5, non_neg_deriv_k], model_params[6, non_neg_deriv_k], model_params[7, non_neg_deriv_k]
-    # v_f_deriv_k = max.(v_f_deriv_k, Float32(1e-4))
+    γ, α, ρ, δ, A_H, A_L, κ = model_params[1, :], model_params[2, :], model_params[3, :], model_params[4, :], model_params[5, :], model_params[6, :], model_params[7, :]
+    v_f_deriv_k = max.(v_f_deriv_k, Float32(1e-4))
     c = v_f_deriv_k .^ (-1 ./ γ)
     hjb_err = ρ .* v_f_k  .- (c .^ (1 .- γ)) ./ (1 .- γ) .- v_f_deriv_k .* (GrowthModels.skiba_production_function.(k, α, A_H, A_L, κ) .- δ .* k .- pol_f_k)
     pol_err = c .- pol_f_k
@@ -223,29 +214,18 @@ function generate_grid_values(m::Model, batch_size::Int; seed = 1234)
     # model_points = abs.(randn(length(model_centers)) .* 0.01 .+ model_centers)
     sob_seq = SobolSeq(1e-5, 1.3*maximum(k_ss))
     grid_points = reduce(hcat, next!(sob_seq) for i = 1:(batch_size ÷ 2))
-
-    @show maximum(grid_points)
     # points = sort(vcat(model_points, grid_points[1, :]))
     points = sort(vcat(grid_points[1, :], grid_points[1, :]))
-
     m_vals = params(m)
     m_grid = repeat(m_vals, 1, batch_size)
     vals = vcat(points', m_grid)
     return Float32.(vals)
 end
 
-
-function v_f(nn, k, model_params, ps, st)
+function f_nn(nn, k, model_params, ps, st)
     return first(Lux.apply(nn, vcat(k', model_params), ps, st))
-
-end
-function v_f(nn, k, ps, st)
-    return first(Lux.apply(nn, k, ps, st)) 
 end
 
-function pol_f(nn, k, model_params, ps, st)
-    return first(Lux.apply(nn, vcat(k', model_params), ps, st)) 
-end
 
 # Calculate df/dx, returning f(x) and derivative of f(x) wrt x where x is a vector
 # This isn't actually that useful as to use in NN need to calculate dfx/dparams and 
@@ -269,9 +249,9 @@ end
 
 # finite diff accounting for jumps
 # this one reuses v(k)
-function v_f_deriv(nn, v, k, model_params, ps, st; h = Float32(1e-3))
-    fwd_v = v_f(nn, k .+ h, model_params, ps, st)
-    bwd_v = v_f(nn, k .- h, model_params, ps, st)
+function f_nn_deriv(nn, v, k, model_params, ps, st; h = Float32(1e-3))
+    fwd_v = f_nn(nn, k .+ h, model_params, ps, st)
+    bwd_v = f_nn(nn, k .- h, model_params, ps, st)
     central_diff = (fwd_v .- bwd_v) ./ (2 * h)
     fwd_diff = (fwd_v .- v) ./ h
     bwd_diff = (v .- bwd_v) ./ h
@@ -280,10 +260,10 @@ function v_f_deriv(nn, v, k, model_params, ps, st; h = Float32(1e-3))
     return diffs[argmin(abs_diffs, dims = 1)]
 end
 # finite diff, jumps, computes v(k)
-function v_f_deriv(nn, k, model_params, ps, st; h = Float32(1e-3))
-    v = v_f(nn, k, model_params, ps, st)
-    fwd_v = v_f(nn, k .+ h, model_params, ps, st)
-    bwd_v = v_f(nn, k .- h, model_params, ps, st)
+function f_nn_deriv(nn, k, model_params, ps, st; h = Float32(1e-3))
+    v = f_nn(nn, k, model_params, ps, st)
+    fwd_v = f_nn(nn, k .+ h, model_params, ps, st)
+    bwd_v = f_nn(nn, k .- h, model_params, ps, st)
     central_diff = (fwd_v .- bwd_v) ./ (2 * h)
     fwd_diff = (fwd_v .- v) ./ h
     bwd_diff = (v .- bwd_v) ./ h
@@ -293,15 +273,16 @@ function v_f_deriv(nn, k, model_params, ps, st; h = Float32(1e-3))
 end
 
 
-
-
-function predict_fn(fns, nets, k, model_params, vf_ps, pol_ps, vf_st, pol_st)
-    v_f, v_f_deriv, pol_f = fns
+function predict_fn(nets, k, model_params, nn_params, nn_states; derivative = true)
     v_nn, pol_nn = nets
-    v_f_k = v_f(v_nn, k, model_params, vf_ps, vf_st)
-    v_f_deriv_k = v_f_deriv(v_nn, v_f_k, k, model_params, vf_ps, vf_st)
-    pol_f_k = pol_f(pol_nn, k, model_params, pol_ps, pol_st)
-    return  vec(v_f_k), vec(v_f_deriv_k), vec(pol_f_k)
+    v_f_k = f_nn(v_nn, k, model_params, nn_params[1], nn_states[1]) |> vec
+    if derivative
+        v_f_deriv_k = f_nn_deriv(v_nn, v_f_k, k, model_params, nn_params[1], nn_states[1]) |> vec
+    else
+        v_f_deriv_k = nothing
+    end
+    pol_f_k = f_nn(pol_nn, k, model_params, nn_params[2], nn_states[2]) |> vec
+    return v_f_k, v_f_deriv_k, pol_f_k
 end
 
 
@@ -333,8 +314,18 @@ function plot_pred_output(k_vals, v_f_k, v_f_deriv_k, pol_f_k)
         )
     return p1, p2, p3
 end
+function moving_average(data, window_size)
+    # Calculate the moving average using a window of specified size
+    filter_length = length(data) - window_size + 1
+    ma = zeros(filter_length)
+    for i in 1:filter_length
+        ma[i] = sum(filter(!isfinite, filter(!isnan, data[i:i+window_size-1]))) / window_size
+    end
+    return ma
+end
 
-function plot_nn_output(fns, 
+
+function plot_nn_output( 
                         nets, 
                         k_vals, 
                         param_vals, 
@@ -342,53 +333,53 @@ function plot_nn_output(fns,
                         states, 
                         epoch_list, 
                         loss_list, 
-                        upwind_k,
-                        upwind_v,
-                        upwind_pol,
-                        upwind_kdot,
+                        upwind_targets,
                         cpu_dev) 
-        cpu_k_vals = k_vals |> cpu_dev
-        cpu_param_vals = param_vals |> cpu_dev
-        v_f_k, v_f_deriv_k, pol_f_k = predict_fn(fns, nets, k_vals, param_vals, nn_params[1], nn_params[2], states[1], states[2]) |> cpu_dev
-        kdot = production_function(m, cpu_k_vals) .- cpu_param_vals[4, :] .* cpu_k_vals .- pol_f_k
-        hjb_err, pol_err = err_HJB(cpu_k_vals, cpu_param_vals, v_f_k, v_f_deriv_k, pol_f_k)
+    upwind_k,  upwind_v, upwind_pol, upwind_kdot = upwind_targets
 
+    cpu_k_vals = k_vals |> cpu_dev
+    cpu_param_vals = param_vals |> cpu_dev
+    v_f_k, v_f_deriv_k, pol_f_k = predict_fn(nets, k_vals, param_vals, nn_params, states) |> cpu_dev
+    kdot = production_function(m, cpu_k_vals) .- cpu_param_vals[4, :] .* cpu_k_vals .- pol_f_k
+    hjb_err, pol_err = err_HJB(cpu_k_vals, cpu_param_vals, v_f_k, v_f_deriv_k, pol_f_k)
 
-        p1, p2, p3 = plot_pred_output(cpu_k_vals, v_f_k, v_f_deriv_k, pol_f_k)
-        plot!(p1, Array(upwind_k), Array(upwind_v), linewidth = 2, colour = :red, label = "Upwind")
-        plot!(p3, Array(upwind_k), Array(upwind_pol), linewidth = 2, colour = :red, label = "Upwind")
+    p1, p2, p3 = plot_pred_output(cpu_k_vals, v_f_k, v_f_deriv_k, pol_f_k)
+    plot!(p1, Array(upwind_k), Array(upwind_v), linewidth = 2, colour = :red, label = "Upwind")
+    plot!(p3, Array(upwind_k), Array(upwind_pol), linewidth = 2, colour = :red, label = "Upwind")
 
-        p4 = plot(
-            epoch_list, 
-            loss_list, 
-            label = "Loss", 
-            yscale = :log10
-            )
-        p5 = plot(
-            cpu_k_vals, 
-            kdot, 
-            label = "",
-            xlabel = "\$k\$",
-            ylabel = "\$\\dot{k}\$",
-            )
-        plot!(p5, Array(upwind_k), Array(upwind_kdot), label = "Upwind", colour = :red, linewidth = 2)
-        p6 = plot(
-            cpu_k_vals, 
-            hjb_err, 
-            seriestype = :scatter,
-            label = "",
-            xlabel = "\$k\$",
-            ylabel = "\$HJB Error\$",
-            )
-        p7 = plot(
-            cpu_k_vals, 
-            pol_err, 
-            seriestype = :scatter,
-            label = "",
-            xlabel = "\$k\$",
-            ylabel = "\$Policy Error\$",
-            )
-        return plot(p1, p2, p3, p4, p5, p6, p7, layout = (4, 2), size = (800, 800))
+    p4 = plot(
+        epoch_list, 
+        loss_list, 
+        label = "Loss", 
+        yscale = :log10,
+        alpha = 0.2
+        )
+
+    p5 = plot(
+        cpu_k_vals, 
+        kdot, 
+        label = "",
+        xlabel = "\$k\$",
+        ylabel = "\$\\dot{k}\$",
+        )
+    plot!(p5, Array(upwind_k), Array(upwind_kdot), label = "Upwind", colour = :red, linewidth = 2)
+    p6 = plot(
+        cpu_k_vals, 
+        hjb_err, 
+        seriestype = :scatter,
+        label = "",
+        xlabel = "\$k\$",
+        ylabel = "\$HJB Error\$",
+        )
+    p7 = plot(
+        cpu_k_vals, 
+        pol_err, 
+        seriestype = :scatter,
+        label = "",
+        xlabel = "\$k\$",
+        ylabel = "\$Policy Error\$",
+        )
+    return plot(p1, p2, p3, p4, p5, p6, p7, layout = (4, 2), size = (800, 800))
 end
 
 end
