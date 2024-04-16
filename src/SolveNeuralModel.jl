@@ -188,15 +188,12 @@ function (l::TechnologyLayer{F1, F2, M})(x::Union{AbstractVecOrMat, T}, ps, st::
     ## WARNING: Currently just taking first input, since we know model params 
     # don't vary within batch
     params = extract_nn_parameters(M, x[:, 1])
-    param_vec = reduce(vcat, [params...])
-    prod_output = production_function(M, states,  param_vec)
+    prod_output = production_function(M, states, params)
     y = (ps.weight * prod_output') .+ ps.bias
     return l.activation.(y), st
 end
 
 
-# k_steady_state_hi_Skiba(α::Real, A_H::Real, ρ::Real, δ::Real, κ::Real) = (α*A_H/(ρ + δ))^(1/(1-α)) + κ
-# k_steady_state_lo_Skiba(α::Real, A_L::Real, ρ::Real, δ::Real) = (α*A_L/(ρ + δ))^(1/(1-α))
 
 function (l::SteadyStateLayer{F1, F2, M})(x::Union{AbstractVecOrMat, T}, ps, st::NamedTuple) where {F1, F2, T <: Real, M <: Model}
     states = x[1:l.state_size, :]

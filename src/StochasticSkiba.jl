@@ -90,7 +90,7 @@ end
 
 @inline production_function(::Type{M}; k, z, α, A_H, A_L, κ, kwargs...) where {M <: StochasticSkibaModel} = stochastic_skiba_production_function(k, z, α, A_H, A_L, κ)
 @inline production_function(::Type{M}, k, z, α::T, A_H::T, A_L::T, κ::T) where {M <: StochasticSkibaModel, T <: Real} = stochastic_skiba_production_function(k, z, α, A_H, A_L, κ)
-@inline production_function(::Type{M}, k, z, params::Vector{T}) where {M <: StochasticSkibaModel, T <: Real} = stochastic_skiba_production_function(k, z, params[1], params[2], params[3], params[4])
+@inline production_function(::Type{M}, k, z, params::AbstractVector{T}) where {M <: StochasticSkibaModel, T <: Real} = stochastic_skiba_production_function(k, z, params[1], params[2], params[3], params[4])
 @inline production_function(m::StochasticSkibaModel, k, z) = stochastic_skiba_production_function(k, z, m.α, m.A_H, m.A_L, m.κ)
 
 @inline production_function_prime(::Type{M}, k, z, α::T, A_H::T, A_L::T, κ::T) where {M <: StochasticSkibaModel, T <: Real} = skiba_production_function_prime(k, z, α, A_H, A_L, κ)

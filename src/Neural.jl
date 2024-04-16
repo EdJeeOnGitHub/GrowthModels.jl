@@ -14,9 +14,10 @@ CUDA.allowscalar(false)
 
 Random.seed!(1234)
 
+
 # Dispatching for NN specific stuff
 function GrowthModels.production_function(::Type{M}, states::AbstractMatrix, params) where {M <: StochasticSkibaModel}
-    production_function(M, states[1, :], states[2, :], reduce(vcat, [params...]))
+    production_function(M; k = states[1, :], z = states[2, :], params...)
 end
 function GrowthModels.production_function(m::StochasticSkibaModel, state_vals::AbstractMatrix) 
     production_function(m, state_vals[1, :], state_vals[2, :])
@@ -32,7 +33,7 @@ m = StochasticSkibaModel{Float32}() |> device
 model_params = Float32.(params(m))
 n_params = length(model_params)
 
-batch_size = 200
+batch_size = 100
 
 
 function ValueFunctionChain(m::Model, c_size, n_params)
@@ -47,11 +48,11 @@ function ValueFunctionChain(m::Model, c_size, n_params)
             NoOpLayer()
         ),
         x -> vcat(x...),
-        BatchNorm(c_size*3 + state_size + n_params, relu, track_stats = false),
+        # BatchNorm(c_size*3 + state_size + n_params, relu, track_stats = false),
         Dense(c_size*3 + state_size + n_params, n_size, relu),
-        BatchNorm(n_size, relu, track_stats = false),
+        # BatchNorm(n_size, relu, track_stats = false),
         Dense(n_size, n_size, relu),
-        BatchNorm(n_size, relu, track_stats = false),
+        # BatchNorm(n_size, relu, track_stats = false),
         Dense(n_size, 1)
     )
     return v_f_nn
@@ -68,11 +69,11 @@ function PolicyFunctionChain(m::Model, c_size, n_params)
             NoOpLayer()
         ),
         x -> vcat(x...),
-        BatchNorm(c_size*3 + state_size + n_params, relu, track_stats = false),
+        # BatchNorm(c_size*3 + state_size + n_params, relu, track_stats = false),
         Dense(c_size*3 + state_size + n_params, n_size, tanh),
-        BatchNorm(n_size, relu, track_stats = false),
+        # BatchNorm(n_size, relu, track_stats = false),
         Dense(n_size, n_size, tanh),
-        BatchNorm(n_size, relu, track_stats = false),
+        # BatchNorm(n_size, relu, track_stats = false),
         Dense(n_size, 1, softplus)
     )
     return pol_f_nn
