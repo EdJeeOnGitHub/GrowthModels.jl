@@ -614,14 +614,42 @@ function plot_nn_output(
         loss_list, 
         label = "Loss", 
         yscale = :log10,
-        alpha = 0.7,
+        alpha = 0.2,
         title = "Loss: $mean_loss"
+        )
+    roll_loss = rolling_mean(loss_list, min(2_000, length(loss_list)))
+    plot!(
+        p4, 
+        epoch_list, 
+        roll_loss, 
+        label = "Rolling Mean Loss", 
+        linewidth = 2,
+        alpha = 1.0
         )
     ylims!(p4, minimum(loss_list), 1e4)
 
     return plot(p1, p2, p3, p4, layout = (2, 2), size = (800, 800))
 end
 
+function rolling_mean(data::Vector, window_size::Int)
+    n = length(data)
+    result = fill(NaN, n)  # Initialize the result vector with NaNs
+
+    for i in 1:(n - window_size + 1)
+        # Extract the window of data
+        window = data[i:(i + window_size - 1)]
+        
+        # Filter out NaN and infinite values
+        valid_values = filter(x -> !isnan(x) && isfinite(x) && x < 1e6, window)
+        
+        # Compute the mean of the valid values
+        if !isempty(valid_values)
+            result[i] = median(valid_values) 
+        end
+    end
+
+    return result
+end
 
 function check_statespace(m)
     hps = StateSpaceHyperParams(m)

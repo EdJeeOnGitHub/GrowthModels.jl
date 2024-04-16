@@ -130,7 +130,9 @@ n_redraw = 1
 for epoch in epoch_list[end]:1_000_000
 # epoch = 1
 # epoch = epoch_list[end]
-
+    if epoch == 1 
+        last_nn_params = deepcopy(nn_params)
+    end 
     if epoch % n_redraw  == 0 || epoch == 1
         m, sm, res = draw_random_model(m_type, skiba_sobol_seq); 
     end
@@ -156,6 +158,17 @@ for epoch in epoch_list[end]:1_000_000
         # composite_loss(nets, k_vals, param_vals, p, states, upwind_targets, m)
         upwind_loss(nets, upwind_model_params, p, states, upwind_targets, m)
     end;
+
+    # if loss becomes NaN, go back to last set of params, otherwise save them 
+    # for next iteration
+    if isnan(loss)
+        loss, back = Zygote.pullback(last_nn_params) do p
+            upwind_loss(nets, upwind_model_params, p, states, upwind_targets, m)
+        end;
+    else
+        last_nn_params = deepcopy(nn_params)
+    end
+
 
     if epoch % 10 == 1
         println("Epoch: $epoch, Loss: $loss")
@@ -189,7 +202,7 @@ for epoch in epoch_list[end]:1_000_000
             # another attempt at avoiding huge loss swings leading to NaNs
             trailing_median_loss = NeuralGrowthModel.average_last_n(loss_list, min(epoch, 1000))
             loss_increase = loss / trailing_median_loss
-            if loss_increase > 1000
+            if loss_increase > 10_000
                 @show loss_increase
                 println("Loss Exploded, Skipping")
             else
@@ -198,6 +211,9 @@ for epoch in epoch_list[end]:1_000_000
         end
     end;
 end;
+
+
+
 
 length(epoch_list)
 savefig("skiba-nn-fit.pdf")
