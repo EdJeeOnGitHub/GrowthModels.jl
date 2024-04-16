@@ -126,10 +126,9 @@ skiba_sobol_seq = generate_model_values("StochasticSkibaModel")
 
 epoch_list = [1]
 loss_list = [Inf]
-n_redraw = 1
+# n_redraw = 1
 for epoch in epoch_list[end]:1_000_000
 # epoch = 1
-# epoch = epoch_list[end]
     if epoch == 1 
         last_nn_params = deepcopy(nn_params)
     end 
@@ -166,7 +165,9 @@ for epoch in epoch_list[end]:1_000_000
         loss, back = Zygote.pullback(last_nn_params) do p
             upwind_loss(nets, upwind_model_params, p, states, upwind_targets, m)
         end;
-    else
+    end
+
+    if !isnan(loss)
         last_nn_params = deepcopy(nn_params)
     end
 
@@ -187,6 +188,7 @@ for epoch in epoch_list[end]:1_000_000
                 p_model_output = plot_nn_output(nets, k_vals, param_vals, nn_params, states, epoch_list, loss_list, upwind_targets, cpu_dev, m)
             end
             display(p_model_output)
+            savefig("temp-data/nn-fit.pdf")
         catch e 
             println(e)
         end
@@ -214,189 +216,14 @@ for epoch in epoch_list[end]:1_000_000
 end;
 
 
+using BSON
+output_dict = Dict(
+    :epoch_list => epoch_list,
+    :loss_list => loss_list,
+    :nn_params => nn_params,
+    :v_f_nn => v_f_nn,
+    :pol_f_nn => pol_f_nn,
+    :states => states)
+bson("nn_output.bson",  output_dict)
 
-
-length(epoch_list)
 savefig("skiba-nn-fit.pdf")
-
-
-kdot = production_function(m, k_vals) .- m.δ .* k_vals .- pol_f_k
-
-
-skiba_hyperparams = StateSpaceHyperParams(SkibaModel())
-skiba_state = StateSpace(SkibaModel(), skiba_hyperparams)
-skiba_init_value = Value(skiba_state);
-
-fit_value, fit_variables, fit_iter = solve_HJB(
-    SkibaModel(), 
-    skiba_hyperparams, 
-    init_value = skiba_init_value, maxit = 1000);
-m = SkibaModel()
-sm = SolvedModel(SkibaModel(), fit_value, fit_variables)
-
-using DataInterpolations
-
-sm_v_interp = DataInterpolations.LinearInterpolation(fit_value.v, fit_variables.k)
-sm_v_deriv_interp = DataInterpolations.LinearInterpolation(fit_value.dVf, fit_variables.k)
-
-sm_v_f_k = sm_v_interp(vec(cpu_k_vals))
-sm_v_f_deriv_k = sm_v_deriv_interp(vec(cpu_k_vals))
-sm_pol_f_k = sm.policy_function(vec(cpu_k_vals))
-
-sm_h_err, sm_p_err = err_HJB(cpu_k_vals, cpu_param_vals , sm_v_f_k, sm_v_f_deriv_k, sm_pol_f_k)
-
-nn_h_err, nn_p_err = err_HJB(vec(k_vals), param_vals, v_f_k, v_f_deriv_k, pol_f_k)
-
-sum(abs2, sm_h_err)
-sum(abs2, sm_p_err)
-
-sum(abs2, nn_h_err)
-sum(abs2, nn_p_err)
-
-
-
-p1, p2, p3 = plot_pred_output(cpu_k_vals, Array(v_f_k), Array(v_f_deriv_k), Array(pol_f_k))
-## Adding upwind solution for comparison
-plot!(
-    p1, 
-    cpu_k_vals, 
-    sm_v_f_k, 
-    seriestype = :scatter, 
-    label = "Upwind \$V(k)\$", 
-    colour = :red)
-plot!(
-    p2,
-    cpu_k_vals,
-    sm_v_f_deriv_k,
-    seriestype = :scatter,
-    label = "Upwind \$V'(k)\$",
-    colour = :red
-)
-plot!(
-    p3,
-    cpu_k_vals,
-    sm_pol_f_k,
-    seriestype = :scatter,
-    label = "Upwind \$c(k)\$",
-    colour = :red)
-
-p4 = plot(
-    epoch_list, 
-    loss_list, 
-    label = "Loss", 
-    yscale = :log10,
-    ylabel = "MSE",
-    xlabel = "Epochs"
-    )
-p5 = plot(
-    cpu_k_vals, 
-    Array(kdot), 
-    seriestype = :scatter,
-    label = "NN \$\\dot{k}\$",
-    xlabel = "\$k\$",
-    ylabel = "\$\\dot{k}\$",
-    )
-plot!(
-    p5,
-    cpu_k_vals,
-    sm.kdot_function(cpu_k_vals),
-    seriestype = :scatter,
-    label = "Upwind \$\\dot{k}\$",
-    xlabel = "\$k\$",
-    ylabel = "\$\\dot{k}\$"
-)
-
-p6 = plot(
-    cpu_k_vals, 
-    Array(hjb_err), 
-    seriestype = :scatter,
-    label = "",
-    xlabel = "\$k\$",
-    ylabel = "\$HJB Error\$",
-    )
-p7 = plot(
-    cpu_k_vals, 
-    Array(pol_err), 
-    seriestype = :scatter,
-    label = "",
-    xlabel = "\$k\$",
-    ylabel = "\$Policy Error\$",
-    )
-p_all = plot(p1, p2, p3, p4, p5, p6, p7, layout = (4, 2), size = (800, 800))
-
-savefig(p_all, "skiba-nn-fit.pdf")
-
-using Plots
-plot(
-    vec_vals, v_f_k, 
-    xlabel = "K",
-    ylabel = "Vf(K)",
-    title = "Value Function",
-    seriestype = :scatter,
-    label = ""
-)
-plot!(
-    vec_vals,
-    sm_v_f_k,
-    seriestype = :scatter,
-    label ="",
-    colour = :red
-)
-plot(
-    vec_vals, v_f_deriv_k, 
-    xlabel = "K",
-    ylabel = "Vf(K)",
-    title = "Value Function",
-    seriestype = :scatter,
-    label = ""
-)
-plot(
-    vec_vals, pol_f_k,
-    xlabel = "K",
-    ylabel = "c(K)",
-    title = "Policy Function",
-    seriestype = :scatter,
-    label = ""
-)
-plot!(
-    vec_vals, sm_pol_f_k,
-    #  label = "Policy Function",
-    xlabel = "K",
-    ylabel = "c(K)",
-    title = "Policy Function",
-    seriestype = :scatter,
-    label = ""
-)
-plot!(
-    vec_vals, sm_pol_f_k,
-    xlabel = "K",
-    ylabel = "c(K)",
-    title = "Policy Function",
-    seriestype = :scatter,
-    label = ""
-)
-using BenchmarkTools
-if benchmark
-    @btime v_f(v_f_nn, k_vals, param_vals, vf_ps, vf_st);
-    @btime v_f(v_f_nn, vals, vf_ps, vf_st);
-    @btime v_f_deriv(v_f_nn, k_vals, param_vals, vf_ps, vf_st);
-    @btime dfx(v_f, k_vals, param_vals, vf_ps, vf_st);
-end
-
-
-
-
-if benchmark
-    @btime l, b = Zygote.pullback(vf_ps) do p
-        v_f_deriv(v_f_nn, k_vals, param_vals, p, vf_st)
-    end;
-    @btime l, b = Zygote.pullback(vf_ps) do p
-        dfx(v_f, k_vals, param_vals, p, vf_st)
-    end;
-end
-
-if benchmark
-    @btime l, back = Zygote.pullback(nn_params) do p
-        loss_fn(fns, nets, k_vals, param_vals, p[1], p[2], states[1], states[2])
-    end;
-end
