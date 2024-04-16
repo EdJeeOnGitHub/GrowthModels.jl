@@ -305,7 +305,6 @@ epoch_list = [1]
 loss_list = [Inf]
 n_redraw = 1e6
 for epoch in epoch_list[end]:1_000_000
-
 # epoch = 1
 # epoch = epoch_list[end]
 
@@ -355,11 +354,13 @@ for epoch in epoch_list[end]:1_000_000
             println(e)
         end
     end
+
     # if late on, ignore very large losses as can propagate NaNs
     if !isnan(loss) 
         grads = back(1.0)[1]
-        nan_grads = check_gradients(grads)
-        if nan_grads
+        nan_v_grads = check_gradients(grads[1])
+        nan_pol_grads = check_gradients(grads[2])
+        if nan_v_grads || nan_pol_grads
             println("NaN Gradients")
         else
             Optimisers.update!(st_opt, nn_params, grads)
