@@ -550,6 +550,7 @@ function plot_nn_output(
         alpha = 0.7,
         title = "Loss"
         )
+    ylims!(p4, 0, 1e4)
 
     return plot(p1, p2, p3, p4, layout = (2, 2), size = (800, 800))
 end
