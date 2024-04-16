@@ -26,22 +26,29 @@ function StateSpace(m::StochasticSkibaModel, statespacehyperparams::StateSpaceHy
     StateSpace((k = k, z = z), (y = y,))
 end
 
+function StochasticSkibaModel(;γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0, θ = -log(0.9), σ = 0.1)
+    StochasticSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
+end
+
+function StochasticSkibaModel{T}(;γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0, θ = -log(0.9), σ = 0.1) where {T <: Real}
+    StochasticSkibaModel{T}(γ, α, ρ, δ, A_H, A_L, κ, OrnsteinUhlenbeckProcess{T}(θ = θ, σ = σ))
+end
+
+function StochasticSkibaModel{T}(
+    stochasticprocess::StochasticProcess{T}; 
+     γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0) where {T <: Real}
+    if isnothing(stochasticprocess)
+        stochasticprocess = OrnsteinUhlenbeckProcess{T}(θ = -log(0.9), σ =  0.1)
+    end
+    StochasticSkibaModel{T}(γ, α, ρ, δ, A_H, A_L, κ, stochasticprocess)
+end
 function StochasticSkibaModel(
-    stochasticprocess::Union{StochasticProcess,Nothing}; 
+    stochasticprocess::StochasticProcess; 
      γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0)
     if isnothing(stochasticprocess)
         stochasticprocess = OrnsteinUhlenbeckProcess(θ = -log(0.9), σ =  0.1)
     end
     StochasticSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, stochasticprocess)
-end
-
-function StochasticSkibaModel(;γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0, θ = -log(0.9), σ = 0.1)
-    StochasticSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
-end
-
-# let us pass param vecs
-function StochasticSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, θ, σ)
-    StochasticSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
 end
 
 
@@ -52,7 +59,6 @@ k_star_Skiba(α::T, A_H::T, A_L::T, κ) where {T <: Real} = κ/(1-(A_L/A_H)^(1/�
 k_steady_state_hi(m::StochasticSkibaModel) = (m.α*m.A_H*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α)) + m.κ
 k_steady_state_lo(m::StochasticSkibaModel) = (m.α*m.A_L*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α))
 k_steady_state(m::StochasticSkibaModel) = [k_steady_state_lo(m), k_steady_state_hi(m)]
-k_steady_state(::Type{M}, α::T, A_H::T, A_L::T, ρ::T, δ::T, κ::T, stationary_mean::T) where {M <: StochasticSkibaModel, T <: Real} = [k_steady_state_lo_StochasticSkiba(α, A_L, ρ, δ, stationary_mean), k_steady_state_hi_StochasticSkiba(α, A_H, ρ, δ, κ, stationary_mean)]
 k_star(m::StochasticSkibaModel) = m.κ/(1-(m.A_L/m.A_H)^(1/m.α))
 k_star(::Type{M}, α::T, A_H::T, A_L::T) where {M <: StochasticSkibaModel, T <: Real} = κ/(1-(A_L/A_H)^(1/α))
 

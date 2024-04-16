@@ -1,6 +1,6 @@
-abstract type StochasticProcess end
+abstract type StochasticProcess{T <: Real} end
 
-struct OrnsteinUhlenbeckProcess{T <: Real} <: StochasticProcess  
+struct OrnsteinUhlenbeckProcess{T <: Real} <: StochasticProcess{T}
     # y = log(z) ~ N(0, ln_stationary_σ)
     # y ~ N(ln_mean, ln_stationary_σ)
 
@@ -14,11 +14,32 @@ struct OrnsteinUhlenbeckProcess{T <: Real} <: StochasticProcess
     ln_stationary_μ::T  # Mean of lognormal 
 end
 
-function OrnsteinUhlenbeckProcess{T}(;θ::T, σ::T) where T <: Real
+function OrnsteinUhlenbeckProcess(;θ::T, σ::T)  where {T <: Real}
     ln_stationary_μ = exp((σ^2)/(2*θ)/2)
     ρ = exp(-θ)
-    OrnsteinUhlenbeckProcess{T}(convert(T, θ), convert(T, σ), convert(T, ρ), convert(T, ln_stationary_μ))
+    OrnsteinUhlenbeckProcess(θ, σ, ρ, ln_stationary_μ)
 end
+
+function OrnsteinUhlenbeckProcess{T}(; θ, σ ) where T <: Real
+    # Convert parameters to type T, using more reliable methods
+    θ_T = T(θ)
+    σ_T = T(σ)
+
+    # Calculate other parameters
+    ln_stationary_μ_T = T(exp((σ_T^2) / (2 * θ_T) / 2))
+    ρ_T = T(exp(-θ_T))
+
+    # Create the struct instance
+    OrnsteinUhlenbeckProcess{T}(θ_T, σ_T, ρ_T, ln_stationary_μ_T)
+end
+
+# function OrnsteinUhlenbeckProcess{T}(; θ, σ) where T <: Real
+#     θ = convert(T, θ)
+#     σ = convert(T, σ)  
+#     ln_stationary_μ = exp((σ^2)/(2*θ)/2)
+#     ρ = exp(-θ)
+#     OrnsteinUhlenbeckProcess{T}(convert(T, θ), convert(T, σ), convert(T, ρ), convert(T, ln_stationary_μ))
+# end
 
 function from_stationary_OrnsteinUhlenbeckProcess(; ρ::Float64, ln_stationary_μ::Float64)
     θ = -log(ρ)

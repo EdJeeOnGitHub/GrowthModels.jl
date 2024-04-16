@@ -16,24 +16,15 @@ Random.seed!(1234)
 cpu_dev = cpu_device()
 device = cpu_device()
 # Stuff for GPU
-function SkibaModel{T}(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0) where {T<: Real}
-    SkibaModel{T}(γ, α, ρ, δ, A_H, A_L, κ)
-end
-
-function StochasticSkibaModel{T}(γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0, θ = -log(0.9), σ = 0.1) where {T <: Real}
-    StochasticSkibaModel{T}(γ, α, ρ, δ, A_H, A_L, κ, OrnsteinUhlenbeckProcess{T}(θ = θ, σ = σ))
-end
 
 
-function RamseyCassKoopmansModel{T}(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A = 0.6) where {T <: Real}
-    RamseyCassKoopmansModel{T}(γ, α, ρ, δ, A)
-end
 
+m_type = StochasticSkibaModel{Float32}
 m = StochasticSkibaModel{Float32}() |> device
 model_params = Float32.(params(m))
 n_params = length(model_params)
 
-batch_size = 100
+batch_size = 200
 using BenchmarkTools
 
 
@@ -82,7 +73,6 @@ v_f_nn = ValueFunctionChain(m, c_size, n_params)
 pol_f_nn = PolicyFunctionChain(m, c_size, n_params)
 state_size = ifelse(isa(m, StochasticModel), 2, 1)
 
-vals = generate_grid_values(m, batch_size)
 # Creating input variables for testing
 vals = generate_grid_values(m, batch_size)
 cpu_vals = deepcopy(vals)
@@ -234,42 +224,17 @@ function composite_loss(nets, k, model_params, nn_params, states, upwind_targets
     return proj_l + upwind_l
 end
 
-
-
-function draw_random_model(::Type{M}, sobol_seq) where {M <: StochasticModel}
-    m = M{Float32}()
-    max_ss = maximum(k_steady_state(m))
-    state_constraint = check_statespace(m)
-    successful_vfi = false
-    redraw = !(max_ss < 25) || state_constraint || !successful_vfi
-    while redraw
-        model_param_candidate = Float32.(param_reshuffle(next!(sobol_seq)))
-        m = M{Float32}(model_param_candidate...) 
-        max_ss = maximum(k_steady_state(m))
-        try 
-            sm, res = solve_growth_model(m, (Nk = 10, Nz = 10))
-            successful_vfi = true
-        catch e
-            successful_vfi = false
-            continue
-        end
-        max_ss = maximum(k_steady_state(m))
-        state_constraint = check_statespace(m)
-        redraw = !(max_ss < 25) || state_constraint || !successful_vfi
-    end
-    sm, res = solve_growth_model(m, (Nk = 100,))
-    return m, sm, res
-end
-
 function draw_random_model(::Type{M}, sobol_seq) where {M <: DeterministicModel}
-    m = M{Float32}()
+    m = M()
     max_ss = maximum(k_steady_state(m))
     state_constraint = check_statespace(m)
     successful_vfi = false
     redraw = !(max_ss < 25) || state_constraint || !successful_vfi
     while redraw
         model_param_candidate = Float32.(param_reshuffle(next!(sobol_seq)))
-        m = M{Float32}(model_param_candidate...) 
+
+
+        m = M(model_param_candidate...) 
         max_ss = maximum(k_steady_state(m))
         try 
             sm, res = solve_growth_model(m, (Nk = 100,))
@@ -287,27 +252,52 @@ function draw_random_model(::Type{M}, sobol_seq) where {M <: DeterministicModel}
 end
 
 
-StochasticSkibaModel()
-StochasticSkibaModel{Float32}()
 
-draw_random_model(StochasticSkibaModel, skiba_sobol_seq)
+function draw_random_model(::Type{M}, sobol_seq) where {M <: StochasticModel}
+    Nk = 50
+    Nz = 2
+    m = M()
+    max_ss = maximum(k_steady_state(m))
+    state_constraint = check_statespace(m)
+    successful_vfi = false
+    redraw = !(max_ss < 25) || state_constraint || !successful_vfi
+    while redraw
+        model_param_candidate = Float32.(param_reshuffle(next!(sobol_seq)))
+        m = M(
+            model_param_candidate[1:end-2]...,
+            OrnsteinUhlenbeckProcess(θ = model_param_candidate[end-1], σ = model_param_candidate[end])
+            )
+        max_ss = maximum(k_steady_state(m))
+        try 
+            sm, res = solve_growth_model(m, (Nk = Nk, Nz = Nz))
+            successful_vfi = true
+        catch e
+            successful_vfi = false
+            continue
+        end
+        max_ss = maximum(k_steady_state(m))
+        state_constraint = check_statespace(m)
+        redraw = !(max_ss < 25) || state_constraint || !successful_vfi
+    end
+    sm, res = solve_growth_model(m, (Nk = Nk, Nz = Nz))
+    return m, sm, res
+end
 
-model_param_candidate = Float32.(param_reshuffle(next!(skiba_sobol_seq)))
 
-OrnsteinUhlenbeckProcess(θ = model_param_candidate[end-1], σ = model_param_candidate[end])
 
 epoch_list = [1]
 loss_list = [Inf]
 n_redraw = 1
 for epoch in epoch_list[end]:1_000_000
+# epoch = 1
 
     if epoch % n_redraw  == 0 || epoch == 1
-        m, sm, res = draw_random_model(m, skiba_sobol_seq); 
+        m, sm, res = draw_random_model(m_type, skiba_sobol_seq); 
     end
     m = m |> device
     random_vals = generate_grid_values(m, batch_size, seed = epoch) 
 
-    k_vals, param_vals = random_vals[1, :], random_vals[2:end, :]
+    k_vals, param_vals = random_vals[1:state_size, :], random_vals[state_size+1:end, :]
 
     cpu_k_vals = deepcopy(k_vals)
     cpu_param_vals = deepcopy(param_vals)
@@ -325,22 +315,26 @@ for epoch in epoch_list[end]:1_000_000
         upwind_loss(nets, upwind_model_params, p, states, upwind_targets, m)
     end;
 
-    if epoch % 100 == 1
+    if epoch % 10 == 1
         println("Epoch: $epoch, Loss: $loss")
     end
     push!(epoch_list, epoch)
     push!(loss_list, loss)
   
 
-    if epoch % 1000 == 1
+    if epoch % 50 == 1
         try 
-            p_model_output = plot_nn_output(nets, k_vals, param_vals, nn_params, states, epoch_list, loss_list, upwind_targets, cpu_dev)
+            if (isa(m, StochasticModel))
+                p_model_output = plot_nn_output(nets, k_vals, upwind_model_params, nn_params, states, epoch_list, loss_list, upwind_targets, cpu_dev, m)
+            else
+                p_model_output = plot_nn_output(nets, k_vals, param_vals, nn_params, states, epoch_list, loss_list, upwind_targets, cpu_dev, m)
+            end
             display(p_model_output)
         catch e 
             println(e)
         end
     end
-    if !isnan(loss)
+    if !isnan(loss) && loss < 1e10
         grads = back(1.0)[1]
         if any(isnan, grads[1][1][1].weight) || any(isnan, grads[2][1][1].weight)
             println("NaN Gradients")

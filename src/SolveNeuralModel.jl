@@ -401,7 +401,9 @@ function plot_nn_output(
                         epoch_list, 
                         loss_list, 
                         upwind_targets,
-                        cpu_dev) 
+                        cpu_dev,
+                        m::DeterministicModel
+                        ) 
     upwind_k,  upwind_v, upwind_pol, upwind_kdot = upwind_targets
 
     cpu_k_vals = k_vals |> cpu_dev
@@ -447,6 +449,109 @@ function plot_nn_output(
         ylabel = "\$Policy Error\$",
         )
     return plot(p1, p2, p3, p4, p5, p6, p7, layout = (4, 2), size = (800, 800))
+end
+
+function plot_nn_output( 
+                        nets, 
+                        k_vals, 
+                        param_vals, 
+                        nn_params, 
+                        states, 
+                        epoch_list, 
+                        loss_list, 
+                        upwind_targets,
+                        cpu_dev,
+                        m::StochasticModel
+                        ) 
+
+    
+
+    state_vals, upwind_v, upwind_pol, upwind_kdot = upwind_targets
+    v_f_k, _, pol_f_k = predict_fn(nets, state_vals, param_vals, nn_params, states, derivative = false)
+
+    v_kdot = production_function(m, state_vals[1, :], state_vals[2, :]) .- m.δ .* state_vals[1, :] .- pol_f_k
+    u_states = Array(upwind_targets[1])
+    v = Array(v_f_k)
+    pol = Array(pol_f_k)
+    nk = length(unique(u_states[1, :]))
+    nz = length(unique(u_states[2, :]))
+
+    group = repeat(collect(1:nz), inner = nk)
+
+    u_v = Array(upwind_targets[2])
+    u_pol = Array(upwind_targets[3])
+    u_kdot = Array(upwind_targets[4])
+
+    p1 = plot(
+        u_states[1, :], 
+        v_kdot,
+        group = group,
+        colour = :blue,
+        xlabel = "\$k\$",
+        ylabel = "\$\\dot(k)\$",
+        label = "",
+        title = "\$\\dot{k}\$"
+        )
+    plot!(
+        u_states[1, :],
+        u_kdot,
+        group = group,
+        colour = :red,
+        xlabel = "\$k\$",
+        ylabel = "\$\\dot(k)\$",
+        label = ""
+    )
+    
+    p2 = plot(
+        u_states[1, :], 
+        v_f_k,
+        group = group,
+        colour = :blue,
+        xlabel = "\$k\$",
+        ylabel = "\$V(k)\$",
+        title = "Value Function"
+        )
+   plot!(
+    u_states[1, :],
+    u_v,
+        group = group,
+        colour = :red,
+        xlabel = "\$k\$",
+        ylabel = "\$V(k)\$",
+        label = ""
+   ) 
+
+   p3 = plot(
+    u_states[1, :],
+    pol,
+    group = group,
+    colour = :blue,
+    xlabel = "\$k\$",
+    ylabel = "\$c(k)\$",
+    label = "",
+    title = "Policy Function"
+   )
+   plot!(
+    u_states[1, :],
+    u_pol,
+    group = group,
+    colour = :red,
+    xlabel = "\$k\$",
+    ylabel = "\$c(k)\$",
+    label = ""
+   )
+
+
+    p4 = plot(
+        epoch_list, 
+        loss_list, 
+        label = "Loss", 
+        yscale = :log10,
+        alpha = 0.7,
+        title = "Loss"
+        )
+
+    return plot(p1, p2, p3, p4, layout = (2, 2), size = (800, 800))
 end
 
 end

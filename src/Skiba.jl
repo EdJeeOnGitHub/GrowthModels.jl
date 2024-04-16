@@ -31,6 +31,9 @@ function SkibaModel(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L =
     SkibaModel(γ, α, ρ, δ, A_H, A_L, κ)
 end
 
+function SkibaModel{T}(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0) where {T<: Real}
+    SkibaModel{T}(γ, α, ρ, δ, A_H, A_L, κ)
+end
 
 
 k_steady_state_hi_Skiba(α::T, A_H::T, ρ::T, δ::T, κ::T) where {T <: Real} = (α*A_H/(ρ + δ))^(1/(1-α)) + κ
