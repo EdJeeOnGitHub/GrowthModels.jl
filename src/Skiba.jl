@@ -64,7 +64,7 @@ end
 end
 
 
-@inline production_function(::Type{M}; k, α, A_H, A_L, κ, kwargs...) where {M <: SkibaModel, T <: Real} = skiba_production_function.(k, α, A_H, A_L, κ)
+@inline production_function(::Type{M}; k, α, A_H, A_L, κ, kwargs...) where {M <: SkibaModel} = skiba_production_function.(k, α, A_H, A_L, κ)
 @inline production_function(::Type{M}, k, α::T, A_H::T, A_L::T, κ::T) where {M <: SkibaModel, T <: Real} = skiba_production_function.(k, α, A_H, A_L, κ)
 @inline production_function(::Type{M}, k, params::Vector) where {M <: SkibaModel} = skiba_production_function.(k, params[1], params[2], params[3], params[4])
 @inline production_function(m::SkibaModel, k) = skiba_production_function.(k, m.α, m.A_H, m.A_L, m.κ)

@@ -14,10 +14,10 @@ struct OrnsteinUhlenbeckProcess{T <: Real} <: StochasticProcess
     ln_stationary_μ::T  # Mean of lognormal 
 end
 
-function OrnsteinUhlenbeckProcess(;θ::T, σ::T) where T <: Real
+function OrnsteinUhlenbeckProcess{T}(;θ::T, σ::T) where T <: Real
     ln_stationary_μ = exp((σ^2)/(2*θ)/2)
     ρ = exp(-θ)
-    OrnsteinUhlenbeckProcess(θ, σ, ρ, ln_stationary_μ)
+    OrnsteinUhlenbeckProcess{T}(convert(T, θ), convert(T, σ), convert(T, ρ), convert(T, ln_stationary_μ))
 end
 
 function from_stationary_OrnsteinUhlenbeckProcess(; ρ::Float64, ln_stationary_μ::Float64)

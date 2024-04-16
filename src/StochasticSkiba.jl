@@ -59,7 +59,6 @@ k_star(::Type{M}, α::T, A_H::T, A_L::T) where {M <: StochasticSkibaModel, T <: 
 
 k_star(::Type{M}; α, A_H, A_L, κ, kwargs...) where {M <: StochasticSkibaModel} = κ ./ (1 .- (A_L ./ A_H) .^ (1 ./ α))
 k_steady_state(::Type{M}; α, A_H, A_L, ρ, δ, κ, stationary_mean, kwargs...) where {M <: StochasticSkibaModel} = [k_steady_state_lo_StochasticSkiba.(α, A_L, ρ, δ, stationary_mean), k_steady_state_hi_StochasticSkiba.(α, A_H, ρ, δ, κ, stationary_mean)]
-k_steady_state(::Type{M}; α, A_H, A_L, ρ, δ, κ, θ, σ, kwargs...) where {M <: StochasticSkibaModel} = [k_steady_state_lo_StochasticSkiba.(α, A_L, ρ, δ, stationary_mean), k_steady_state_hi_StochasticSkiba.(α, A_H, ρ, δ, κ, stationary_mean)]
 
 function k_steady_state(::Type{M}; α, A_H, A_L, ρ, δ, κ, θ, σ,  kwargs...) where {M <: StochasticSkibaModel}
     stationary_mean = exp.((σ .^ 2) ./ (2 .* θ) ./ 2)

@@ -20,8 +20,8 @@ function SkibaModel{T}(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_
     SkibaModel{T}(γ, α, ρ, δ, A_H, A_L, κ)
 end
 
-function StochasticSkibaModel{T}(;γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0, θ = -log(0.9), σ = 0.1) where {T <: Real}
-    StochasticSkibaModel{T}(γ, α, ρ, δ, A_H, A_L, κ, OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
+function StochasticSkibaModel{T}(γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0, θ = -log(0.9), σ = 0.1) where {T <: Real}
+    StochasticSkibaModel{T}(γ, α, ρ, δ, A_H, A_L, κ, OrnsteinUhlenbeckProcess{T}(θ = θ, σ = σ))
 end
 
 
@@ -235,7 +235,6 @@ function composite_loss(nets, k, model_params, nn_params, states, upwind_targets
 end
 
 
-ed = SkibaModel
 
 function draw_random_model(::Type{M}, sobol_seq) where {M <: StochasticModel}
     m = M{Float32}()
@@ -244,11 +243,11 @@ function draw_random_model(::Type{M}, sobol_seq) where {M <: StochasticModel}
     successful_vfi = false
     redraw = !(max_ss < 25) || state_constraint || !successful_vfi
     while redraw
-        model_param_candidate = param_reshuffle(next!(sobol_seq))
+        model_param_candidate = Float32.(param_reshuffle(next!(sobol_seq)))
         m = M{Float32}(model_param_candidate...) 
         max_ss = maximum(k_steady_state(m))
         try 
-            sm, res = solve_growth_model(m, (Nk = 100,))
+            sm, res = solve_growth_model(m, (Nk = 10, Nz = 10))
             successful_vfi = true
         catch e
             successful_vfi = false
@@ -269,7 +268,7 @@ function draw_random_model(::Type{M}, sobol_seq) where {M <: DeterministicModel}
     successful_vfi = false
     redraw = !(max_ss < 25) || state_constraint || !successful_vfi
     while redraw
-        model_param_candidate = param_reshuffle(next!(sobol_seq))
+        model_param_candidate = Float32.(param_reshuffle(next!(sobol_seq)))
         m = M{Float32}(model_param_candidate...) 
         max_ss = maximum(k_steady_state(m))
         try 
@@ -288,8 +287,14 @@ function draw_random_model(::Type{M}, sobol_seq) where {M <: DeterministicModel}
 end
 
 
+StochasticSkibaModel()
+StochasticSkibaModel{Float32}()
 
 draw_random_model(StochasticSkibaModel, skiba_sobol_seq)
+
+model_param_candidate = Float32.(param_reshuffle(next!(skiba_sobol_seq)))
+
+OrnsteinUhlenbeckProcess(θ = model_param_candidate[end-1], σ = model_param_candidate[end])
 
 epoch_list = [1]
 loss_list = [Inf]
