@@ -22,26 +22,6 @@ function GrowthModels.production_function(m::StochasticSkibaModel, state_vals::A
     production_function(m, state_vals[1, :], state_vals[2, :])
 end
 
-# Define a function to fetch the appropriate device based on the hostname
-function choose_device()
-    # Get the current hostname
-    host = gethostname()
-
-    # Initialize the device variable
-    device = nothing
-
-    # Check if the hostname is "zero-gravitas"
-    if host == "zero-gravitas"
-        # Assign the CPU device if the condition is met
-        device = cpu_device()
-    else
-        # Assign the GPU device otherwise
-        device = gpu_device()
-    end
-    
-    return device
-end
-
 cpu_dev = cpu_device()
 device = choose_device()
 
@@ -53,8 +33,6 @@ model_params = Float32.(params(m))
 n_params = length(model_params)
 
 batch_size = 200
-using BenchmarkTools
-
 
 
 function ValueFunctionChain(m::Model, c_size, n_params)
@@ -69,8 +47,11 @@ function ValueFunctionChain(m::Model, c_size, n_params)
             NoOpLayer()
         ),
         x -> vcat(x...),
+        BatchNorm(c_size*3 + state_size + n_params, relu, track_stats = false),
         Dense(c_size*3 + state_size + n_params, n_size, relu),
+        BatchNorm(n_size, relu, track_stats = false),
         Dense(n_size, n_size, relu),
+        BatchNorm(n_size, relu, track_stats = false),
         Dense(n_size, 1)
     )
     return v_f_nn
@@ -87,8 +68,11 @@ function PolicyFunctionChain(m::Model, c_size, n_params)
             NoOpLayer()
         ),
         x -> vcat(x...),
+        BatchNorm(c_size*3 + state_size + n_params, relu, track_stats = false),
         Dense(c_size*3 + state_size + n_params, n_size, tanh),
+        BatchNorm(n_size, relu, track_stats = false),
         Dense(n_size, n_size, tanh),
+        BatchNorm(n_size, relu, track_stats = false),
         Dense(n_size, 1, softplus)
     )
     return pol_f_nn
@@ -137,176 +121,14 @@ v_f_k, v_f_deriv_k, pol_f_k = predict_fn(nets, state_vals, param_vals, nn_params
 skiba_sobol_seq = generate_model_values("StochasticSkibaModel")
 
 # make sure A_H > A_L
-param_reshuffle = function(p)
-    new_p = copy(p)
-    new_p[5] = p[5] + p[6]
-    return new_p
-end
 
-function check_statespace(m)
-    hps = StateSpaceHyperParams(m)
-    statespace = StateSpace(m, hps)
-    max_statespace_constraint = statespace.aux_state.y[end] - m.δ * maximum(statespace[:k])
-    min_statespace_constraint = statespace.aux_state.y[1] - m.δ * minimum(statespace[:k])
-    state_error =  max_statespace_constraint < 0 || min_statespace_constraint < 0
-    return state_error
-end
-
-    
-
-
-
-function projection_loss(nets, k, model_params, nn_params, states)
-    v_f_k, v_f_deriv_k, pol_f_k = predict_fn(nets, k, model_params, nn_params, states)
-    hjb_err, pol_err = err_HJB(k, model_params, v_f_k, v_f_deriv_k, pol_f_k)
-    n_k = length(k)
-    neg_deriv_penalty = sum(exp.(min.(v_f_deriv_k, 0)))
-    loss = sqrt(sum(abs, pol_err) / n_k) + sqrt(sum(abs, hjb_err) / n_k) + sqrt(sum(abs, neg_deriv_penalty) / n_k)
-    return loss
-end
-
-
-function upwind_loss(nets, model_params, nn_params, states, upwind_targets, m::StochasticModel)
-    state_vals, upwind_v, upwind_pol, upwind_kdot = upwind_targets
-    v_f_k, _, pol_f_k = predict_fn(nets, state_vals, model_params, nn_params, states, derivative = false)
-    kdot = production_function(m, state_vals[1, :], state_vals[2, :]) .- m.δ .* state_vals[1, :] .- pol_f_k
-
-    n_k = length(v_f_k)
-    upwind_v_err = sqrt(sum(abs2, upwind_v - v_f_k) / n_k)
-    upwind_pol_err = sqrt(sum(abs2, upwind_pol - pol_f_k) / n_k)
-    upwind_kdot_err = sqrt(sum(abs2, upwind_kdot - kdot) / n_k)
-    return upwind_v_err + upwind_pol_err + upwind_kdot_err
-end
-
-
-function upwind_loss(nets, model_params, nn_params, states, upwind_targets, m::DeterministicModel)
-    k, upwind_v, upwind_pol, upwind_kdot = upwind_targets
-    v_f_k, _, pol_f_k = predict_fn(nets, k, model_params, nn_params, states, derivative = false)
-    kdot = production_function(m, k) .- m.δ .* k .- pol_f_k
-
-    n_k = length(v_f_k)
-    upwind_v_err = sqrt(sum(abs2, upwind_v - v_f_k) / n_k)
-    upwind_pol_err = sqrt(sum(abs2, upwind_pol - pol_f_k) / n_k)
-    upwind_kdot_err = sqrt(sum(abs2, upwind_kdot - kdot) / n_k)
-    return upwind_v_err + upwind_pol_err + upwind_kdot_err
-end
-
-
-
-function create_upwind_targets(sm::SolvedModel{T}, res, model_params) where {T <: DeterministicModel}
-    upwind_v = res.value.v |> device
-    upwind_pol = sm.variables[:c] |> device
-    upwind_kdot = sm.kdot_function(sm.variables[:k]) |> device
-    upwind_model_params = repeat(model_params[:, 1], 1, size(upwind_v, 1))
-    upwind_k = sm.variables[:k] |> device
-    return  (upwind_k, upwind_v, upwind_pol, upwind_kdot), upwind_model_params
-end
-
-function create_upwind_targets(sm::SolvedModel{T}, res, model_params) where {T <: StochasticModel}
-    upwind_v = res.value.v[:] |> device
-    upwind_pol = sm.variables[:c][:] |> device
-    upwind_kdot = sm.kdot_function.(sm.variables[:k][:, 1], sm.variables[:z][1, :]')[:] |> device
-    upwind_k = sm.variables[:k][:] |> device
-    upwind_z = sm.variables[:z][:] |> device
-
-    upwind_state = vcat(upwind_k', upwind_z')
-    upwind_model_params = repeat(model_params[:, 1], 1, size(upwind_v, 1))
-
-    return  (upwind_state, upwind_v, upwind_pol, upwind_kdot), upwind_model_params
-end
-
-
-
-
-
-
-function composite_loss(nets, k, model_params, nn_params, states, upwind_targets, m)
-    proj_l = projection_loss(nets, k, model_params, nn_params, states)
-    upwind_model_params = repeat(model_params[:, 1], 1, size(upwind_targets[2], 1))
-    upwind_l = upwind_loss(nets, upwind_model_params, nn_params, states, upwind_targets, m)
-    return proj_l + upwind_l
-end
-
-function draw_random_model(::Type{M}, sobol_seq) where {M <: DeterministicModel}
-    m = M()
-    max_ss = maximum(k_steady_state(m))
-    state_constraint = check_statespace(m)
-    successful_vfi = false
-    redraw = !(max_ss < 25) || state_constraint || !successful_vfi
-    while redraw
-        model_param_candidate = Float32.(param_reshuffle(next!(sobol_seq)))
-
-
-        m = M(model_param_candidate...) 
-        max_ss = maximum(k_steady_state(m))
-        try 
-            sm, res = solve_growth_model(m, (Nk = 100,))
-            successful_vfi = true
-        catch e
-            successful_vfi = false
-            continue
-        end
-        max_ss = maximum(k_steady_state(m))
-        state_constraint = check_statespace(m)
-        redraw = !(max_ss < 25) || state_constraint || !successful_vfi
-    end
-    sm, res = solve_growth_model(m, (Nk = 100,))
-    return m, sm, res
-end
-
-
-
-function draw_random_model(::Type{M}, sobol_seq) where {M <: StochasticModel}
-    Nk = 50
-    Nz = 2
-    m = M()
-    max_ss = maximum(k_steady_state(m))
-    state_constraint = check_statespace(m)
-    successful_vfi = false
-    redraw = !(max_ss < 25) || state_constraint || !successful_vfi
-    while redraw
-        model_param_candidate = Float32.(param_reshuffle(next!(sobol_seq)))
-        m = M(
-            model_param_candidate[1:end-2]...,
-            OrnsteinUhlenbeckProcess(θ = model_param_candidate[end-1], σ = model_param_candidate[end])
-            )
-        max_ss = maximum(k_steady_state(m))
-        try 
-            sm, res = solve_growth_model(m, (Nk = Nk, Nz = Nz))
-            successful_vfi = true
-        catch e
-            successful_vfi = false
-            continue
-        end
-        max_ss = maximum(k_steady_state(m))
-        state_constraint = check_statespace(m)
-        redraw = !(max_ss < 25) || state_constraint || !successful_vfi
-    end
-    sm, res = solve_growth_model(m, (Nk = Nk, Nz = Nz))
-    return m, sm, res
-end
-
-
-function check_gradients(grads)
-    # Recursive function to check for NaN in gradients within any structure
-    for grad in grads
-        if grad isa NamedTuple && !haskey(grad, :weight)  # Check if the gradient component is a tuple (e.g., from Parallel)
-            check_gradients(grad)  # Recurse into the tuple
-        elseif grad isa NamedTuple && haskey(grad, :weight)  # Check if it's a layer with weights
-            if any(isnan, grad.weight)
-                return true  # Return true if any NaN is found
-            end
-        end
-    end
-    return false  # No NaN found
-end
 
 epoch_list = [1]
 loss_list = [Inf]
-n_redraw = 1e6
+n_redraw = 1
 for epoch in epoch_list[end]:1_000_000
 # epoch = 1
-# epoch = epoch_list[end]
+# epoch = epoch_list[end] + 1
 
     if epoch % n_redraw  == 0 || epoch == 1
         m, sm, res = draw_random_model(m_type, skiba_sobol_seq); 
@@ -322,7 +144,7 @@ for epoch in epoch_list[end]:1_000_000
     k_vals = k_vals |> device
     param_vals = param_vals |> device
 
-    upwind_targets, upwind_model_params = create_upwind_targets(sm, res, param_vals)
+    upwind_targets, upwind_model_params = create_upwind_targets(sm, res, param_vals, device)
 
 
     # state_vals, upwind_v, upwind_pol, upwind_kdot = upwind_targets
@@ -356,7 +178,7 @@ for epoch in epoch_list[end]:1_000_000
     end
 
     # if late on, ignore very large losses as can propagate NaNs
-    if !isnan(loss) 
+    if !isnan(loss)  && loss < 1e10
         grads = back(1.0)[1]
         nan_v_grads = check_gradients(grads[1])
         nan_pol_grads = check_gradients(grads[2])
