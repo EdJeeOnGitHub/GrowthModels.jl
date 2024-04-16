@@ -73,13 +73,13 @@ function PolicyFunctionChain(m::Model, c_size, n_params)
     pol_f_nn = Chain(
         Parallel(
             nothing,
-            MicawberLayer(state_size + n_params, c_size, relu, m),
-            SteadyStateLayer(state_size + n_params, c_size, relu, m),
+            MicawberLayer(state_size + n_params, c_size, tanh, m),
+            SteadyStateLayer(state_size + n_params, c_size, tanh, m),
             NoOpLayer()
         ),
         x -> vcat(x...),
-        Dense(c_size*2 + state_size + n_params, n_size, relu),
-        Dense(n_size, n_size, relu),
+        Dense(c_size*2 + state_size + n_params, n_size, tanh),
+        Dense(n_size, n_size, tanh),
         Dense(n_size, 1, softplus)
     )
     return pol_f_nn
@@ -283,10 +283,23 @@ function draw_random_model(::Type{M}, sobol_seq) where {M <: StochasticModel}
 end
 
 
+function check_gradients(grads)
+    # Recursive function to check for NaN in gradients within any structure
+    for grad in grads
+        if grad isa NamedTuple && !haskey(grad, :weight)  # Check if the gradient component is a tuple (e.g., from Parallel)
+            check_gradients(grad)  # Recurse into the tuple
+        elseif grad isa NamedTuple && haskey(grad, :weight)  # Check if it's a layer with weights
+            if any(isnan, grad.weight)
+                return true  # Return true if any NaN is found
+            end
+        end
+    end
+    return false  # No NaN found
+end
 
 epoch_list = [1]
 loss_list = [Inf]
-n_redraw = 10
+n_redraw = 100
 for epoch in epoch_list[end]:1_000_000
 
 # epoch = 1
@@ -338,9 +351,11 @@ for epoch in epoch_list[end]:1_000_000
             println(e)
         end
     end
-    if !isnan(loss) && loss < 1e10
+    # if late on, ignore very large losses as can propagate NaNs
+    if !isnan(loss) && (loss < 1e3 && epoch > 1e4)
         grads = back(1.0)[1]
-        if any(isnan, grads[1][1][1].weight) || any(isnan, grads[2][1][1].weight)
+        nan_grads = check_gradients(grads)
+        if nan_grads
             println("NaN Gradients")
         else
             Optimisers.update!(st_opt, nn_params, grads)
@@ -348,6 +363,94 @@ for epoch in epoch_list[end]:1_000_000
     end;
 end;
 
+filter(!isnan, loss_list)
+
+typeof(test_grads[1][1][1])
+keys(test_grads[1][1])
+
+:layer_1 in keys(test_grads[1][1])
+
+test_grads[1][1][:layer_1].bias
+isa(test_grads[1][1], NamedTuple)
+
+check_gradients(test_grads[1])
+check_gradients(test_grads)
+
+grad = test_grads[1][3]
+isa(grad, NamedTuple)
+g_keys = keys(grad)
+
+grad
+
+haskey(grad, :weight)
+
+
+check_gradients(test_grads[1])
+any_nan = false
+function check_gradients(gradients)
+   any_nan = false
+   for grad in gradients
+        if isa(grad, NamedTuple)
+
+        if :weight in g_keys
+            w = grad.weight
+            if any(isnan, w)
+                any_nan = true
+            end
+        else 
+            for key in g_keys
+                if !isnothing(grad[key])
+                    w = grad[key].weight
+                    if any(isnan, w)
+                        any_nan = true
+                    end
+                end
+            end
+        end
+end
+
+
+grad
+g_keys
+
+for grad in test_grads[1]
+    if grad isa NamedTuple
+            for key in keys(grad)
+                if 
+                println(key)
+                # println(grad[key].weight)
+            end
+    else
+        println("uhoh")
+    end
+end
+
+function check_gradients(grads)
+    # Recursive function to check for NaN in gradients within any structure
+    for grad in grads
+        if grad isa Tuple  # Check if the gradient component is a tuple (e.g., from Parallel)
+            check_gradients(grad)  # Recurse into the tuple
+        elseif   # Check if it's a layer with weights
+            if any(isnan, grad.weight)
+                return true  # Return true if any NaN is found
+            end
+        end
+    end
+    return false  # No NaN found
+end
+
+test_grads = back(1.0)[1]
+
+v_grads = test_grads[1]
+
+test_grads[1][1]
+test_grads[1][1]
+
+if any(layer -> any(x -> isnan(x), layer.weight), test_grads[1])
+    println("NaN Gradients detected")
+else
+    Optimisers.update!(st_opt, nn_params, grads)
+end
 
 length(epoch_list)
 savefig("skiba-nn-fit.pdf")
