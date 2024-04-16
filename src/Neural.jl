@@ -13,8 +13,30 @@ benchmark = false
 CUDA.allowscalar(false)
 
 Random.seed!(1234)
+
+
+# Define a function to fetch the appropriate device based on the hostname
+function choose_device()
+    # Get the current hostname
+    host = gethostname()
+
+    # Initialize the device variable
+    device = nothing
+
+    # Check if the hostname is "zero-gravitas"
+    if host == "zero-gravitas"
+        # Assign the CPU device if the condition is met
+        device = cpu_device()
+    else
+        # Assign the GPU device otherwise
+        device = gpu_device()
+    end
+    
+    return device
+end
+
 cpu_dev = cpu_device()
-device = gpu_device()
+device = choose_device()
 
 
 
