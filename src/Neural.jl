@@ -14,6 +14,13 @@ CUDA.allowscalar(false)
 
 Random.seed!(1234)
 
+# Dispatching for NN specific stuff
+function GrowthModels.production_function(::Type{M}, states::AbstractMatrix, params) where {M <: StochasticSkibaModel}
+    production_function(M, states[1, :], states[2, :], reduce(vcat, [params...]))
+end
+function GrowthModels.production_function(m::StochasticSkibaModel, state_vals::AbstractMatrix) 
+    production_function(m, state_vals[1, :], state_vals[2, :])
+end
 
 # Define a function to fetch the appropriate device based on the hostname
 function choose_device()
@@ -56,12 +63,13 @@ function ValueFunctionChain(m::Model, c_size, n_params)
         # both read in simultaneously
         Parallel(
             nothing,
-            MicawberLayer(state_size + n_params, c_size, relu, m),
-            SteadyStateLayer(state_size + n_params, c_size, relu, m),
+            MicawberLayer(state_size + n_params, c_size, relu, m, state_size),
+            SteadyStateLayer(state_size + n_params, c_size, relu, m, state_size),
+            TechnologyLayer(state_size + n_params, c_size, relu, m, state_size),
             NoOpLayer()
         ),
         x -> vcat(x...),
-        Dense(c_size*2 + state_size + n_params, n_size, relu),
+        Dense(c_size*3 + state_size + n_params, n_size, relu),
         Dense(n_size, n_size, relu),
         Dense(n_size, 1)
     )
@@ -73,12 +81,13 @@ function PolicyFunctionChain(m::Model, c_size, n_params)
     pol_f_nn = Chain(
         Parallel(
             nothing,
-            MicawberLayer(state_size + n_params, c_size, tanh, m),
-            SteadyStateLayer(state_size + n_params, c_size, tanh, m),
+            MicawberLayer(state_size + n_params, c_size, tanh, m, state_size),
+            SteadyStateLayer(state_size + n_params, c_size, tanh, m, state_size),
+            TechnologyLayer(state_size + n_params, c_size, relu, m, state_size),
             NoOpLayer()
         ),
         x -> vcat(x...),
-        Dense(c_size*2 + state_size + n_params, n_size, tanh),
+        Dense(c_size*3 + state_size + n_params, n_size, tanh),
         Dense(n_size, n_size, tanh),
         Dense(n_size, 1, softplus)
     )
@@ -120,8 +129,6 @@ st_opt = Optimisers.setup(ADAM(), nn_params) |> device
 
 nets = (v_f_nn, pol_f_nn)
 
-
-
 v_f_k, v_f_deriv_k, pol_f_k = predict_fn(nets, state_vals, param_vals, nn_params, states)
 
 
@@ -158,9 +165,6 @@ function projection_loss(nets, k, model_params, nn_params, states)
     return loss
 end
 
-function GrowthModels.production_function(m::StochasticSkibaModel, state_vals::AbstractMatrix) 
-    production_function(m, state_vals[1, :], state_vals[2, :])
-end
 
 function upwind_loss(nets, model_params, nn_params, states, upwind_targets, m::StochasticModel)
     state_vals, upwind_v, upwind_pol, upwind_kdot = upwind_targets
@@ -299,7 +303,7 @@ end
 
 epoch_list = [1]
 loss_list = [Inf]
-n_redraw = 100
+n_redraw = 1e6
 for epoch in epoch_list[end]:1_000_000
 
 # epoch = 1
@@ -352,7 +356,7 @@ for epoch in epoch_list[end]:1_000_000
         end
     end
     # if late on, ignore very large losses as can propagate NaNs
-    if !isnan(loss) && (loss < 1e3 && epoch > 1e4)
+    if !isnan(loss) 
         grads = back(1.0)[1]
         nan_grads = check_gradients(grads)
         if nan_grads
@@ -363,94 +367,7 @@ for epoch in epoch_list[end]:1_000_000
     end;
 end;
 
-filter(!isnan, loss_list)
 
-typeof(test_grads[1][1][1])
-keys(test_grads[1][1])
-
-:layer_1 in keys(test_grads[1][1])
-
-test_grads[1][1][:layer_1].bias
-isa(test_grads[1][1], NamedTuple)
-
-check_gradients(test_grads[1])
-check_gradients(test_grads)
-
-grad = test_grads[1][3]
-isa(grad, NamedTuple)
-g_keys = keys(grad)
-
-grad
-
-haskey(grad, :weight)
-
-
-check_gradients(test_grads[1])
-any_nan = false
-function check_gradients(gradients)
-   any_nan = false
-   for grad in gradients
-        if isa(grad, NamedTuple)
-
-        if :weight in g_keys
-            w = grad.weight
-            if any(isnan, w)
-                any_nan = true
-            end
-        else 
-            for key in g_keys
-                if !isnothing(grad[key])
-                    w = grad[key].weight
-                    if any(isnan, w)
-                        any_nan = true
-                    end
-                end
-            end
-        end
-end
-
-
-grad
-g_keys
-
-for grad in test_grads[1]
-    if grad isa NamedTuple
-            for key in keys(grad)
-                if 
-                println(key)
-                # println(grad[key].weight)
-            end
-    else
-        println("uhoh")
-    end
-end
-
-function check_gradients(grads)
-    # Recursive function to check for NaN in gradients within any structure
-    for grad in grads
-        if grad isa Tuple  # Check if the gradient component is a tuple (e.g., from Parallel)
-            check_gradients(grad)  # Recurse into the tuple
-        elseif   # Check if it's a layer with weights
-            if any(isnan, grad.weight)
-                return true  # Return true if any NaN is found
-            end
-        end
-    end
-    return false  # No NaN found
-end
-
-test_grads = back(1.0)[1]
-
-v_grads = test_grads[1]
-
-test_grads[1][1]
-test_grads[1][1]
-
-if any(layer -> any(x -> isnan(x), layer.weight), test_grads[1])
-    println("NaN Gradients detected")
-else
-    Optimisers.update!(st_opt, nn_params, grads)
-end
 
 length(epoch_list)
 savefig("skiba-nn-fit.pdf")

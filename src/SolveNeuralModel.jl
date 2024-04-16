@@ -13,6 +13,7 @@ using Statistics
 export PositiveDense, 
        MicawberLayer, 
        SteadyStateLayer, 
+       TechnologyLayer,
        err_HJB, 
        monotonicity_penalty, 
        calculate_lipschitz_constant, 
@@ -117,6 +118,22 @@ struct SteadyStateLayer{F1, F2, T <: Model} <: GrowthModelLayer
     init_bias::Function
 end
 
+
+struct TechnologyLayer{F1, F2, T <: Model} <: GrowthModelLayer
+    activation
+    state_size::Int
+    m::T
+    in_dims::Int
+    out_dims::Int
+    init_weight::Function
+    init_bias::Function
+end
+
+
+function TechnologyLayer(in_dims::Int, out_dims::Int, activation, m::Model, state_size = 1; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
+    return TechnologyLayer{typeof(init_weight), typeof(init_bias), typeof(m)}(activation, state_size, m, in_dims, out_dims, init_weight, init_bias)
+end
+
 function MicawberLayer(in_dims::Int, out_dims::Int, activation, m::Model, state_size = 1; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
     return MicawberLayer{typeof(init_weight), typeof(init_bias), typeof(m)}(activation, state_size, m, in_dims, out_dims, init_weight, init_bias)
 end
@@ -127,10 +144,20 @@ function SteadyStateLayer(in_dims::Int, out_dims::Int, activation, m::Model, sta
 end
 
 function Lux.initialparameters(rng::AbstractRNG, layer::GrowthModelLayer)
+    w = layer.init_weight(rng, layer.out_dims, layer.state_size)
+    b = layer.init_bias(rng, layer.out_dims, 1)
+    return (weight = w, bias = b)
+end
+
+
+# if steady state layer or TechnologyLayer, then only one set of weights as 
+# output of the layer is a scalar even if 2dim (i.e. k, z) inputs.
+function Lux.initialparameters(rng::AbstractRNG, layer::Union{SteadyStateLayer, TechnologyLayer})
     w = layer.init_weight(rng, layer.out_dims, 1)
     b = layer.init_bias(rng, layer.out_dims, 1)
     return (weight = w, bias = b)
 end
+
 Lux.initialstates(::AbstractRNG, ::GrowthModelLayer) = NamedTuple()
 Lux.parameterlength(l::GrowthModelLayer) = l.out_dims * l.in_dims + l.out_dims
 
@@ -141,14 +168,21 @@ function (l::MicawberLayer{F1, F2, M})(x::Union{AbstractVecOrMat, T}, ps, st::Na
     # don't vary within batch
     params = extract_nn_parameters(M, x[:, 1])
     k_s = k_star(M; params...)
-    # k_s = κ ./ (1 .- (A_L ./ A_H).^(1 ./ α))
-    # abs to ensure positive in input layer
-    # difference between x and k_star
     y = (ps.weight * (states .- k_s)) .+ ps.bias
     return l.activation.(y), st
 end
 
 
+function (l::TechnologyLayer{F1, F2, M})(x::Union{AbstractVecOrMat, T}, ps, st::NamedTuple) where {F1, F2, T <: Real, M <: Model}
+    states = x[1:l.state_size, :]
+    ## WARNING: Currently just taking first input, since we know model params 
+    # don't vary within batch
+    params = extract_nn_parameters(M, x[:, 1])
+    param_vec = reduce(vcat, [params...])
+    prod_output = production_function(M, states,  param_vec)
+    y = (ps.weight * prod_output') .+ ps.bias
+    return l.activation.(y), st
+end
 
 
 # k_steady_state_hi_Skiba(α::Real, A_H::Real, ρ::Real, δ::Real, κ::Real) = (α*A_H/(ρ + δ))^(1/(1-α)) + κ
@@ -161,7 +195,6 @@ function (l::SteadyStateLayer{F1, F2, M})(x::Union{AbstractVecOrMat, T}, ps, st:
     params = extract_nn_parameters(M, x[:, 1])
     k_ss = reduce(vcat, k_steady_state(M; params...))
     diff = -1 *(k_ss .- states[1, :]')
-
     abs_diff = abs.(diff)
     distances_indices = argmin(abs_diff, dims = 1)
     distances = diff[distances_indices]
