@@ -13,6 +13,7 @@ using Statistics
 export PositiveDense, 
        MicawberLayer, 
        SteadyStateLayer, 
+       TechnologyLayer,
        err_HJB, 
        monotonicity_penalty, 
        calculate_lipschitz_constant, 
@@ -23,7 +24,17 @@ export PositiveDense,
        dfx, 
        predict_fn, 
        plot_pred_output, 
-       plot_nn_output
+       plot_nn_output,
+       # 
+       choose_device,
+       check_gradients,
+       draw_random_model,
+       create_upwind_targets,
+       composite_loss,
+       upwind_loss,
+       projection_loss,
+       check_statespace
+
 
 
 
@@ -117,6 +128,22 @@ struct SteadyStateLayer{F1, F2, T <: Model} <: GrowthModelLayer
     init_bias::Function
 end
 
+
+struct TechnologyLayer{F1, F2, T <: Model} <: GrowthModelLayer
+    activation
+    state_size::Int
+    m::T
+    in_dims::Int
+    out_dims::Int
+    init_weight::Function
+    init_bias::Function
+end
+
+
+function TechnologyLayer(in_dims::Int, out_dims::Int, activation, m::Model, state_size = 1; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
+    return TechnologyLayer{typeof(init_weight), typeof(init_bias), typeof(m)}(activation, state_size, m, in_dims, out_dims, init_weight, init_bias)
+end
+
 function MicawberLayer(in_dims::Int, out_dims::Int, activation, m::Model, state_size = 1; init_weight=Lux.glorot_uniform, init_bias = Lux.zeros32)
     return MicawberLayer{typeof(init_weight), typeof(init_bias), typeof(m)}(activation, state_size, m, in_dims, out_dims, init_weight, init_bias)
 end
@@ -127,10 +154,20 @@ function SteadyStateLayer(in_dims::Int, out_dims::Int, activation, m::Model, sta
 end
 
 function Lux.initialparameters(rng::AbstractRNG, layer::GrowthModelLayer)
+    w = layer.init_weight(rng, layer.out_dims, layer.state_size)
+    b = layer.init_bias(rng, layer.out_dims, 1)
+    return (weight = w, bias = b)
+end
+
+
+# if steady state layer or TechnologyLayer, then only one set of weights as 
+# output of the layer is a scalar even if 2dim (i.e. k, z) inputs.
+function Lux.initialparameters(rng::AbstractRNG, layer::Union{SteadyStateLayer, TechnologyLayer})
     w = layer.init_weight(rng, layer.out_dims, 1)
     b = layer.init_bias(rng, layer.out_dims, 1)
     return (weight = w, bias = b)
 end
+
 Lux.initialstates(::AbstractRNG, ::GrowthModelLayer) = NamedTuple()
 Lux.parameterlength(l::GrowthModelLayer) = l.out_dims * l.in_dims + l.out_dims
 
@@ -141,14 +178,21 @@ function (l::MicawberLayer{F1, F2, M})(x::Union{AbstractVecOrMat, T}, ps, st::Na
     # don't vary within batch
     params = extract_nn_parameters(M, x[:, 1])
     k_s = k_star(M; params...)
-    # k_s = κ ./ (1 .- (A_L ./ A_H).^(1 ./ α))
-    # abs to ensure positive in input layer
-    # difference between x and k_star
     y = (ps.weight * (states .- k_s)) .+ ps.bias
     return l.activation.(y), st
 end
 
 
+function (l::TechnologyLayer{F1, F2, M})(x::Union{AbstractVecOrMat, T}, ps, st::NamedTuple) where {F1, F2, T <: Real, M <: Model}
+    states = x[1:l.state_size, :]
+    ## WARNING: Currently just taking first input, since we know model params 
+    # don't vary within batch
+    params = extract_nn_parameters(M, x[:, 1])
+    param_vec = reduce(vcat, [params...])
+    prod_output = production_function(M, states,  param_vec)
+    y = (ps.weight * prod_output') .+ ps.bias
+    return l.activation.(y), st
+end
 
 
 # k_steady_state_hi_Skiba(α::Real, A_H::Real, ρ::Real, δ::Real, κ::Real) = (α*A_H/(ρ + δ))^(1/(1-α)) + κ
@@ -161,7 +205,6 @@ function (l::SteadyStateLayer{F1, F2, M})(x::Union{AbstractVecOrMat, T}, ps, st:
     params = extract_nn_parameters(M, x[:, 1])
     k_ss = reduce(vcat, k_steady_state(M; params...))
     diff = -1 *(k_ss .- states[1, :]')
-
     abs_diff = abs.(diff)
     distances_indices = argmin(abs_diff, dims = 1)
     distances = diff[distances_indices]
@@ -582,4 +625,189 @@ function plot_nn_output(
     return plot(p1, p2, p3, p4, layout = (2, 2), size = (800, 800))
 end
 
+
+function check_statespace(m)
+    hps = StateSpaceHyperParams(m)
+    statespace = StateSpace(m, hps)
+    max_statespace_constraint = statespace.aux_state.y[end] - m.δ * maximum(statespace[:k])
+    min_statespace_constraint = statespace.aux_state.y[1] - m.δ * minimum(statespace[:k])
+    state_error =  max_statespace_constraint < 0 || min_statespace_constraint < 0
+    return state_error
+end
+
+    
+
+
+
+function projection_loss(nets, k, model_params, nn_params, states)
+    v_f_k, v_f_deriv_k, pol_f_k = predict_fn(nets, k, model_params, nn_params, states)
+    hjb_err, pol_err = err_HJB(k, model_params, v_f_k, v_f_deriv_k, pol_f_k)
+    n_k = length(k)
+    neg_deriv_penalty = sum(exp.(min.(v_f_deriv_k, 0)))
+    loss = sqrt(sum(abs, pol_err) / n_k) + sqrt(sum(abs, hjb_err) / n_k) + sqrt(sum(abs, neg_deriv_penalty) / n_k)
+    return loss
+end
+
+
+function upwind_loss(nets, model_params, nn_params, states, upwind_targets, m::StochasticModel)
+    state_vals, upwind_v, upwind_pol, upwind_kdot = upwind_targets
+    v_f_k, _, pol_f_k = predict_fn(nets, state_vals, model_params, nn_params, states, derivative = false)
+    kdot = production_function(m, state_vals[1, :], state_vals[2, :]) .- m.δ .* state_vals[1, :] .- pol_f_k
+
+    n_k = length(v_f_k)
+    upwind_v_err = sqrt(sum(abs2, upwind_v - v_f_k) / n_k)
+    upwind_pol_err = sqrt(sum(abs2, upwind_pol - pol_f_k) / n_k)
+    upwind_kdot_err = sqrt(sum(abs2, upwind_kdot - kdot) / n_k)
+    return upwind_v_err + upwind_pol_err + upwind_kdot_err
+end
+
+
+function upwind_loss(nets, model_params, nn_params, states, upwind_targets, m::DeterministicModel)
+    k, upwind_v, upwind_pol, upwind_kdot = upwind_targets
+    v_f_k, _, pol_f_k = predict_fn(nets, k, model_params, nn_params, states, derivative = false)
+    kdot = production_function(m, k) .- m.δ .* k .- pol_f_k
+
+    n_k = length(v_f_k)
+    upwind_v_err = sqrt(sum(abs2, upwind_v - v_f_k) / n_k)
+    upwind_pol_err = sqrt(sum(abs2, upwind_pol - pol_f_k) / n_k)
+    upwind_kdot_err = sqrt(sum(abs2, upwind_kdot - kdot) / n_k)
+    return upwind_v_err + upwind_pol_err + upwind_kdot_err
+end
+
+
+
+function create_upwind_targets(sm::SolvedModel{T}, res, model_params, device) where {T <: DeterministicModel}
+    upwind_v = res.value.v |> device
+    upwind_pol = sm.variables[:c] |> device
+    upwind_kdot = sm.kdot_function(sm.variables[:k]) |> device
+    upwind_model_params = repeat(model_params[:, 1], 1, size(upwind_v, 1))
+    upwind_k = sm.variables[:k] |> device
+    return  (upwind_k, upwind_v, upwind_pol, upwind_kdot), upwind_model_params
+end
+
+function create_upwind_targets(sm::SolvedModel{T}, res, model_params, device) where {T <: StochasticModel}
+    upwind_v = res.value.v[:] |> device
+    upwind_pol = sm.variables[:c][:] |> device
+    upwind_kdot = sm.kdot_function.(sm.variables[:k][:, 1], sm.variables[:z][1, :]')[:] |> device
+    upwind_k = sm.variables[:k][:] |> device
+    upwind_z = sm.variables[:z][:] |> device
+
+    upwind_state = vcat(upwind_k', upwind_z')
+    upwind_model_params = repeat(model_params[:, 1], 1, size(upwind_v, 1))
+
+    return  (upwind_state, upwind_v, upwind_pol, upwind_kdot), upwind_model_params
+end
+
+
+
+
+function composite_loss(nets, k, model_params, nn_params, states, upwind_targets, m)
+    proj_l = projection_loss(nets, k, model_params, nn_params, states)
+    upwind_model_params = repeat(model_params[:, 1], 1, size(upwind_targets[2], 1))
+    upwind_l = upwind_loss(nets, upwind_model_params, nn_params, states, upwind_targets, m)
+    return proj_l + upwind_l
+end
+
+function draw_random_model(::Type{M}, sobol_seq) where {M <: DeterministicModel}
+    m = M()
+    max_ss = maximum(k_steady_state(m))
+    state_constraint = check_statespace(m)
+    successful_vfi = false
+    redraw = !(max_ss < 25) || state_constraint || !successful_vfi
+    while redraw
+        model_param_candidate = Float32.(param_reshuffle(next!(sobol_seq)))
+
+
+        m = M(model_param_candidate...) 
+        max_ss = maximum(k_steady_state(m))
+        try 
+            sm, res = solve_growth_model(m, (Nk = 100,))
+            successful_vfi = true
+        catch e
+            successful_vfi = false
+            continue
+        end
+        max_ss = maximum(k_steady_state(m))
+        state_constraint = check_statespace(m)
+        redraw = !(max_ss < 25) || state_constraint || !successful_vfi
+    end
+    sm, res = solve_growth_model(m, (Nk = 100,))
+    return m, sm, res
+end
+
+
+
+function draw_random_model(::Type{M}, sobol_seq) where {M <: StochasticModel}
+    Nk = 50
+    Nz = 2
+    m = M()
+    max_ss = maximum(k_steady_state(m))
+    state_constraint = check_statespace(m)
+    successful_vfi = false
+    redraw = !(max_ss < 25) || state_constraint || !successful_vfi
+    while redraw
+        model_param_candidate = Float32.(param_reshuffle(next!(sobol_seq)))
+        m = M(
+            model_param_candidate[1:end-2]...,
+            OrnsteinUhlenbeckProcess(θ = model_param_candidate[end-1], σ = model_param_candidate[end])
+            )
+        max_ss = maximum(k_steady_state(m))
+        try 
+            sm, res = solve_growth_model(m, (Nk = Nk, Nz = Nz))
+            successful_vfi = true
+        catch e
+            successful_vfi = false
+            continue
+        end
+        max_ss = maximum(k_steady_state(m))
+        state_constraint = check_statespace(m)
+        redraw = !(max_ss < 25) || state_constraint || !successful_vfi
+    end
+    sm, res = solve_growth_model(m, (Nk = Nk, Nz = Nz))
+    return m, sm, res
+end
+
+
+function check_gradients(grads)
+    # Recursive function to check for NaN in gradients within any structure
+    for grad in grads
+        if grad isa NamedTuple && !haskey(grad, :weight)  # Check if the gradient component is a tuple (e.g., from Parallel)
+            check_gradients(grad)  # Recurse into the tuple
+        elseif grad isa NamedTuple && haskey(grad, :weight)  # Check if it's a layer with weights
+            if any(isnan, grad.weight)
+                return true  # Return true if any NaN is found
+            end
+        end
+    end
+    return false  # No NaN found
+end
+
+
+
+
+# Define a function to fetch the appropriate device based on the hostname
+function choose_device()
+    # Get the current hostname
+    host = gethostname()
+
+    # Initialize the device variable
+    device = nothing
+
+    # Check if the hostname is "zero-gravitas"
+    if host == "zero-gravitas"
+        # Assign the CPU device if the condition is met
+        device = cpu_device()
+    else
+        # Assign the GPU device otherwise
+        device = gpu_device()
+    end
+    
+    return device
+end
+
+param_reshuffle = function(p)
+    new_p = copy(p)
+    new_p[5] = p[5] + p[6]
+    return new_p
+end
 end
