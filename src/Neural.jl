@@ -299,11 +299,11 @@ end
 
 epoch_list = [1]
 loss_list = [Inf]
-n_redraw = 100
-for epoch in epoch_list[end]:1_000_000
+n_redraw = 1
+# for epoch in epoch_list[end]:1_000_000
 
 # epoch = 1
-# epoch = epoch_list[end]
+epoch = epoch_list[end]
 
     if epoch % n_redraw  == 0 || epoch == 1
         m, sm, res = draw_random_model(m_type, skiba_sobol_seq); 
@@ -351,11 +351,14 @@ for epoch in epoch_list[end]:1_000_000
             println(e)
         end
     end
+
     # if late on, ignore very large losses as can propagate NaNs
-    if !isnan(loss) && (loss < 1e3 && epoch > 1e4)
+    if !isnan(loss) 
+        # (loss < 1e5 && epoch > 1e4)
         grads = back(1.0)[1]
-        nan_grads = check_gradients(grads)
-        if nan_grads
+        nan_v_grads = check_gradients(grads[1])
+        nan_pol_grads = check_gradients(grads[2])
+        if nan_v_grads || nan_pol_grads
             println("NaN Gradients")
         else
             Optimisers.update!(st_opt, nn_params, grads)
