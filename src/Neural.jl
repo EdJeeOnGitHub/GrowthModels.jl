@@ -162,6 +162,7 @@ for epoch in epoch_list[end]:1_000_000
     # if loss becomes NaN, go back to last set of params, otherwise save them 
     # for next iteration
     if isnan(loss)
+        println("Loss NaN, using previous params and re-running.")
         loss, back = Zygote.pullback(last_nn_params) do p
             upwind_loss(nets, upwind_model_params, p, states, upwind_targets, m)
         end;
