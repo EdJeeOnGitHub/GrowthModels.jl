@@ -187,8 +187,7 @@ for epoch in epoch_list[end]:1_000_000
             else
                 p_model_output = plot_nn_output(nets, k_vals, param_vals, nn_params, states, epoch_list, loss_list, upwind_targets, cpu_dev, m)
             end
-            display(p_model_output)
-            savefig("temp-data/nn-fit.pdf")
+            savefig(p_model_output, "temp-data/nn-fit.pdf")
         catch e 
             println(e)
         end
