@@ -8,6 +8,7 @@ using ForwardDiff, LinearAlgebra
 using LuxCUDA
 using Plots
 using Sobol
+using Statistics
 
 export PositiveDense, 
        MicawberLayer, 
@@ -392,6 +393,30 @@ function moving_average(data, window_size)
 end
 
 
+
+function average_last_n(vec::Vector, n::Int)
+    # Check if n is within the bounds of the vector length
+    if n > length(vec) || n < 1
+        error("n must be between 1 and the length of the vector")
+    end
+
+    # Get the last n elements of the vector
+    last_n_elements = vec[end-n+1:end]
+
+    # Filter out Inf and NaN values
+    filtered_elements = filter(x -> !isinf(x) && !isnan(x), last_n_elements)
+
+    # If all elements are Inf or NaN, return Inf
+    if isempty(filtered_elements)
+        return Inf
+    end
+
+    # Calculate the average
+    return median(filtered_elements) 
+end
+
+
+
 function plot_nn_output( 
                         nets, 
                         k_vals, 
@@ -542,6 +567,7 @@ function plot_nn_output(
     label = ""
    )
 
+   mean_loss = round(average_last_n(loss_list, length(epoch_list) ÷ 10), digits = 3)
 
     p4 = plot(
         epoch_list, 
@@ -549,7 +575,7 @@ function plot_nn_output(
         label = "Loss", 
         yscale = :log10,
         alpha = 0.7,
-        title = "Loss"
+        title = "Loss: $mean_loss"
         )
     ylims!(p4, minimum(loss_list), 1e4)
 
