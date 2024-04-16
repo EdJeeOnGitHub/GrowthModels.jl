@@ -14,8 +14,7 @@ CUDA.allowscalar(false)
 
 Random.seed!(1234)
 cpu_dev = cpu_device()
-device = cpu_device()
-# Stuff for GPU
+device = gpu_device()
 
 
 
@@ -102,28 +101,6 @@ nets = (v_f_nn, pol_f_nn)
 
 
 v_f_k, v_f_deriv_k, pol_f_k = predict_fn(nets, state_vals, param_vals, nn_params, states)
-
-
-plot(
-    Array(k_vals), Array(v_f_k),
-    seriestype = :scatter,
-    colour = :blue,
-    label = "NN \$V(k)\$",
-    xlabel = "\$k\$",
-    ylabel = "\$V(k)\$",
-    )
-plot!(
-    Array(k_vals), Array(v_f_deriv_k),
-    seriestype = :scatter,
-    colour = :blue,
-    label = "NN \$V(k)\$",
-    xlabel = "\$k\$",
-    ylabel = "\$V(k)\$",
-    )
-
-
-# hjb_err, pol_err = err_HJB(k_vals, param_vals, v_f_k, v_f_deriv_k, pol_f_k)
-
 
 
 
@@ -288,8 +265,9 @@ end
 epoch_list = [1]
 loss_list = [Inf]
 n_redraw = 1
-for epoch in epoch_list[end]:1_000_000
+# for epoch in epoch_list[end]:1_000_000
 # epoch = 1
+epoch = epoch_list[end]
 
     if epoch % n_redraw  == 0 || epoch == 1
         m, sm, res = draw_random_model(m_type, skiba_sobol_seq); 
@@ -308,6 +286,8 @@ for epoch in epoch_list[end]:1_000_000
     upwind_targets, upwind_model_params = create_upwind_targets(sm, res, param_vals)
 
 
+    # state_vals, upwind_v, upwind_pol, upwind_kdot = upwind_targets
+    # v_f_k, _, pol_f_k = predict_fn(nets, state_vals, upwind_model_params, nn_params, states, derivative = false)
 
 
     loss, back = Zygote.pullback(nn_params) do p
@@ -321,6 +301,7 @@ for epoch in epoch_list[end]:1_000_000
     push!(epoch_list, epoch)
     push!(loss_list, loss)
   
+
 
     if epoch % 50 == 1
         try 
