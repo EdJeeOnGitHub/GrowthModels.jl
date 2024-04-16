@@ -326,7 +326,7 @@ for epoch in epoch_list[end]:1_000_000
   
 
 
-    if epoch % 50 == 1
+    if epoch % 500 == 1
         try 
             if (isa(m, StochasticModel))
                 p_model_output = plot_nn_output(nets, k_vals, upwind_model_params, nn_params, states, epoch_list, loss_list, upwind_targets, cpu_dev, m)
@@ -351,13 +351,6 @@ end;
 
 length(epoch_list)
 savefig("skiba-nn-fit.pdf")
-
-
-
-
-
-v_f_k, v_f_deriv_k, pol_f_k = predict_fn(fns, nets, cu(cpu_k_vals), cu(cpu_param_vals), nn_params[1], nn_params[2], states[1], states[2])
-
 
 
 kdot = production_function(m, k_vals) .- m.δ .* k_vals .- pol_f_k
