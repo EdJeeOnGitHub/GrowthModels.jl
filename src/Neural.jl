@@ -127,7 +127,7 @@ skiba_sobol_seq = generate_model_values("StochasticSkibaModel")
 epoch_list = [1]
 loss_list = [Inf]
 n_redraw = 1
-for epoch in epoch_list[end]:1_000_000
+for epoch in epoch_list[end]:5_000_000
 # epoch = 1
     if epoch == 1 
         last_nn_params = deepcopy(nn_params)
