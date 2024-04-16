@@ -76,7 +76,7 @@ y_L(m::StochasticSkibaModel) = (k, z) -> m.A_L*z*k^m.α
 
 # Skiba production function
 @inline function stochastic_skiba_production_function(k, z, α, A_H, A_L, κ)
-    z .* max.(A_H .* pow.(max.(k .- κ, 0), α), A_L .* pow.(k, α))
+    z .* max.(A_H .* max.(k .- κ, 0) .^ α, A_L .* k .^ α)
 end
 # derivative of skiba production function
 @inline function skiba_production_function_prime(k, z, α, A_H, A_L, κ)

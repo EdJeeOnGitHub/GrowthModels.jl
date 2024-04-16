@@ -466,13 +466,14 @@ function plot_nn_output(
 
     
 
-    state_vals, upwind_v, upwind_pol, upwind_kdot = upwind_targets
-    v_f_k, _, pol_f_k = predict_fn(nets, state_vals, param_vals, nn_params, states, derivative = false)
+    state_vals, upwind_v, upwind_pol, upwind_kdot = upwind_targets 
+    v_f_k, _, pol_f_k = predict_fn(nets, state_vals, param_vals, nn_params, states, derivative = false) 
 
-    v_kdot = production_function(m, state_vals[1, :], state_vals[2, :]) .- m.δ .* state_vals[1, :] .- pol_f_k
-    u_states = Array(upwind_targets[1])
-    v = Array(v_f_k)
-    pol = Array(pol_f_k)
+    v_kdot = production_function(m, state_vals[1, :], state_vals[2, :]) .- m.δ .* state_vals[1, :] .- pol_f_k 
+    v_kdot = Array(v_kdot) |> cpu_dev
+    u_states = Array(upwind_targets[1]) |> cpu_dev
+    v = Array(v_f_k) |> cpu_dev
+    pol = Array(pol_f_k) |> cpu_dev
     nk = length(unique(u_states[1, :]))
     nz = length(unique(u_states[2, :]))
 
@@ -504,7 +505,7 @@ function plot_nn_output(
     
     p2 = plot(
         u_states[1, :], 
-        v_f_k,
+        v,
         group = group,
         colour = :blue,
         xlabel = "\$k\$",
