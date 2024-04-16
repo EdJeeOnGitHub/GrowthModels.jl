@@ -178,7 +178,7 @@ for epoch in epoch_list[end]:1_000_000
         end
     end
 
-    # if late on, ignore very large losses as can propagate NaNs
+    # Ignore very large losses to prevent propagating NaNs 
     if !isnan(loss)  && loss < 1e10
         grads = back(1.0)[1]
         nan_v_grads = check_gradients(grads[1])
@@ -186,12 +186,18 @@ for epoch in epoch_list[end]:1_000_000
         if nan_v_grads || nan_pol_grads
             println("NaN Gradients")
         else
-            Optimisers.update!(st_opt, nn_params, grads)
+            # another attempt at avoiding huge loss swings leading to NaNs
+            trailing_median_loss = NeuralGrowthModel.average_last_n(loss_list, min(epoch, 1000))
+            loss_increase = loss / trailing_median_loss
+            if loss_increase > 1000
+                @show loss_increase
+                println("Loss Exploded, Skipping")
+            else
+                Optimisers.update!(st_opt, nn_params, grads)
+            end
         end
     end;
 end;
-
-
 
 length(epoch_list)
 savefig("skiba-nn-fit.pdf")
