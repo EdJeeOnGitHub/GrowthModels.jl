@@ -102,8 +102,8 @@ end
 
 
 state_size = ifelse(isa(m, StochasticModel), 2, 1)
-c_size = 24
-n_size = 48
+c_size = 24*2
+n_size = 48*2
 
 v_pol_f_nn = ValuePolicyFunctionChain(m, c_size, n_params)
 v_f_nn = ValueFunctionChain(m, c_size, n_params)
@@ -111,44 +111,17 @@ pol_f_nn = PolicyFunctionChain(m, c_size, n_params)
 state_size = ifelse(isa(m, StochasticModel), 2, 1)
 
 # Creating input variables for testing
-vals = generate_grid_values(m, batch_size)
-cpu_vals = deepcopy(vals)
-cpu_k_vals = vec(cpu_vals[1:state_size, :])
-cpu_param_vals = cpu_vals[state_size + 1:end, :]
-vals = vals |> device
-state_vals = vals[1:state_size, :]
-state_vals = ifelse(isa(state_vals, Vector), vec(state_vals), state_vals)
-k_vals = state_vals[1, :]
-param_vals = vals[state_size + 1:end, :]
-# Setting up NN params
-rng = Random.default_rng()
-# Version on the CPU
-cpu_vf_ps, cpu_vf_st = Lux.setup(rng, v_f_nn) 
-cpu_pol_ps, cpu_pol_st = Lux.setup(rng, pol_f_nn) 
-cpu_vp_ps, cpu_vp_st = Lux.setup(rng, v_pol_f_nn)
 
-vf_ps, vf_st = Lux.setup(rng, v_f_nn) .|> device
-pol_ps, pol_st = Lux.setup(rng, pol_f_nn) .|> device
-vp_ps, vp_st = Lux.setup(rng, v_pol_f_nn) .|> device
+function setup_nn_hps(nn, rng, device)
+    ps, st = Lux.setup(rng, nn) .|> device
+    opt = Optimisers.ADAM()
+    st_opt = Optimisers.setup(opt, ps) |> device
+    return nn, ps, st, st_opt
+end
 
 
-states = (vf_st, pol_st) |> device
-nn_params = (vf_ps, pol_ps) |> device
-
-opt = Optimisers.ADAM() 
-st_opt = Optimisers.setup(ADAM(), vp_ps) |> device
-
-nets = (v_f_nn, pol_f_nn)
-
-v_f_k, v_f_deriv_k, pol_f_k = predict_fn(nets, state_vals, param_vals, nn_params, states)
 
 
-b_v_f_k, b_v_f_deriv_k, b_pol_f_k = predict_fn(v_pol_f_nn, state_vals, param_vals, vp_ps, vp_st)
-
-
-skiba_sobol_seq = generate_model_values("StochasticSkibaModel")
-
-# make sure A_H > A_L
 
 
 function generate_values(m, batch_size, state_size, seed)
@@ -195,7 +168,7 @@ function train!(epoch, st_opt, nets, nn_params, last_nn_params, states, hps::Tra
     upwind_targets, upwind_model_params = create_upwind_targets(sm, res, param_vals, device)
     # Calculate loss
     loss, back = Zygote.pullback(nn_params) do p
-        upwind_loss(nets, upwind_model_params, p, states, upwind_targets, m)
+        policy_loss(nets, upwind_model_params, p, states, upwind_targets, m)
     end;
 
     nan_loss_iter = 0
@@ -209,7 +182,7 @@ function train!(epoch, st_opt, nets, nn_params, last_nn_params, states, hps::Tra
         upwind_targets, upwind_model_params = create_upwind_targets(sm, res, param_vals, device)
         # Calculate loss
         loss, back = Zygote.pullback(last_nn_params) do p
-            upwind_loss(nets, upwind_model_params, p, states, upwind_targets, m)
+            policy_loss(nets, upwind_model_params, p, states, upwind_targets, m)
         end;
         if nan_loss_iter > 50
             println("Too many NaN losses, skipping epoch.")
@@ -232,9 +205,30 @@ function train!(epoch, st_opt, nets, nn_params, last_nn_params, states, hps::Tra
     if epoch % plot_iter == 1
         try 
             if (isa(m, StochasticModel))
-                p_model_output = plot_nn_output(nets, k_vals, upwind_model_params, nn_params, states, epoch_list, loss_list, upwind_targets, cpu_dev, m)
+                # p_model_output = plot_nn_output(nets, k_vals, upwind_model_params, nn_params, states, epoch_list, loss_list, upwind_targets, cpu_dev, m)
+                mean_loss = round(NeuralGrowthModel.average_last_n(loss_list, length(epoch_list) ÷ 10), digits = 3)
+
+                    p_model_output = plot(
+                        epoch_list, 
+                        loss_list, 
+                        label = "Loss", 
+                        yscale = :log10,
+                        alpha = 0.2,
+                        title = "Loss: $mean_loss"
+                        )
+                    roll_loss = NeuralGrowthModel.rolling_mean(loss_list, min(2_000, length(loss_list)))
+                    plot!(
+                        p_model_output, 
+                        epoch_list, 
+                        roll_loss, 
+                        label = "Rolling Mean Loss", 
+                        linewidth = 2,
+                        alpha = 1.0
+                        )
+                    ylims!(p_model_output, minimum(loss_list), 1e4)
+
             else
-                p_model_output = plot_nn_output(nets, k_vals, param_vals, nn_params, states, epoch_list, loss_list, upwind_targets, cpu_dev, m)
+                # p_model_output = plot_nn_output(nets, k_vals, param_vals, nn_params, states, epoch_list, loss_list, upwind_targets, cpu_dev, m)
             end
 
             if save_fig
@@ -270,17 +264,19 @@ function train!(epoch, st_opt, nets, nn_params, last_nn_params, states, hps::Tra
 end
 
 
-train_hps = TrainHyperParams(1, batch_size, state_size, device, m_type, skiba_sobol_seq, [1], [Inf], 10, 2000, !isinteractive(), isinteractive())
+skiba_sobol_seq = generate_model_values("StochasticSkibaModel")
+train_hps = TrainHyperParams(1, batch_size, state_size, device, m_type, skiba_sobol_seq, [1], [Inf], 10, 500, !isinteractive(), isinteractive())
 
 
-nn_params = vp_ps
-nets = v_pol_f_nn
-states = vp_st
-last_nn_params = deepcopy(nn_params)
+
+rng = Random.default_rng()
+nn, ps, st, st_opt = setup_nn_hps(pol_f_nn, rng, device)
+last_nn_params = deepcopy(ps)
+
 
 
 for epoch in train_hps.epoch_list[end]:25_000_000
-    train!(epoch, st_opt, nets, nn_params, last_nn_params, states, train_hps)
+    train!(epoch, st_opt, nn, ps, last_nn_params, st, train_hps)
 end;
 
 
@@ -288,10 +284,9 @@ using BSON
 
 output_dict = Dict(
     :train_hps => train_hps,
-    :nn_params => nn_params,
-    :v_f_nn => v_f_nn,
-    :pol_f_nn => pol_f_nn,
-    :states => states)
+    :ps => ps,
+    :nn => nn,
+    :st => st)
 bson("nn_output.bson",  output_dict)
 
 savefig("skiba-nn-fit.pdf")

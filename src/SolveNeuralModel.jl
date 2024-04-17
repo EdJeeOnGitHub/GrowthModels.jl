@@ -25,6 +25,7 @@ export PositiveDense,
        predict_fn, 
        plot_pred_output, 
        plot_nn_output,
+       policy_loss,
        # 
        choose_device,
        check_gradients,
@@ -448,7 +449,7 @@ end
 function average_last_n(vec::Vector, n::Int)
     # Check if n is within the bounds of the vector length
     if n > length(vec) || n < 1
-        error("n must be between 1 and the length of the vector")
+        return Inf
     end
 
     # Get the last n elements of the vector
@@ -463,7 +464,7 @@ function average_last_n(vec::Vector, n::Int)
     end
 
     # Calculate the average
-    return median(filtered_elements) 
+    return sum(filtered_elements)  / length(filtered_elements)
 end
 
 
@@ -684,6 +685,13 @@ function projection_loss(nets, k, model_params, nn_params, states)
     return loss
 end
 
+function policy_loss(net, model_params, nn_params, states, upwind_targets, m::StochasticModel)
+    state_vals, upwind_v, upwind_pol, upwind_kdot = upwind_targets
+    p_output = f_nn(net, state_vals, model_params, nn_params, states)
+    n_k = length(p_output)
+    upwind_pol_err = sqrt(sum(abs2, upwind_pol - vec(p_output)) / n_k)
+    return  upwind_pol_err 
+end
 
 function upwind_loss(nets, model_params, nn_params, states, upwind_targets, m::StochasticModel)
     state_vals, upwind_v, upwind_pol, upwind_kdot = upwind_targets
@@ -691,10 +699,10 @@ function upwind_loss(nets, model_params, nn_params, states, upwind_targets, m::S
     kdot = production_function(m, state_vals[1, :], state_vals[2, :]) .- m.δ .* state_vals[1, :] .- pol_f_k
 
     n_k = length(v_f_k)
-    upwind_v_err = sqrt(sum(abs2, upwind_v - v_f_k) / n_k)
+    # upwind_v_err = sqrt(sum(abs2, upwind_v - v_f_k) / n_k)
     upwind_pol_err = sqrt(sum(abs2, upwind_pol - pol_f_k) / n_k)
-    upwind_kdot_err = sqrt(sum(abs2, upwind_kdot - kdot) / n_k)
-    return upwind_v_err + upwind_pol_err + upwind_kdot_err
+    # upwind_kdot_err = sqrt(sum(abs2, upwind_kdot - kdot) / n_k)
+    return  upwind_pol_err 
 end
 
 
