@@ -35,6 +35,27 @@ n_params = length(model_params)
 
 batch_size = 100
 
+function ValuePolicyFunctionChain(m::Model, c_size, n_params)
+    state_size = ifelse(isa(m, StochasticModel), 2, 1)
+    nn = Chain(
+        # both read in simultaneously
+        Parallel(
+            nothing,
+            MicawberLayer(state_size + n_params, c_size, relu, m, state_size),
+            SteadyStateLayer(state_size + n_params, c_size, relu, m, state_size),
+            TechnologyLayer(state_size + n_params, c_size, relu, m, state_size),
+            NoOpLayer()
+        ),
+        x -> vcat(x...),
+        # BatchNorm(c_size*3 + state_size + n_params, relu, track_stats = false),
+        Dense(c_size*3 + state_size + n_params, n_size, relu),
+        # BatchNorm(n_size, relu, track_stats = false),
+        Dense(n_size, n_size, relu),
+        # BatchNorm(n_size, relu, track_stats = false),
+        Dense(n_size, 2)
+    )
+    return nn
+end
 
 function ValueFunctionChain(m::Model, c_size, n_params)
     state_size = ifelse(isa(m, StochasticModel), 2, 1)
@@ -84,6 +105,7 @@ state_size = ifelse(isa(m, StochasticModel), 2, 1)
 c_size = 24
 n_size = 48
 
+v_pol_f_nn = ValuePolicyFunctionChain(m, c_size, n_params)
 v_f_nn = ValueFunctionChain(m, c_size, n_params)
 pol_f_nn = PolicyFunctionChain(m, c_size, n_params)
 state_size = ifelse(isa(m, StochasticModel), 2, 1)
@@ -103,20 +125,25 @@ rng = Random.default_rng()
 # Version on the CPU
 cpu_vf_ps, cpu_vf_st = Lux.setup(rng, v_f_nn) 
 cpu_pol_ps, cpu_pol_st = Lux.setup(rng, pol_f_nn) 
+cpu_vp_ps, cpu_vp_st = Lux.setup(rng, v_pol_f_nn)
 
 vf_ps, vf_st = Lux.setup(rng, v_f_nn) .|> device
 pol_ps, pol_st = Lux.setup(rng, pol_f_nn) .|> device
+vp_ps, vp_st = Lux.setup(rng, v_pol_f_nn) .|> device
+
 
 states = (vf_st, pol_st) |> device
 nn_params = (vf_ps, pol_ps) |> device
+
 opt = Optimisers.ADAM() 
-st_opt = Optimisers.setup(ADAM(), nn_params) |> device
+st_opt = Optimisers.setup(ADAM(), vp_ps) |> device
 
 nets = (v_f_nn, pol_f_nn)
 
 v_f_k, v_f_deriv_k, pol_f_k = predict_fn(nets, state_vals, param_vals, nn_params, states)
 
 
+b_v_f_k, b_v_f_deriv_k, b_pol_f_k = predict_fn(v_pol_f_nn, state_vals, param_vals, vp_ps, vp_st)
 
 
 skiba_sobol_seq = generate_model_values("StochasticSkibaModel")
@@ -184,7 +211,7 @@ function train!(epoch, st_opt, nets, nn_params, last_nn_params, states, hps::Tra
         loss, back = Zygote.pullback(last_nn_params) do p
             upwind_loss(nets, upwind_model_params, p, states, upwind_targets, m)
         end;
-        if nan_loss_iter > 10
+        if nan_loss_iter > 50
             println("Too many NaN losses, skipping epoch.")
             break
         end
@@ -243,14 +270,18 @@ function train!(epoch, st_opt, nets, nn_params, last_nn_params, states, hps::Tra
 end
 
 
-train_hps = TrainHyperParams(1, batch_size, state_size, device, m_type, skiba_sobol_seq, [1], [Inf], 10, 500, !isinteractive(), isinteractive())
+train_hps = TrainHyperParams(1, batch_size, state_size, device, m_type, skiba_sobol_seq, [1], [Inf], 10, 2000, !isinteractive(), isinteractive())
+
+
+nn_params = vp_ps
+nets = v_pol_f_nn
+states = vp_st
 last_nn_params = deepcopy(nn_params)
 
 
 for epoch in train_hps.epoch_list[end]:25_000_000
     train!(epoch, st_opt, nets, nn_params, last_nn_params, states, train_hps)
 end;
-
 
 
 using BSON

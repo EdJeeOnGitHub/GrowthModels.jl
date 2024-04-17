@@ -380,6 +380,16 @@ function f_nn_deriv(nn, k, model_params, ps, st; h = Float32(1e-3))
     return diffs[argmin(abs_diffs, dims = 1)]
 end
 
+# dispatch on single NN for both policy and value function
+function predict_fn(net::Chain, k, model_params, nn_params, nn_states)
+    p_output = f_nn(net, k, model_params, nn_params, nn_states)
+    return p_output[1, :], nothing, p_output[2, :]
+end
+
+function predict_fn(net::Chain, k, model_params, nn_params, nn_states; derivative = false)
+    p_output = f_nn(net, k, model_params, nn_params, nn_states)
+    return p_output[1, :], nothing, p_output[2, :]
+end
 
 function predict_fn(nets, k, model_params, nn_params, nn_states; derivative = true)
     v_nn, pol_nn = nets
@@ -422,6 +432,7 @@ function plot_pred_output(k_vals, v_f_k, v_f_deriv_k, pol_f_k)
         )
     return p1, p2, p3
 end
+
 function moving_average(data, window_size)
     # Calculate the moving average using a window of specified size
     filter_length = length(data) - window_size + 1
@@ -793,21 +804,23 @@ function draw_random_model(::Type{M}, sobol_seq) where {M <: StochasticModel}
 end
 
 
-function check_gradients(grads)
-    # Recursive function to check for NaN in gradients within any structure
-    for grad in grads
-        if grad isa NamedTuple && !haskey(grad, :weight)  # Check if the gradient component is a tuple (e.g., from Parallel)
-            check_gradients(grad)  # Recurse into the tuple
-        elseif grad isa NamedTuple && haskey(grad, :weight)  # Check if it's a layer with weights
-            if any(isnan, grad.weight)
-                return true  # Return true if any NaN is found
+# Define a recursive function to check for 'NaN' values in nested named tuples
+function check_gradients(obj)
+    # Check if the object is a named tuple
+    if typeof(obj) <: NamedTuple
+        # Use any() to check if there are NaN values directly within current level of values
+        if :weight in keys(obj) && any(isnan, obj[:weight])
+            return true
+        end
+        # Recurse into deeper levels if no NaN is directly found
+        for value in values(obj)
+            if check_gradients(value)
+                return true
             end
         end
     end
-    return false  # No NaN found
+    return false  # Return false if no NaN values are found
 end
-
-
 
 
 # Define a function to fetch the appropriate device based on the hostname
@@ -835,4 +848,5 @@ param_reshuffle = function(p)
     new_p[5] = p[5] + p[6]
     return new_p
 end
+
 end
