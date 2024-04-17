@@ -153,14 +153,9 @@ function TrainHyperParams(; n_redraw = 1, batch_size = 100, state_size = 1, devi
     return TrainHyperParams(n_redraw, batch_size, state_size, device, m_type, sobol_seq, epoch_list, loss_list, print_iter, plot_iter, save_fig, display_fig)
 end
 
-function train!(epoch, st_opt, nets, nn_params, states, hps::TrainHyperParams)
+function train!(epoch, st_opt, nets, nn_params, last_nn_params, states, hps::TrainHyperParams)
     (; n_redraw, batch_size, state_size, device, m_type, sobol_seq, epoch_list, 
         loss_list, print_iter, plot_iter, save_fig, display_fig) = hps
-    
-    # initialise last_nn_params if on first epoch
-    if epoch == 1 
-        last_nn_params = deepcopy(nn_params)
-    end
 
     # redraw model every n_redraw epochs
     if epoch % n_redraw  == 0 || epoch == 1
@@ -248,16 +243,20 @@ function train!(epoch, st_opt, nets, nn_params, states, hps::TrainHyperParams)
 end
 
 
-train_hps = TrainHyperParams(1, batch_size, state_size, device, m_type, skiba_sobol_seq, [1], [Inf], 10, 500, false, true)
+train_hps = TrainHyperParams(1, batch_size, state_size, device, m_type, skiba_sobol_seq, [1], [Inf], 10, 500, !isinteractive(), isinteractive())
+last_nn_params = deepcopy(nn_params)
+
+
 for epoch in train_hps.epoch_list[end]:25_000_000
-    train!(epoch, st_opt, nets, nn_params, states, train_hps)
+    train!(epoch, st_opt, nets, nn_params, last_nn_params, states, train_hps)
 end;
 
 
+
 using BSON
+
 output_dict = Dict(
-    :epoch_list => epoch_list,
-    :loss_list => loss_list,
+    :train_hps => train_hps,
     :nn_params => nn_params,
     :v_f_nn => v_f_nn,
     :pol_f_nn => pol_f_nn,
