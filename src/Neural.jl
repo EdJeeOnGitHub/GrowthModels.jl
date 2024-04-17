@@ -124,70 +124,103 @@ skiba_sobol_seq = generate_model_values("StochasticSkibaModel")
 # make sure A_H > A_L
 
 
-epoch_list = [1]
-loss_list = [Inf]
-n_redraw = 1
-for epoch in epoch_list[end]:25_000_000
-# epoch = 1
-    if epoch == 1 
-        last_nn_params = deepcopy(nn_params)
-    end 
-    if epoch % n_redraw  == 0 || epoch == 1
-        m, sm, res = draw_random_model(m_type, skiba_sobol_seq); 
-    end
-    m = m |> device
-    random_vals = generate_grid_values(m, batch_size, seed = epoch) 
-
+function generate_values(m, batch_size, state_size, seed)
+    random_vals = generate_grid_values(m, batch_size, seed = seed)
     k_vals, param_vals = random_vals[1:state_size, :], random_vals[state_size+1:end, :]
-
-    cpu_k_vals = deepcopy(k_vals)
-    cpu_param_vals = deepcopy(param_vals)
 
     k_vals = k_vals |> device
     param_vals = param_vals |> device
+    return k_vals, param_vals
+end
 
+
+struct TrainHyperParams
+    n_redraw::Int
+    batch_size::Int
+    state_size::Int
+    device::LuxDeviceUtils.AbstractLuxDevice
+    m_type::Type
+    sobol_seq::ScaledSobolSeq
+    epoch_list::Vector{Int}
+    loss_list::Vector
+    print_iter::Int
+    plot_iter::Int
+    save_fig::Bool
+    display_fig::Bool
+end
+
+function TrainHyperParams(; n_redraw = 1, batch_size = 100, state_size = 1, device = device, m_type = StochasticSkibaModel, sobol_seq = skiba_sobol_seq, epoch_list = [1], loss_list = [Inf], print_iter = 100, plot_iter = 500, save_fig = false, display_fig = true)
+    return TrainHyperParams(n_redraw, batch_size, state_size, device, m_type, sobol_seq, epoch_list, loss_list, print_iter, plot_iter, save_fig, display_fig)
+end
+
+function train!(epoch, st_opt, nets, nn_params, states, hps::TrainHyperParams)
+    (; n_redraw, batch_size, state_size, device, m_type, sobol_seq, epoch_list, 
+        loss_list, print_iter, plot_iter, save_fig, display_fig) = hps
+    
+    # initialise last_nn_params if on first epoch
+    if epoch == 1 
+        last_nn_params = deepcopy(nn_params)
+    end
+
+    # redraw model every n_redraw epochs
+    if epoch % n_redraw  == 0 || epoch == 1
+        m, sm, res = draw_random_model(m_type, sobol_seq); 
+    end
+    m = m |> device
+    # generate state values to train on
+    k_vals, param_vals = generate_values(m, batch_size, state_size, epoch)    
+    # Create upwind "targets" from value function iteration
     upwind_targets, upwind_model_params = create_upwind_targets(sm, res, param_vals, device)
-
-
-    # state_vals, upwind_v, upwind_pol, upwind_kdot = upwind_targets
-    # v_f_k, _, pol_f_k = predict_fn(nets, state_vals, upwind_model_params, nn_params, states, derivative = false)
-
-
+    # Calculate loss
     loss, back = Zygote.pullback(nn_params) do p
-        # composite_loss(nets, k_vals, param_vals, p, states, upwind_targets, m)
         upwind_loss(nets, upwind_model_params, p, states, upwind_targets, m)
     end;
 
-    # if loss becomes NaN, go back to last set of params, otherwise save them 
-    # for next iteration
-    if isnan(loss)
-        println("Loss NaN, using previous params and re-running.")
+    nan_loss_iter = 0
+    while isnan(loss)
+        nan_loss_iter += 1
+        println("Loss NaN, re-drawing model and using previous params.")
+        m, sm, res = draw_random_model(m_type, sobol_seq); 
+        # generate state values to train on
+        k_vals, param_vals = generate_values(m, batch_size, state_size, epoch)    
+        # Create upwind "targets" from value function iteration
+        upwind_targets, upwind_model_params = create_upwind_targets(sm, res, param_vals, device)
+        # Calculate loss
         loss, back = Zygote.pullback(last_nn_params) do p
             upwind_loss(nets, upwind_model_params, p, states, upwind_targets, m)
         end;
+        if nan_loss_iter > 10
+            println("Too many NaN losses, skipping epoch.")
+            break
+        end
     end
-
+    # if loss ok, update last_nn_params
     if !isnan(loss)
         last_nn_params = deepcopy(nn_params)
     end
 
 
-    if epoch % 10 == 1
+    if epoch % print_iter == 1
         println("Epoch: $epoch, Loss: $loss")
     end
     push!(epoch_list, epoch)
     push!(loss_list, loss)
   
 
-
-    if epoch % 500 == 1
+    if epoch % plot_iter == 1
         try 
             if (isa(m, StochasticModel))
                 p_model_output = plot_nn_output(nets, k_vals, upwind_model_params, nn_params, states, epoch_list, loss_list, upwind_targets, cpu_dev, m)
             else
                 p_model_output = plot_nn_output(nets, k_vals, param_vals, nn_params, states, epoch_list, loss_list, upwind_targets, cpu_dev, m)
             end
-            savefig(p_model_output, "temp-data/nn-fit.pdf")
+
+            if save_fig
+                savefig(p_model_output, "temp-data/nn-fit.pdf")
+            end
+            if display_fig
+                display(p_model_output)
+            end
         catch e 
             println(e)
         end
@@ -211,7 +244,13 @@ for epoch in epoch_list[end]:25_000_000
                 Optimisers.update!(st_opt, nn_params, grads)
             end
         end
-    end;
+    end
+end
+
+
+train_hps = TrainHyperParams(1, batch_size, state_size, device, m_type, skiba_sobol_seq, [1], [Inf], 10, 500, false, true)
+for epoch in train_hps.epoch_list[end]:25_000_000
+    train!(epoch, st_opt, nets, nn_params, states, train_hps)
 end;
 
 
