@@ -102,8 +102,8 @@ end
 
 
 state_size = ifelse(isa(m, StochasticModel), 2, 1)
-c_size = 24*2
-n_size = 48*2
+c_size = 24
+n_size = 48
 
 v_pol_f_nn = ValuePolicyFunctionChain(m, c_size, n_params)
 v_f_nn = ValueFunctionChain(m, c_size, n_params)
@@ -208,9 +208,10 @@ function train!(epoch, st_opt, nets, nn_params, last_nn_params, states, hps::Tra
                 # p_model_output = plot_nn_output(nets, k_vals, upwind_model_params, nn_params, states, epoch_list, loss_list, upwind_targets, cpu_dev, m)
                 mean_loss = round(NeuralGrowthModel.average_last_n(loss_list, length(epoch_list) ÷ 10), digits = 3)
 
+                    loss_idx = Int.(collect(range(start = 1, stop = epoch, length = min(1000, epoch))))
                     p_model_output = plot(
-                        epoch_list, 
-                        loss_list, 
+                        epoch_list[loss_idx], 
+                        loss_list[loss_idx], 
                         label = "Loss", 
                         yscale = :log10,
                         alpha = 0.2,
@@ -219,8 +220,8 @@ function train!(epoch, st_opt, nets, nn_params, last_nn_params, states, hps::Tra
                     roll_loss = NeuralGrowthModel.rolling_mean(loss_list, min(2_000, length(loss_list)))
                     plot!(
                         p_model_output, 
-                        epoch_list, 
-                        roll_loss, 
+                        epoch_list[loss_idx], 
+                        roll_loss[loss_idx], 
                         label = "Rolling Mean Loss", 
                         linewidth = 2,
                         alpha = 1.0
@@ -233,6 +234,13 @@ function train!(epoch, st_opt, nets, nn_params, last_nn_params, states, hps::Tra
 
             if save_fig
                 savefig(p_model_output, "temp-data/nn-fit.pdf")
+                output_dict = Dict(
+                    :train_hps => train_hps,
+                    :ps => ps,
+                    :nn => nn,
+                    :st => st)
+                bson("nn_output.bson",  output_dict)
+
             end
             if display_fig
                 display(p_model_output)
@@ -265,7 +273,7 @@ end
 
 
 skiba_sobol_seq = generate_model_values("StochasticSkibaModel")
-train_hps = TrainHyperParams(1, batch_size, state_size, device, m_type, skiba_sobol_seq, [1], [Inf], 10, 500, !isinteractive(), isinteractive())
+train_hps = TrainHyperParams(1, batch_size, state_size, device, m_type, skiba_sobol_seq, [1], [Inf], 10, 2000, !isinteractive(), isinteractive())
 
 
 
