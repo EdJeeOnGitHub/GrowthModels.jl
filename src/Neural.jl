@@ -6,6 +6,7 @@ using ForwardDiff, LinearAlgebra
 using LuxCUDA
 using Plots
 using Sobol
+using BSON
 
 include("SolveNeuralModel.jl")
 using .NeuralGrowthModel
@@ -288,7 +289,6 @@ for epoch in train_hps.epoch_list[end]:25_000_000
 end;
 
 
-using BSON
 
 output_dict = Dict(
     :train_hps => train_hps,
