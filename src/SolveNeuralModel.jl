@@ -407,12 +407,12 @@ This function accounts for jumps in the function `f_nn` and reuses the value `v`
 - `diffs`: Array of computed derivatives.
 """
 function f_nn_deriv(nn, v, k, model_params, ps, st; h = Float32(1e-3))
-    fwd_v = f_nn(nn, k .+ h, model_params, ps, st)
-    bwd_v = f_nn(nn, k .- h, model_params, ps, st)
+    fwd_v = f_nn(nn, k .+ h, model_params, ps, st)[1, :]
+    bwd_v = f_nn(nn, k .- h, model_params, ps, st)[1, :]
     central_diff = (fwd_v .- bwd_v) ./ (2 * h)
     fwd_diff = (fwd_v .- v) ./ h
     bwd_diff = (v .- bwd_v) ./ h
-    diffs = vcat(central_diff, bwd_diff, fwd_diff)
+    diffs = vcat(central_diff', bwd_diff', fwd_diff')
     abs_diffs = abs.(diffs)
     return diffs[argmin(abs_diffs, dims = 1)]
 end
@@ -434,13 +434,13 @@ Compute the derivative of the function `f_nn` with respect to `k` using finite d
 
 """
 function f_nn_deriv(nn, k, model_params, ps, st; h = Float32(1e-3))
-    v = f_nn(nn, k, model_params, ps, st)
-    fwd_v = f_nn(nn, k .+ h, model_params, ps, st)
-    bwd_v = f_nn(nn, k .- h, model_params, ps, st)
+    v = f_nn(nn, k, model_params, ps, st)[1, :]
+    fwd_v = f_nn(nn, k .+ h, model_params, ps, st)[1, :]
+    bwd_v = f_nn(nn, k .- h, model_params, ps, st)[1, :]
     central_diff = (fwd_v .- bwd_v) ./ (2 * h)
     fwd_diff = (fwd_v .- v) ./ h
     bwd_diff = (v .- bwd_v) ./ h
-    diffs = vcat(central_diff, bwd_diff, fwd_diff)
+    diffs = vcat(central_diff', bwd_diff', fwd_diff')
     abs_diffs = abs.(diffs)
     return diffs[argmin(abs_diffs, dims = 1)]
 end
@@ -452,7 +452,7 @@ end
 
 
 function predict_fn(::ProjectionApproximation, net::Chain, k, model_params, ps, st; derivative = true)
-    net_out = f_nn(net, k, model_params, nn_params[1], nn_states[1]) |> vec
+    net_out = f_nn(net, k, model_params, ps, st) 
     v_f_k = net_out[1, :]
     pol_f_k = net_out[2, :]
     if derivative
@@ -500,11 +500,11 @@ function loss(approx::UpwindApproximation, net, model_params, ps, st, targets)
 end
 
 function error_projection(::Type{M}, state_vals, model_params, value_f, value_deriv_f, policy_f) where {M <: DeterministicModel}
-    params = extract_nn_parameters(M, model_params)
+    params = extract_nn_parameters(M, vcat(state_vals, model_params))
     (; γ, ρ, δ) = params
     value_deriv_f = max.(value_deriv_f, Float32(1e-4))
     c = value_deriv_f .^ (-1 ./ γ)
-    hjb_err = ρ .* value_f  .- (c .^ (1 .- γ)) ./ (1 .- γ) .- value_deriv_f .* (production_function(M, state_vals, params...) .- δ .* state_vals .- policy_f)
+    hjb_err = ρ .* value_f  .- (c .^ (1 .- γ)) ./ (1 .- γ) .- value_deriv_f .* (production_function(M, state_vals, params) .- δ .* state_vals .- policy_f)
     policy_err = c .- policy_f
     return hjb_err, policy_err
 end
