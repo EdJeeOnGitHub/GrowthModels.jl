@@ -475,7 +475,7 @@ end
 
 function create_upwind_targets(sm::SolvedModel{T}, model_params, device) where {T <: DeterministicModel}
     upwind_pol = sm.variables[:c] |> device
-    upwind_model_params = repeat(model_params[:, 1], 1, size(upwind_v, 1))
+    upwind_model_params = repeat(model_params[:, 1], 1, size(upwind_pol, 1))
     upwind_states = sm.variables[:k] |> device
     return  (upwind_states,  upwind_pol), upwind_model_params
 end
@@ -486,7 +486,7 @@ function create_upwind_targets(sm::SolvedModel{T}, model_params, device) where {
     upwind_z = sm.variables[:z][:] |> device
 
     upwind_state = vcat(upwind_k', upwind_z')
-    upwind_model_params = repeat(model_params[:, 1], 1, size(upwind_v, 1))
+    upwind_model_params = repeat(model_params[:, 1], 1, size(upwind_state, 2))
 
     return  (upwind_state,  upwind_pol), upwind_model_params
 end
@@ -683,7 +683,7 @@ struct TrainHyperParams{T <: SolutionApproximation}
     display_fig::Bool
 end
 
-function TrainHyperParams(; approx = UpwindApproximation, n_redraw = 1, batch_size = 100, state_size = 1, device = choose_device(), m_type = StochasticSkibaModel, sobol_seq = generate_model_values(m_type), epoch_list = [1], loss_list = [Inf], print_iter = 100, plot_iter = 500, save_output = false,  save_path = "temp-data/",  model_id = "test-nn", display_fig = true)
+function TrainHyperParams(m_type, state_size, device; approx = UpwindApproximation, n_redraw = 1, batch_size = 100, sobol_seq = generate_model_values(m_type), epoch_list = [1], loss_list = [Inf], print_iter = 100, plot_iter = 500, save_output = false,  save_path = "temp-data/",  model_id = "test-nn", display_fig = true)
     return TrainHyperParams(approx, n_redraw, batch_size, state_size, device, m_type, sobol_seq, epoch_list, loss_list, print_iter, plot_iter, save_output, save_path, model_id, display_fig)
 end
 
@@ -763,7 +763,6 @@ end
 function train!(curr_model::Tuple{Model, SolvedModel}, epoch, st_opt, net::Chain, ps, last_ps, st, hps::TrainHyperParams{T}) where {T <: UpwindApproximation}
     (; approx, n_redraw, batch_size, state_size, device, m_type, sobol_seq, epoch_list, 
         loss_list, print_iter, plot_iter, save_output, save_path, model_id, display_fig) = hps
-    @show approx
     # redraw model every n_redraw epochs
     if epoch % n_redraw  == 0 || epoch == 1
         m, sm, _ = draw_random_model(approx, m_type, sobol_seq); 
@@ -898,26 +897,26 @@ end
 
 
 
-# function average_last_n(vec::Vector, n::Int)
-#     # Check if n is within the bounds of the vector length
-#     if n > length(vec) || n < 1
-#         return Inf
-#     end
+function average_last_n(vec::Vector, n::Int)
+    # Check if n is within the bounds of the vector length
+    if n > length(vec) || n < 1
+        return Inf
+    end
 
-#     # Get the last n elements of the vector
-#     last_n_elements = vec[end-n+1:end]
+    # Get the last n elements of the vector
+    last_n_elements = vec[end-n+1:end]
 
-#     # Filter out Inf and NaN values
-#     filtered_elements = filter(x -> !isinf(x) && !isnan(x), last_n_elements)
+    # Filter out Inf and NaN values
+    filtered_elements = filter(x -> !isinf(x) && !isnan(x), last_n_elements)
 
-#     # If all elements are Inf or NaN, return Inf
-#     if isempty(filtered_elements)
-#         return Inf
-#     end
+    # If all elements are Inf or NaN, return Inf
+    if isempty(filtered_elements)
+        return Inf
+    end
 
-#     # Calculate the average
-#     return sum(filtered_elements)  / length(filtered_elements)
-# end
+    # Calculate the average
+    return sum(filtered_elements)  / length(filtered_elements)
+end
 
 
 

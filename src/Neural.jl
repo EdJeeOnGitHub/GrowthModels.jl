@@ -34,6 +34,7 @@ device = choose_device()
 
 m_type = StochasticSkibaModel{Float32}
 m = StochasticSkibaModel{Float32}() |> device
+state_size = ifelse(isa(m, StochasticModel), 2, 1)
 model_params = Float32.(params(m))
 n_params = length(model_params)
 
@@ -96,17 +97,11 @@ function PolicyFunctionChain(m::Model, c_size, n_params)
 end
 
 
-state_size = ifelse(isa(m, StochasticModel), 2, 1)
 c_size = 24
 n_size = 48
-
-v_pol_f_nn = ValuePolicyFunctionChain(m, c_size, n_params)
-v_f_nn = ValueFunctionChain(m, c_size, n_params)
 pol_f_nn = PolicyFunctionChain(m, c_size, n_params)
-state_size = ifelse(isa(m, StochasticModel), 2, 1)
 
 # Creating input variables for testing
-
 function setup_nn_hps(nn, rng, device)
     ps, st = Lux.setup(rng, nn) .|> device
     opt = Optimisers.ADAM()
@@ -122,21 +117,21 @@ approx = UpwindApproximation()
 
 sobol_seq = generate_model_values(m_type)
 train_hps = TrainHyperParams(
-    approx = approx,
-    m_type = m_type
+    m_type,
+    state_size,
+    device;
+    approx = approx
     )
 
+rng = Random.default_rng();
+nn, ps, st, st_opt = setup_nn_hps(pol_f_nn, rng, device);
+last_ps = deepcopy(ps);
 
+m, sm, _ = draw_random_model(approx, m_type, sobol_seq);
+curr_m = (m, sm) |> device;
+# warmup check
+train!(curr_m, 1, st_opt, nn, ps, last_ps, st, train_hps);
 
-rng = Random.default_rng()
-nn, ps, st, st_opt = setup_nn_hps(pol_f_nn, rng, device)
-last_ps = deepcopy(ps)
-
-
-m, sm, _ = draw_random_model(approx, m_type, sobol_seq) 
-curr_m = (m, sm) |> device
-
-train!(curr_m, 1, st_opt, nn, ps, last_ps, st, train_hps)
 
 for epoch in train_hps.epoch_list[end]:25_000_000
     train!(curr_m, epoch, st_opt, nn, ps, last_ps, st, train_hps)
