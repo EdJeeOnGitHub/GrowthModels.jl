@@ -148,6 +148,12 @@ param_values = input_values[2:end, :] |> device
 value_f, value_deriv_f, policy_f = predict_fn(approx, nn, k_values, param_values, ps, st) |> cpu_dev
 
 plot(
+    train_hps.epoch_list,
+train_hps.loss_list,
+yscale = :log10
+)
+
+plot(
     Array(k_values),
     value_f
 )
