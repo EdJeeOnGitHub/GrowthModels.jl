@@ -49,6 +49,8 @@ k_star(m::SmoothSkibaModel) = k_star_SmoothSkiba(m.α, m.A_L, m.A_H, m.κ)
 k_star_SmoothSkiba(α::Real, A_L::Real, A_H::Real, κ::Real) = κ/(1-(A_L/A_H)^(1/α))
 
 
+k_steady_state(m::SmoothSkibaModel) = [k_steady_state_lo(m), k_steady_state_hi(m)]
+
 # Skiba production function
 @inline function smooth_skiba_production_function(k, α, A_H, A_L, κ, β)
     weight_fun = 1 / (1 + exp(-β * (k - κ)))

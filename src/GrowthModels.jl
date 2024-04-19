@@ -45,6 +45,7 @@ module GrowthModels
            StochasticSkibaModel,
            StochasticRamseyCassKoopmansModel
        
+    export StateEvolution, iterate_g, create_group_ids
     # stochastic stuff
     export StochasticProcess,
            OrnsteinUhlenbeckProcess,
@@ -72,6 +73,7 @@ module GrowthModels
     include("StochasticRamseyCassKoopmans.jl")
     include("StochasticSkiba.jl")
     include("SolvedModel.jl")
+    include("StateEvolution.jl")
 
 
     function show(io::IO, h::HyperParams)
