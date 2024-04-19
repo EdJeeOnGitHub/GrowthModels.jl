@@ -255,6 +255,26 @@ function solve_growth_model(model::Model, init_value::Value, hyper_params::State
     sm = SolvedModel(m, res)
     return sm, res
 end
+function solve_growth_model(m::Model)
+    hyperparams = StateSpaceHyperParams(m)
+    state = StateSpace(m, hyperparams)
+    init_value = Value(state)
+    res = solve_HJB(m, hyperparams, init_value = init_value, maxit = 1000, verbose = false)
+    sm = SolvedModel(m, res)
+    return sm, res
+end
+
+function solve_growth_model(m::Model, hp_args)
+    hyperparams = StateSpaceHyperParams(m; hp_args...)
+    state = StateSpace(m, hyperparams)
+    init_value = Value(state)
+    res = solve_HJB(m, hyperparams, init_value = init_value, maxit = 1000, verbose = false)
+    sm = SolvedModel(m, res)
+    return sm, res
+end
+
+
+
 
 
 statespace_k_dot(m::Model) =  (variables::NamedTuple) -> variables.y .- m.δ .* variables.k .- variables.c
