@@ -75,6 +75,7 @@ struct SolvedModel{T<:Model}
     state::Vector{Symbol}
     control::Vector{Symbol}
     variables::NamedTuple
+    value::Value
     production_function::Function
     production_function_prime::Function
     policy_function::Union{Function, Interpolations.Extrapolation}
@@ -112,6 +113,7 @@ function SolvedModel(m::T, value::Value, variables::NamedTuple) where T <: Union
         [:k],
         [:c],
         variables,
+        value,
         prod_func,
         prod_func_prime,
         x -> c_policy_function(x),
@@ -153,6 +155,7 @@ function SolvedModel(m::StochasticModel, value::Value, variables::NamedTuple)
         [:k, :z],
         [:c],
         variables,
+        value,
         prod_func,
         prod_func_prime,
         c_policy_function,
@@ -262,7 +265,7 @@ function(r::SolvedModel)(state::Union{Number,Vector{<:Number}}, time_span::Tuple
     return sol
 end
 
-function(r::SolvedModel)(state_dict::Dict, ensemble::DiffEqBase.EnsembleAlgorithm; algorithm::Union{DiffEqBase.AbstractDEAlgorithm,Nothing} = Tsit5(), reltol = 1e-6, abstol = 1e-6)
+function(r::SolvedModel)(state_dict::Dict, ensemble::DiffEqBase.EnsembleAlgorithm; algorithm = Tsit5(), reltol = 1e-6, abstol = 1e-6)
     function f(du, u, p, t)
         du[1] = r.kdot_function(u[1])
         return nothing

@@ -78,6 +78,7 @@ function update_v(m::DeterministicModel, value::Value{T, N_v}, state::StateSpace
             dVf = dVf, 
             dVb = dVb, 
             dV0 = dV0, 
+            A = A,
             dist = dist,
             convergence_status = true,
             iter = iter
@@ -98,6 +99,7 @@ function update_v(m::DeterministicModel, value::Value{T, N_v}, state::StateSpace
         dVf = dVf, 
         dVb = dVb, 
         dV0 = dV0, 
+        A = A,
         dist = dist,
         convergence_status = false,
         iter = iter
@@ -300,6 +302,7 @@ function update_v(m::StochasticModel, value::Value{T, N_v}, state::StateSpace, h
             dVf = dVf, 
             dVb = dVb, 
             dV0 = dV0, 
+            A = A,
             dist = dist,
             convergence_status = true,
             iter = iter
@@ -321,6 +324,7 @@ function update_v(m::StochasticModel, value::Value{T, N_v}, state::StateSpace, h
         dVf = dVf, 
         dVb = dVb, 
         dV0 = dV0, 
+        A = A,
         dist = dist,
         convergence_status = false,
         iter = iter

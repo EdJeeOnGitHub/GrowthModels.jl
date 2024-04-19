@@ -2,6 +2,78 @@ using GrowthModels
 using Test
 using Plots
 
+    skiba_model = StochasticSkibaModel()
+    skiba_hyperparams = StateSpaceHyperParams(skiba_model, Nz = 4, Nk = 100)
+    skiba_state = StateSpace(skiba_model, skiba_hyperparams)
+    skiba_init_value = Value(skiba_state);
+
+    skiba_state
+    fit_value, fit_variables, fit_iter = solve_HJB(
+        skiba_model, 
+        skiba_hyperparams, 
+        init_value = skiba_init_value, maxit = 1000);
+
+
+    sm = SolvedModel(skiba_model, fit_value, fit_variables)
+
+
+    function iterate_g(g, A_t)
+        I_A = sparse(I, size(A_t))
+        evolution = I_A - A_t
+        return evolution \ g
+    end
+    
+    function iterate_g_explicit(g, A_t)
+        return (1/10000)* A_t * g + g
+    end
+
+
+    A_t = sm.value.A'
+    g = fill(1, size(A_t, 1)) 
+    g = g ./ sum(g)
+    g = g 
+
+
+
+    g_list = []
+    push!(g_list, g)
+    @btime for t in 1:100
+        push!(g_list, iterate_g(g_list[end], A_t))
+    end
+
+    g_time_series = reduce(hcat, g_list)
+
+using StatsPlots
+
+
+sm.variables[:k] # 100 x 4 matrix
+plot(
+    vec(sm.variables[:k]),
+    g_time_series[:, 1:10:end],
+    labels = "",
+    group = repeat(1:4, inner = 100)
+)
+
+plot(
+    vec(sm.variables[:k]),
+    g2_time_series[:, 1:1000:end],
+    labels = "",
+    group = repeat(1:4, inner = 100)
+)
+
+using BenchmarkTools
+    @btime for i in 2:100
+        push!(g_list, ed \ g_list[i-1] )
+    end;
+
+g_list[1]
+    g_list
+    histogram(g_list[end] .* vec(sm.variables[:k]), bins = 60)
+
+
+
+
+    g_list[2]
 
 @testset "Skiba" begin
     skiba_model = SkibaModel()
