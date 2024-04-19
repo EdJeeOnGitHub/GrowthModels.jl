@@ -1,4 +1,20 @@
-abstract type StochasticProcess end
+
+
+struct PoissonProcess{T <: Real} <: StochasticProcess
+    z::AbstractVector{T}
+    λ::AbstractVector{T}
+end
+function PoissonProcess(; z::AbstractVector{T}, λ::AbstractVector{T}) where T <: Real
+    PoissonProcess(z, λ)
+end
+function process_mean(p::PoissonProcess)
+    z_1, z_2 = p.z
+    λ_1, λ_2 = p.λ
+    return (z_1 * λ_2 + z_2 * λ_1) / sum(p.λ)
+end
+
+
+
 
 struct OrnsteinUhlenbeckProcess{T <: Real} <: StochasticProcess  
     # y = log(z) ~ N(0, ln_stationary_σ)

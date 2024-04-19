@@ -50,6 +50,7 @@ module GrowthModels
     export StochasticProcess,
            OrnsteinUhlenbeckProcess,
            from_stationary_OrnsteinUhlenbeckProcess,
+           PoissonProcess,
            sample
 
 
@@ -57,9 +58,10 @@ module GrowthModels
 
     # Types
     abstract type Model{T <: Real} end
+    abstract type StochasticProcess end
 
     abstract type DeterministicModel{T <: Real} <: Model{T} end
-    abstract type StochasticModel{T <: Real} <: Model{T} end
+    abstract type StochasticModel{T <: Real, S <: StochasticProcess} <: Model{T} end
 
 
     # Modules

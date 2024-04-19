@@ -126,8 +126,20 @@ function update_value_function!(init_value, res)
     end
 end
 
+"""
+construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess, state::StateSpace, hyperparams::StateSpaceHyperParams)
 
-function construct_diffusion_matrix(stochasticprocess::StochasticProcess, state::StateSpace, hyperparams::StateSpaceHyperParams)
+Constructs the diffusion matrix for the HJB equation.
+
+# Arguments
+- `stochasticprocess::OrnsteinUhlenbeckProcess`: The Ornstein-Uhlenbeck process.
+- `state::StateSpace`: The state space.
+- `hyperparams::StateSpaceHyperParams`: The hyperparameters of the state space.
+
+# Returns
+- `Bswitch`: The diffusion matrix.
+"""
+function construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess, state::StateSpace, hyperparams::StateSpaceHyperParams)
     (; θ, σ) = stochasticprocess
     z = state[:z]
     k_hps, z_hps = hyperparams[:k], hyperparams[:z]
@@ -171,7 +183,30 @@ function construct_diffusion_matrix(stochasticprocess::StochasticProcess, state:
     return Bswitch
 end
 
-function update_v(m::StochasticModel, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams, diffusion_matrix; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v}
+"""
+    construct_diffusion_matrix(stochasticprocess::PoissonProcess, state::StateSpace, hyperparams::StateSpaceHyperParams)
+
+Constructs the diffusion matrix for the HJB equation.
+
+# Arguments
+- `stochasticprocess::PoissonProcess`: The Poisson process representing the stochastic component of the model.
+- `state::StateSpace`: The state space of the model.
+- `hyperparams::StateSpaceHyperParams`: The hyperparameters of the state space.
+
+# Returns
+- `B_switch`: The diffusion matrix.
+"""
+function construct_diffusion_matrix(stochasticprocess::PoissonProcess, state::StateSpace, hyperparams::StateSpaceHyperParams)
+    (; λ) = stochasticprocess
+    k_hps = hyperparams[:k]
+    Nk = k_hps.N
+    N = Nk # since Nz will always be 2 and we're just stacking anyway
+    I_A = sparse(I, N, N)
+    B_switch = [-I_A*λ[1] I_A*λ[1]; I_A*λ[2] -I_A*λ[2]]
+    return B_switch
+end
+
+function update_v(m::StochasticModel{T, S}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams, diffusion_matrix; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v, S <: StochasticProcess}
     (; γ, α, ρ, δ) = m
     (; v, dVf, dVb, dV0, dist) = value
     k, z = state[:k], state[:z]' # y isn't really a state but avoid computing it each iteration this way
@@ -204,14 +239,14 @@ function update_v(m::StochasticModel, value::Value{T, N_v}, state::StateSpace, h
     I_concave = dVb .> dVf
 
     # Consumption and savings with forward difference
-    cf = dVf.^(-1 / γ)
+    cf = max.(dVf, eps()).^(-1 / γ)
     sf = y - δ .* kk - cf
     # Consumption and savings with backward difference
-    cb = dVb.^(-1 / γ)
+    cb = max.(dVb, eps()).^(-1 / γ)
     sb = y - δ .* kk - cb
     # Consumption and derivative of value function at steady state
     c0 = y - δ .* kk
-    dV0 .= c0.^(-γ)
+    dV0 .= max.(c0, eps()).^(-γ)
 
     # Decision on forward or backward differences based on the sign of the drift
     If = sf .> 0 # positive drift -> forward difference
@@ -220,7 +255,7 @@ function update_v(m::StochasticModel, value::Value{T, N_v}, state::StateSpace, h
 
     V_Upwind = dVf .* If + dVb .* Ib + dV0 .* I0
 
-    c = V_Upwind.^(-1 / γ)
+    c = max.(V_Upwind, eps()).^(-1 / γ)
     u = c.^(1 - γ) / (1 - γ)
 
     # Construct matrix A

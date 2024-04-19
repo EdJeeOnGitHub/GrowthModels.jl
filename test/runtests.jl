@@ -2,8 +2,7 @@ using GrowthModels
 using Test
 using Plots
 using SparseArrays
-
-
+using ForwardDiff
 
 
 @testset "Skiba" begin
@@ -98,7 +97,10 @@ model_names = ["RamseyCassKoopmansModel", "SkibaModel", "SmoothSkibaModel"]
     A_t = sparse(sm.value.A')
     g = fill(1, size(A_t, 1)) 
     g = g ./ sum(g)
-    distribution_time_series =  StateEvolution(g, A_t, 100);
+    v_dim = size(init_value.v)
+    distribution_time_series =  StateEvolution(g, A_t, 101, v_dim);
+    distribution_time_series.S
+    distribution_time_series.E_S
     min_dist = minimum(abs.(vec(sm.variables[:k])[argmax(distribution_time_series[100])] .- k_steady_state(m)))
     # smooth skiba steady state not actually calculated analytically
     if !isa(m, SmoothSkibaModel)
@@ -161,6 +163,31 @@ model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
     # @test isa(r, SolvedModel)
     # @test isa(time_plot, Plots.Plot)
 end
+
+
+
+
+@testset "Poisson Skiba" begin
+
+    p = PoissonProcess(z = [-0.4, 0.0], λ = [9/10, 1/10])
+    m = StochasticSkibaModel(p) 
+    k_hps = HyperParams(N = 1000, xmax = 20, xmin = 1e-3)
+    z_hps = HyperParams(N = 2, xmax = maximum(p.z), xmin = minimum(p.z))
+    hyperparams = StateSpaceHyperParams((k = k_hps, z = z_hps))
+
+    state = StateSpace(m, hyperparams)
+    init_value = Value(state)
+    v_dim = size(init_value.v)
+
+    fit_value, fit_variables, fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 1000)
+
+    sm = SolvedModel(m, fit_value, fit_variables)
+    A_t = sparse(sm.value.A')
+    g = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
+    g = g ./ sum(g)
+    distribution_time_series =  StateEvolution(g, A_t, 200, v_dim);
+end
+
 
 
 # Differentiation tests
