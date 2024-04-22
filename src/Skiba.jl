@@ -26,6 +26,9 @@ function StateSpace(m::SkibaModel, statespacehyperparams::StateSpaceHyperParams)
 end
 
 
+function SkibaModel{T}(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0) where {T<: Real}
+    SkibaModel{T}(γ, α, ρ, δ, A_H, A_L, κ)
+end
 
 function SkibaModel(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0)
     SkibaModel(γ, α, ρ, δ, A_H, A_L, κ)

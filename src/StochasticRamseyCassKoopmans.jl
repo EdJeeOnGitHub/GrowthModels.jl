@@ -26,7 +26,7 @@ function StateSpaceHyperParams(m::StochasticRamseyCassKoopmansModel{T, S}; Nk = 
     return StateSpaceHyperParams((k = k_hps, z = z_hps))
 end
 
-function StateSpace(m::StochasticSkibaModel{T, S}, statespacehyperparams::StateSpaceHyperParams) where {T <: Real, S <: PoissonProcess}
+function StateSpace(m::StochasticRamseyCassKoopmansModel{T, S}, statespacehyperparams::StateSpaceHyperParams) where {T <: Real, S <: PoissonProcess}
     k_hps = statespacehyperparams[:k]
     z_hps = statespacehyperparams[:z]
     k = collect(range(k_hps.xmin, k_hps.xmax, length = k_hps.N))
