@@ -47,11 +47,7 @@ struct StochasticRamseyCassKoopmansModel{T <: Real, S <: StochasticProcess} <: S
     ρ::T
     δ::T
     A::T
-<<<<<<< HEAD
-    stochasticprocess::StochasticProcess{T}
-=======
     stochasticprocess::S
->>>>>>> main
 end
 
 
@@ -63,11 +59,5 @@ struct StochasticSkibaModel{T <: Real, S <: StochasticProcess} <: StochasticMode
     A_H::T
     A_L::T
     κ::T
-<<<<<<< HEAD
-    stochasticprocess::StochasticProcess{T}
-end
-
-=======
     stochasticprocess::S
 end
->>>>>>> main
