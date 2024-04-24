@@ -325,13 +325,13 @@ function update_v(m::StochasticModel{T, S}, value::Value{T, N_v}, state::StateSp
 
     # If using forward diff, want this just to be value part
     distance = ForwardDiff.value(maximum(abs.(Vchange)))
-    push!(dist, distance)
+    # push!(dist, distance)
 
     if distance < crit
         if verbose
             println("Value Function Converged, Iteration = ", iter)
         end
-        push!(dist, distance)
+        # push!(dist, distance)
         value = Value{T, N_v}(
             v = V, 
             dVf = dVf, 

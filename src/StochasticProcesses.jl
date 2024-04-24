@@ -16,7 +16,7 @@ end
 
 
 
-struct OrnsteinUhlenbeckProcess{T <: Real} <: StochasticProcess{T}
+struct OrnsteinUhlenbeckProcess{T <: Real} <: StochasticProcess
     # y = log(z) ~ N(0, ln_stationary_σ)
     # y ~ N(ln_mean, ln_stationary_σ)
 

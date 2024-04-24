@@ -78,10 +78,6 @@ k_star(::Type{M}, α::T, A_H::T, A_L::T) where {M <: StochasticSkibaModel, T <: 
 k_star(::Type{M}; α, A_H, A_L, κ, kwargs...) where {M <: StochasticSkibaModel} = κ ./ (1 .- (A_L ./ A_H) .^ (1 ./ α))
 k_steady_state(::Type{M}; α, A_H, A_L, ρ, δ, κ, stationary_mean, kwargs...) where {M <: StochasticSkibaModel} = [k_steady_state_lo_StochasticSkiba.(α, A_L, ρ, δ, stationary_mean), k_steady_state_hi_StochasticSkiba.(α, A_H, ρ, δ, κ, stationary_mean)]
 
-function k_steady_state(::Type{M}; α, A_H, A_L, ρ, δ, κ, θ, σ,  kwargs...) where {M <: StochasticSkibaModel}
-    stationary_mean = exp.((σ .^ 2) ./ (2 .* θ) ./ 2)
-    [k_steady_state_lo_StochasticSkiba.(α, A_L, ρ, δ, stationary_mean), k_steady_state_hi_StochasticSkiba.(α, A_H, ρ, δ, κ, stationary_mean)]
-end
 
 y_H(m::StochasticSkibaModel{T, S}) where {T <: Real, S <: OrnsteinUhlenbeckProcess} = (k, z) -> m.A_H*z*max(k - m.κ,0)^m.α
 y_L(m::StochasticSkibaModel{T, S}) where {T <: Real, S <: OrnsteinUhlenbeckProcess} = (k, z) -> m.A_L*z*k^m.α 
@@ -90,12 +86,8 @@ y_H(m::StochasticSkibaModel{T, S}) where {T <: Real, S <: PoissonProcess} = (k, 
 y_L(m::StochasticSkibaModel{T, S}) where {T <: Real, S <: PoissonProcess} = (k, z) -> m.A_L*k^m.α  + z
 
 # Skiba production function
-@inline function stochastic_skiba_production_function(::OrnsteinUhlenbeckProcess, k, z, α, A_H, A_L, κ)
-    z .* max.(A_H .* max.(k .- κ, 0) .^ α, A_L .* k .^ α)
-end
-
 @inline function stochastic_skiba_production_function(::PoissonProcess, k, z, α, A_H, A_L, κ)
-     max.(max.(A_H .* max.(k .- κ, 0) .^ α, A_L .* k .^ α) .+ z, 1e-3)
+     max.(max.(A_H .* max.(k .- κ, eltype(k)(0)) .^ α, A_L .* k .^ α) .+ z, eltype(k)(1e-3))
 end
 # derivative of skiba production function
 @inline function skiba_production_function_prime(::OrnsteinUhlenbeckProcess, k, z, α, A_H, A_L, κ)
