@@ -54,6 +54,8 @@ k_steady_state(::Type{M}, α::Real, A_L::Real, A_H::Real, ρ::Real, δ::Real, κ
 k_star(::Type{M}; α::Real, A_L::Real, A_H::Real, κ::Real, kwargs...)  where {M <: SmoothSkibaModel} = κ/(1-(A_L/A_H)^(1/α))
 k_steady_state(::Type{M}; α::Real, A_L::Real, A_H::Real, ρ::Real, δ::Real, κ::Real, kwargs...) where {M <: SmoothSkibaModel} = [k_steady_state_lo_SmoothSkiba(α, A_L, ρ, δ, κ), k_steady_state_hi_SmoothSkiba(α, A_H, ρ, δ, κ)]
 
+k_steady_state(m::SmoothSkibaModel) = [k_steady_state_lo(m), k_steady_state_hi(m)]
+
 # Skiba production function
 @inline function smooth_skiba_production_function(k, α, A_H, A_L, κ, β)
     weight_fun = 1 / (1 + exp(-β * (k - κ)))

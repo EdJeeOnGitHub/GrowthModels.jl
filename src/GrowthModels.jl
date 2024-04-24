@@ -46,10 +46,12 @@ module GrowthModels
            StochasticSkibaModel,
            StochasticRamseyCassKoopmansModel
        
+    export StateEvolution, iterate_g, create_group_ids
     # stochastic stuff
     export StochasticProcess,
            OrnsteinUhlenbeckProcess,
            from_stationary_OrnsteinUhlenbeckProcess,
+           PoissonProcess,
            sample
 
 
@@ -57,9 +59,10 @@ module GrowthModels
 
     # Types
     abstract type Model{T <: Real} end
+    abstract type StochasticProcess end
 
     abstract type DeterministicModel{T <: Real} <: Model{T} end
-    abstract type StochasticModel{T <: Real} <: Model{T} end
+    abstract type StochasticModel{T <: Real, S <: StochasticProcess} <: Model{T} end
 
 
     # Modules
@@ -73,6 +76,7 @@ module GrowthModels
     include("StochasticRamseyCassKoopmans.jl")
     include("StochasticSkiba.jl")
     include("SolvedModel.jl")
+    include("StateEvolution.jl")
 
 
     function show(io::IO, h::HyperParams)

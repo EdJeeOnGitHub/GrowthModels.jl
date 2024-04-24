@@ -107,6 +107,7 @@ struct Value{T, D}
     dVf::Array{T, D}
     dVb::Array{T, D}
     dV0::Array{T, D}
+    A::SparseArrays.SparseMatrixCSC
     dist::Vector{Float64}
     convergence_status::Bool
     iter::Int64
@@ -117,10 +118,12 @@ function Value(::StateSpace{T, N, D, C }) where {T, N, D, C <: NamedTuple}
     dVf = zeros(T, D)
     dVb = zeros(T, D)
     dV0 = zeros(T, D)
+    A_dim = prod(D)
+    A = SparseArrays.spzeros(T, (A_dim, A_dim))
     dist = [Inf]
     convergence_status = false
     iter = 0
-    Value(v, dVf, dVb, dV0, dist, convergence_status, iter)
+    Value(v, dVf, dVb, dV0, A, dist, convergence_status, iter)
 end
 
 function Value(T, h::Union{HyperParams,StateSpaceHyperParams{N,D}}) where {N, D}
@@ -133,18 +136,20 @@ function Value(T, D)
     dVf = zeros(T, D)
     dVb = zeros(T, D)
     dV0 = zeros(T, D)
+    A_dim = prod(D)
+    A = SparseArrays.spzeros(T, (A_dim, A_dim))
     dist = [Inf]
     convergence_status = false
     iter = 0
-    Value(v, dVf, dVb, dV0, dist, convergence_status, iter)
+    Value(v, dVf, dVb, dV0, A, dist, convergence_status, iter)
 end
 
-function Value(; v, dVf, dVb, dV0, dist, convergence_status, iter) 
-    Value(v, dVf, dVb, dV0, dist, convergence_status, iter)
+function Value(; v, dVf, dVb, dV0, A, dist, convergence_status, iter) 
+    Value(v, dVf, dVb, dV0, A, dist, convergence_status, iter)
 end
 
-function Value{T,D}(; v, dVf, dVb, dV0, dist, convergence_status, iter) where {T,D}
-    Value{T,D}(v, dVf, dVb, dV0, dist, convergence_status, iter)
+function Value{T,D}(; v, dVf, dVb, dV0, A, dist, convergence_status, iter) where {T,D}
+    Value{T,D}(v, dVf, dVb, dV0, A, dist, convergence_status, iter)
 end
 
 
@@ -268,6 +273,23 @@ function solve_growth_model(model::Model, init_value::Value, hyper_params::State
     if update
         update_value_function!(init_value, res)
     end
+    sm = SolvedModel(m, res)
+    return sm, res
+end
+function solve_growth_model(m::Model)
+    hyperparams = StateSpaceHyperParams(m)
+    state = StateSpace(m, hyperparams)
+    init_value = Value(state)
+    res = solve_HJB(m, hyperparams, init_value = init_value, maxit = 1000, verbose = false)
+    sm = SolvedModel(m, res)
+    return sm, res
+end
+
+function solve_growth_model(m::Model, hp_args)
+    hyperparams = StateSpaceHyperParams(m; hp_args...)
+    state = StateSpace(m, hyperparams)
+    init_value = Value(state)
+    res = solve_HJB(m, hyperparams, init_value = init_value, maxit = 1000, verbose = false)
     sm = SolvedModel(m, res)
     return sm, res
 end

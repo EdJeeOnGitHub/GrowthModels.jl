@@ -40,17 +40,22 @@ end
 function show(io::IO, m::RamseyCassKoopmansModel)
     print(io, "RamseyCassKoopmansModel: γ = ", m.γ, ", α = ", m.α, ", ρ = ", m.ρ, ", δ = ", m.δ, ", A = ", m.A)
 end
-struct StochasticRamseyCassKoopmansModel{T <: Real} <: StochasticModel{T}
+
+struct StochasticRamseyCassKoopmansModel{T <: Real, S <: StochasticProcess} <: StochasticModel{T, S}
     γ::T
     α::T
     ρ::T
     δ::T
     A::T
+<<<<<<< HEAD
     stochasticprocess::StochasticProcess{T}
+=======
+    stochasticprocess::S
+>>>>>>> main
 end
 
 
-struct StochasticSkibaModel{T <: Real} <: StochasticModel{T}
+struct StochasticSkibaModel{T <: Real, S <: StochasticProcess} <: StochasticModel{T, S}
     γ::T
     α::T
     ρ::T
@@ -58,6 +63,11 @@ struct StochasticSkibaModel{T <: Real} <: StochasticModel{T}
     A_H::T
     A_L::T
     κ::T
+<<<<<<< HEAD
     stochasticprocess::StochasticProcess{T}
 end
 
+=======
+    stochasticprocess::S
+end
+>>>>>>> main
