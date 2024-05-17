@@ -196,12 +196,11 @@ Constructs the diffusion matrix for the HJB equation.
 # Returns
 - `B_switch`: The diffusion matrix.
 """
-function construct_diffusion_matrix(stochasticprocess::PoissonProcess, state::StateSpace, hyperparams::StateSpaceHyperParams)
+function construct_diffusion_matrix(stochasticprocess::PoissonProcess, state::StateSpace, hyperparams::StateSpaceHyperParams) 
     (; λ) = stochasticprocess
-    k_hps = hyperparams[:k]
-    Nk = k_hps.N
-    N = Nk # since Nz will always be 2 and we're just stacking anyway
-    I_A = sparse(I, N, N)
+    D = size(hyperparams)
+    N_grid_size = prod(D[1:end - 1])
+    I_A = sparse(I, N_grid_size, N_grid_size)
     B_switch = [-I_A*λ[1] I_A*λ[1]; I_A*λ[2] -I_A*λ[2]]
     return B_switch
 end

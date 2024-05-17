@@ -43,7 +43,8 @@ module GrowthModels
            SmoothSkibaModel,
            RamseyCassKoopmansModel,
            StochasticSkibaModel,
-           StochasticRamseyCassKoopmansModel
+           StochasticRamseyCassKoopmansModel,
+           StochasticTwoAssetKinkedModel
        
     export StateEvolution, iterate_g, create_group_ids
     # stochastic stuff
@@ -74,6 +75,7 @@ module GrowthModels
     include("RamseyCassKoopmans.jl")
     include("StochasticRamseyCassKoopmans.jl")
     include("StochasticSkiba.jl")
+    include("StochasticTwoAssetKinked.jl")
     include("SolvedModel.jl")
     include("StateEvolution.jl")
 
