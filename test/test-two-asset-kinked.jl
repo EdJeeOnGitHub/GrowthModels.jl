@@ -16,7 +16,7 @@ init_value.v
 
 v_dim = size(init_value.v)
 
-fit_value, fit_variables, fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 1000)
+# fit_value, fit_variables, fit_iter = solve_HJB(m, hyperparams, init_value = init_value, maxit = 1000)
 
 stochasticprocess = m.stochasticprocess
 m = m
@@ -30,7 +30,7 @@ crit = 10^(-6)
 Delta = 1000
 verbose = true
 
-diffusion_matrix = construct_diffusion_matrix(m.stochasticprocess, state, hps)
+diffusion_matrix = GrowthModels.construct_diffusion_matrix(m.stochasticprocess, state, hps)
 
 
 
@@ -49,15 +49,21 @@ diffusion_matrix = construct_diffusion_matrix(m.stochasticprocess, state, hps)
     Nz, dz, zmax, zmin = z_hps.N, z_hps.dx, z_hps.xmax, z_hps.xmin
 
 
-Nb
-
     bb = repeat(reshape(b, :, 1), 1, Na)
+    aa = repeat(reshape(a, 1, :), Nb, 1)
+    zz = repeat(reshape(z, 1, :), Na, 1)
 
-    b
-    kk = repeat(reshape(k, :, 1), 1, Nz);
-    zz = repeat(reshape(z, 1, :), Nk, 1);
+    bbb =  repeat(bb, 1, 1, 2) 
+    aaa = repeat(aa, 1, 1, 2)
+    zzz = permutedims(repeat(zz, 1, 1, 100), (3, 1, 2))
+
 
     Bswitch = diffusion_matrix    
+
+
+    
+
+    dVf 
 
     V = v
 

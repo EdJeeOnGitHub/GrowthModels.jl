@@ -35,8 +35,8 @@ function StateSpaceHyperParams(m::StochasticTwoAssetKinkedModel{T, S}; Nb = 100,
 end
 
 function StateSpace(m::StochasticTwoAssetKinkedModel{T, S}, statespacehyperparams::StateSpaceHyperParams) where {T <: Real, S <: PoissonProcess}
-    b_hps = statespacehyperparams[:a]
-    a_hps = statespacehyperparams[:b]
+    b_hps = statespacehyperparams[:b]
+    a_hps = statespacehyperparams[:a]
     z_hps = statespacehyperparams[:z]
 
     b = collect(range(b_hps.xmin, b_hps.xmax, length = b_hps.N))
