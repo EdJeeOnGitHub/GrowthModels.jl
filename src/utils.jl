@@ -100,6 +100,53 @@ function StateSpace(statespacehyperparams::StateSpaceHyperParams{N, D}, aux_stat
 end
 
 
+# Dispatch for stochastic models
+function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001, Nz = 40) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
+    kssH = k_steady_state_hi(m)
+    kmin, kmax = kmin_f*kssH, kmax_f*kssH
+    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin)
+    # z_hps
+    zmean = process_mean(m.stochasticprocess)
+    zmin = zmean*0.8
+    zmax = zmean*1.2
+    z_hps = HyperParams(N = Nz, xmax = zmax, xmin = zmin)
+    return StateSpaceHyperParams((k = k_hps, z = z_hps))
+end
+
+function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001, Nz = 2) where {T <: Real, S <: PoissonProcess}
+    kssH = k_steady_state_hi(m)
+    kmin, kmax = kmin_f*kssH, kmax_f*kssH
+    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin)
+    # z_hps
+    zmin = minimum(m.stochasticprocess.z)
+    zmax = maximum(m.stochasticprocess.z)
+    z_hps = HyperParams(N = Nz, xmax = zmax, xmin = zmin)
+    return StateSpaceHyperParams((k = k_hps, z = z_hps))
+end
+
+function StateSpace(m::StochasticModel{T, S}, statespacehyperparams::StateSpaceHyperParams) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
+    k_hps = statespacehyperparams[:k]
+    z_hps = statespacehyperparams[:z]
+    k = collect(range(k_hps.xmin, k_hps.xmax, length = k_hps.N))
+    z = collect(range(z_hps.xmin, z_hps.xmax, length = z_hps.N))
+    # z' creates Nk x Nz matrix
+    y = production_function(m, k, z')
+    StateSpace((k = k, z = z), (y = y,))
+end
+
+function StateSpace(m::StochasticModel{T, S}, statespacehyperparams::StateSpaceHyperParams) where {T <: Real, S <: PoissonProcess}
+    k_hps = statespacehyperparams[:k]
+    z_hps = statespacehyperparams[:z]
+    k = collect(range(k_hps.xmin, k_hps.xmax, length = k_hps.N))
+    z = collect(range(z_hps.xmin, z_hps.xmax, length = z_hps.N))
+    z = vcat(z_hps.xmin, z_hps.xmax)
+    # z' creates Nk x Nz matrix
+    y = production_function(m, k, z')
+    StateSpace((k = k, z = z), (y = y,))
+end
+
+
+
 
 # Struct to hold value function, its derivatives, and convergence diagnostics
 struct Value{T, D} 
