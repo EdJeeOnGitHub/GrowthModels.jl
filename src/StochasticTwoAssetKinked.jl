@@ -60,8 +60,9 @@ end
     return (1 .- ξ) .* w .* z .+ r_b .* b 
 end
 
-function cost_adjustment(d, a, χ_0, χ_1) 
-    χ_0 .* abs.(d) + 0.5 .* χ_1 .* a .* (d ./ a).^2
+function StochasticTwoAssetKinkedModel_cost_adjustment(d, a, χ_0, χ_1) 
+    # χ_0 .* abs.(d) + 0.5 .* χ_1 .* a .* (d ./ a).^2
+    return χ_0 .* abs.(d) .+ χ_1 .* (d .^2) ./ 2 .* max.(a, eps()) .^ (-1);
 end
 
 

@@ -36,6 +36,9 @@ end
 # ensures each state variable is a vector with same dimension
 # probably not a great modification but makes things easier for me 
 # when I create a struct to hold value functions
+# T is the type of the state variables
+# N is the number of state variables
+# D is the dimension of the value functions
 struct StateSpace{T, N, D, C <: NamedTuple, A <: NamedTuple} 
     state::C
     aux_state::A
@@ -149,11 +152,17 @@ end
 
 
 # Struct to hold value function, its derivatives, and convergence diagnostics
-struct Value{T, D} 
-    v::Array{T, D}
-    dVf::Array{T, D}
-    dVb::Array{T, D}
-    dV0::Array{T, D}
+# T is the type of the value function
+# N is the number of state variables
+# D is the dimension of the value function
+# 
+# We ensure the derivative of the value function with respect to each state can 
+# be stored by using a (N x D[1] x D[2] x ... x D[K]) array.
+struct Value{T, D_v, D_dv} 
+    v::Array{T, D_v}
+    dVf::Array{T, D_dv}
+    dVb::Array{T, D_dv}
+    dV0::Array{T, D_dv}
     A::SparseArrays.SparseMatrixCSC
     dist::Vector{Float64}
     convergence_status::Bool
@@ -161,10 +170,10 @@ struct Value{T, D}
 end
 
 function Value(::StateSpace{T, N, D, C }) where {T, N, D, C <: NamedTuple}
-    v = zeros(T, D)
-    dVf = zeros(T, D)
-    dVb = zeros(T, D)
-    dV0 = zeros(T, D)
+    v = zeros(T,  D)
+    dVf = zeros(T, (N, D...))
+    dVb = zeros(T, (N, D...))
+    dV0 = zeros(T, (N, D...))
     A_dim = prod(D)
     A = SparseArrays.spzeros(T, (A_dim, A_dim))
     dist = [Inf]
@@ -175,14 +184,15 @@ end
 
 function Value(T, h::Union{HyperParams,StateSpaceHyperParams{N,D}}) where {N, D}
     D_v = isa(h, HyperParams) ? h.N : D
-    Value(T, D_v)
+    D_dv = isa(h, HyperParams) ? (N,) : (N, D...) 
+    Value(T, D_v, D_dv)
 end
 
-function Value(T, D)
+function Value(T, N, D)
     v = zeros(T, D)
-    dVf = zeros(T, D)
-    dVb = zeros(T, D)
-    dV0 = zeros(T, D)
+    dVf = zeros(T, (N, D...))
+    dVb = zeros(T, (N, D...))
+    dV0 = zeros(T, (N, D...))
     A_dim = prod(D)
     A = SparseArrays.spzeros(T, (A_dim, A_dim))
     dist = [Inf]
@@ -195,8 +205,8 @@ function Value(; v, dVf, dVb, dV0, A, dist, convergence_status, iter)
     Value(v, dVf, dVb, dV0, A, dist, convergence_status, iter)
 end
 
-function Value{T,D}(; v, dVf, dVb, dV0, A, dist, convergence_status, iter) where {T,D}
-    Value{T,D}(v, dVf, dVb, dV0, A, dist, convergence_status, iter)
+function Value{T, D_v, D_dv}(; v, dVf, dVb, dV0, A, dist, convergence_status, iter) where {T, D_v, D_dv}
+    Value{T, D_v, D_dv}(v, dVf, dVb, dV0, A, dist, convergence_status, iter)
 end
 
 
