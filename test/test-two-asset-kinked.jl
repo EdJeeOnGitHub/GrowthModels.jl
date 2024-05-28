@@ -30,7 +30,7 @@ crit = 10^(-6)
 Delta = 1000
 verbose = true
 
-diffusion_matrix = construct_diffusion_matrix(m.stochasticprocess, state, hps)
+diffusion_matrix = GrowthModels.construct_diffusion_matrix(m.stochasticprocess, state, hps)
 
 
 
@@ -49,11 +49,9 @@ diffusion_matrix = construct_diffusion_matrix(m.stochasticprocess, state, hps)
     Nz, dz, zmax, zmin = z_hps.N, z_hps.dx, z_hps.xmax, z_hps.xmin
 
 
-Nb
 
     bb = repeat(reshape(b, :, 1), 1, Na)
 
-    b
     kk = repeat(reshape(k, :, 1), 1, Nz);
     zz = repeat(reshape(z, 1, :), Nk, 1);
 
