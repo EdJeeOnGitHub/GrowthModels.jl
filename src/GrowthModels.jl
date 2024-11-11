@@ -6,7 +6,7 @@ module GrowthModels
     using SparseArrays, LinearAlgebra
     import Base: show
     using Printf
-    using OrdinaryDiffEq, Interpolations
+    using Interpolations
     using NaNMath: pow
     using ForwardDiff
     using Random
@@ -35,8 +35,7 @@ module GrowthModels
     export  k_steady_state_hi, k_steady_state_lo, k_star,
            production_function,
            k_dot,
-           plot_production_function,
-           plot_timepath
+           plot_production_function
     export k_steady_state
     # Models
     export SkibaModel, 

@@ -1,6 +1,5 @@
 using GrowthModels
 using BenchmarkTools
-using OrdinaryDiffEq
 
 test_params = [
     2.0,
