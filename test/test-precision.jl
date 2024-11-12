@@ -1,5 +1,4 @@
 using GrowthModels
-using Statistics
 using Test
 
 test_params = [
@@ -32,11 +31,21 @@ function many_fits(p; n = 10)
 end
 
 
+function calculate_variance(array)
+    n = size(array, 2)
+    mean_array = sum(array, dims = 2) / n
+    variance_array = sum((array .- mean_array).^2, dims = 2) / (n - 1)
+    return variance_array[:]
+end
+
 @testset "Testing value function same across fits" begin
     value_fits, variable_fits = many_fits(test_params);
 
-    @test maximum(var(value_fits, dims = 2)[:]) <= 1e-10
-    @test maximum(var(variable_fits, dims = 2)[:]) <= 1e10
+    value_variance = calculate_variance(value_fits)
+    variable_variance = calculate_variance(variable_fits)
+
+    @test maximum(value_variance) <= 1e-10
+    @test maximum(variable_variance) <= 1e10
 end
 
 
