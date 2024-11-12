@@ -53,7 +53,7 @@ end
 
 # Given a vector of times, iterate the state evolution to each time step
 # using the implicit formula to jump straight to that time step
-function StateEvolution(g::Vector{T}, A_t::SparseMatrixCSC, times::Vector) where T <: Real
+function StateEvolution(g::Vector{T}, A_t::SparseMatrixCSC, times::Vector, v_dim) where T <: Real
     S = zeros((size(g, 1), length(times)))
     S[:, 1] .= g
     i = 1
