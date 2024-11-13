@@ -44,12 +44,12 @@ end
 # 1 unit each time
 function StateEvolution(g::Vector{R}, A_t::SparseMatrixCSC, T::Int, v_dim) where {R <: Real}
     S = zeros((size(g, 1), T))
-    I_A = sparse(I, size(A_t))
-    timestep = 1
-    AT_inv = inv(Matrix(I_A - timestep * A_t))
+    # I_A = sparse(I, size(A_t))
+    # timestep = 1
+    # AT_inv = inv(Matrix(I_A - timestep * A_t))
     S[:, 1] .= g
     for t in 2:T
-        S[:, t] .= iterate_g_w_inv(S[:, t-1], AT_inv)
+        S[:, t] .= iterate_g(S[:, t-1], A_t)
     end
     # if no shock dimension, return S
     if v_dim[1] == size(g, 1)
