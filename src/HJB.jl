@@ -262,8 +262,7 @@ function update_v(m::StochasticModel{T, S}, value::Value{T, N_v}, state::StateSp
 
     # Forward difference
     dVf[1:Nk-1, :] .= (V[2:Nk, :] - V[1:Nk-1, :]) ./ dkf[1:Nk-1]
-    # dVf[Nk, :] .= (y[Nk, :] .- δ .* k[Nk, :]) .^ (-γ) # State constraint at kmax
-    dVf[end, :] .= dVf[end-1, :]  # State constraint at kmax
+    dVf[Nk, :] .= (y[Nk, :] .- δ .* k[Nk, :]) .^ (-γ) # State constraint at kmax
 
     # Backward difference
     dVb[2:Nk, :] .= (V[2:Nk, :] - V[1:Nk-1, :]) ./ dkb[2:Nk]
