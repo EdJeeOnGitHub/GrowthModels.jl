@@ -60,16 +60,50 @@ function Base.getindex(statespace::StateSpace, args::CartesianIndex)
 end
 Base.getindex(statespace::StateSpace, x::Symbol) = statespace.state[x]
 
-struct HyperParams
+struct HyperParams{T} 
     N::Int64
-    dx::Real
-    xmin::Real
-    xmax::Real
-    function HyperParams(; N = 1000, xmin = 0.001, xmax = 10.0)
-        dx = (xmax - xmin) / (N - 1) 
-        new(N, dx, xmin, xmax)
+    dx::Union{T, Vector{T}}
+    xmin::T
+    xmax::T
+    function HyperParams(; N = 1000, xmin = 0.001, xmax = 10.0, dx = (xmax - xmin) / (N - 1))
+        new{T}(N, dx, xmin, xmax)
     end
 end
+
+function Hyperparams(coef, pow; N = 1000, xmin = 0.001, xmax = 10.0)
+    x = range(0, 1, length = N)
+    uneven_x = x .+ coef * x.^power
+    uneven_xmax = maximum(uneven_x)
+    uneven_xmin = minimum(uneven_x)
+
+    x_grid = xmin .+ ((xmax - xmin) ./ (uneven_xmax - uneven_xmin)) .* uneven_x
+    dx = [diff(x_grid); 0.0]
+
+    
+end
+
+coef = 5
+power = 10
+xmin = 0.001
+xmax = 50_000
+N = 1000
+x = range(0, 1, length = N)
+uneven_x = x .+ coef * x.^power
+uneven_xmax = maximum(uneven_x)
+uneven_xmin = minimum(uneven_x)
+
+x_grid = xmin .+ ((xmax - xmin) ./ (uneven_xmax - uneven_xmin)) .* uneven_x
+
+plot(x, x, label="x", xlabel="x", ylabel="x")
+plot(x, x_grid)
+
+vline!(x, x_grid, label="x", xlabel="x", ylabel="x")
+diff(x_grid)
+
+plot(x, [0.0; diff(x_grid)])
+
+
+
 
 struct StateSpaceHyperParams{N, D}
     hyperparams::NamedTuple
