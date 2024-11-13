@@ -29,11 +29,11 @@ function iterate_g(g, A_t; time_step = 1)
     return evolution \ g
 end
 
-function iterate_g_w_inv(g, AT_inv)
-    return AT_inv * g
+function iterate_g_w_chol(g, AT_chol)
+    return  AT_chol \ g
 end
-function iterate_g_w_inv!(g, AT_inv)
-    g .= AT_inv * g
+function iterate_g_w_chol!(g, AT_chol)
+    g .= AT_chol \ g
 end
 
 function StateEvolution(S::Array{T}, times::Vector{T}, g::Vector{T}, A::SparseMatrixCSC) where T <: Real
@@ -46,10 +46,11 @@ function StateEvolution(g::Vector{R}, A_t::SparseMatrixCSC, T::Int, v_dim) where
     S = zeros((size(g, 1), T))
     I_A = sparse(I, size(A_t))
     timestep = 1
-    AT_inv = inv(I_A - timestep * A_t)
+    # AT_inv = inv(I_A - timestep * A_t)
+    AT_chol = cholesky(I_A - timestep * A_t)
     S[:, 1] .= g
     for t in 2:T
-        S[:, t] .= iterate_g_w_inv(S[:, t-1], AT_inv)
+        S[:, t] .= iterate_g_w_inv(S[:, t-1], AT_chol)
     end
     # if no shock dimension, return S
     if v_dim[1] == size(g, 1)
