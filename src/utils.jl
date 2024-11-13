@@ -73,10 +73,6 @@ end
 
 
 
-
-
-
-
 struct StateSpaceHyperParams{N, D}
     hyperparams::NamedTuple
 end

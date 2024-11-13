@@ -222,6 +222,113 @@ end
 
 
 
+
+
+    
+
+    #     function rescale_g(sm, g) 
+    #         Nz = size(sm.variables.z, 2)
+    #         dxf, dxb = GrowthModels.generate_dx(sm.variables[:k][:, 1])
+    #         dx_tilde = 0.5 * (dxf + dxb)
+    #         dx_tilde[1] = 0.5*dxf[1]
+    #         dx_tilde[end] = 0.5*dxb[end]
+    #         dx_tilde_stacked = repeat(dx_tilde, Nz)
+    #         grid_diag = spdiagm(0 => dx_tilde_stacked)
+            
+    #         AT = sparse(sm.value.A')
+    #         b = zeros(size(AT, 1))
+    #         i_fix = 1
+    #         b[i_fix] = 0.1
+    #         row = [zeros(i_fix - 1); 1; zeros(size(AT, 1) - i_fix)]
+    #         AT[i_fix, :] = row
+    #         g_tilde = AT \ b
+
+    #         # g_tilde = repeat(g, Nz)
+
+
+
+
+    #         # g_sum = sum(g_tilde)
+    #         # g_tilde = g_tilde ./ g_sum
+    #         g_tilde = g_tilde ./ sum(g_tilde)
+
+    #         gg = grid_diag \ g_tilde
+    #         return gg
+    #     end
+
+    # function fk(m, g; coef = 0.0, power = 0.0, kmax_f = 1.5, Nz)
+    #     g_z = repeat(g, Nz)
+    #     hp = StateSpaceHyperParams(m, Nz = Nz, Nk = 1000, coef = coef, power = power, kmax_f = kmax_f)
+    #     state = StateSpace(m, hp)
+    #     init_value = Value(state)
+    #     fit_value, fit_variables, fit_iter = solve_HJB(m, hp, init_value = init_value, maxit = 1000)
+    #     sm = SolvedModel(m, fit_value, fit_variables)
+    #     A_t = sparse(sm.value.A')
+    #     g_z_tilde = rescale_g(sm, g)
+        
+
+    #     distribution_time_series =  StateEvolution(g_z, A_t, [2000], size(sm.value.v));
+    #     rescale_d = StateEvolution(g_z_tilde, A_t, [2000], size(sm.value.v)); 
+    #     return distribution_time_series, rescale_d, sm
+    # end
+
+    # ts_u, ts_u_rs, sm_u = fk(m, g, coef = 0.0, power = 0.0, kmax_f = 3.0, Nz = 20)
+    # ts_nu, ts_nu_rs, sm_nu = fk(m, g, coef = 5.0, power = 10.0, kmax_f = 3.0, Nz = 20)
+
+    # sum(ts_u.E_S[:, end])
+    # sum(ts_u_rs.E_S[:, end])
+
+    # using Plots
+    # k_vec = sm_u.variables[:k][:, 1]
+    # plot(
+    #     k_vec,
+    #     ts_u.E_S[:, end]
+    #     #  ./ sum(ts_u.E_S[:, end])
+    # )
+    # plot!(
+    #     k_vec,
+    #     ts_u_rs.E_S[:, end]
+    #     #  ./ sum(ts_u_rs.E_S[:, end])
+    # )
+
+    # k_vec_nu = sm_nu.variables[:k][:, 1]
+    # plot(
+    #     k_vec_nu,
+    #     ts_nu.E_S[:, end]
+    #     #  ./ sum(ts_nu.E_S[:, end])
+    # )
+    # plot!(
+    #     k_vec_nu,
+    #     ts_nu_rs.E_S[:, end]
+    #     #  ./ sum(ts_nu_rs.E_S[:, end])
+    # )
+
+    # plot(
+    #     k_vec, 
+    #     # ts_u_rs.E_S[:, end] ./ sum(ts_u_rs.E_S[:, end]),
+    #     ts_u_rs.E_S[:, end],
+    #     #  ./ sum(ts_u_rs.E_S[:, end]),
+    #     label = "Uniform"
+    # )
+    # plot!(
+    #     k_vec_nu, 
+    #     # ts_nu_rs.E_S[:, end] ./ sum(ts_nu_rs.E_S[:, end]), 
+    #     ts_nu_rs.E_S[:, end],
+    #     #  ./ sum(ts_nu_rs.E_S[:, end]), 
+    #     label = "Non-Uniform"
+    # )
+
+
+
+    # k_hps_nu = HyperParams(coef = 5.0, power = 10.0, N = 1000, xmax = 20.0, xmin = 1e-3);
+    # hyperparams_nu = StateSpaceHyperParams((k = k_hps_nu,));
+    # state_nu = StateSpace(m, hyperparams_nu)
+    # fit_value_nu, fit_variables_nu, fit_iter_nu = solve_HJB(m, hyperparams_nu, init_value = init_value, maxit = 1000)
+    # sm_nu = SolvedModel(m, fit_value_nu, fit_variables_nu)
+
+
+
+
 # Differentiation tests
 include("test-differentiable.jl")
 # Precision tests

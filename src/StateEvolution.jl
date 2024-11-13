@@ -66,7 +66,7 @@ function StateEvolution(g::Vector{T}, A_t::SparseMatrixCSC, times::Vector, v_dim
         E_S = S
     else
         # otherwise average
-        E_S = sum(reshape(S, (v_dim..., T)), dims = 2)[:, 1, :]
+        E_S = sum(reshape(S, (v_dim..., length(times))), dims = 2)[:, 1, :]
     end
     return StateEvolution(S, times, g, A_t, E_S)
 end
