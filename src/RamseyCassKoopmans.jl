@@ -3,22 +3,6 @@
 
 
 
-# HyperParams for the NGM model
-function StateSpaceHyperParams(m::RamseyCassKoopmansModel; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001)
-    kss = k_steady_state(m)
-    kmin, kmax = kmin_f*kss, kmax_f*kss
-    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin)
-    return StateSpaceHyperParams((k = k_hps,))
-end
-
-
-function StateSpace(m::RamseyCassKoopmansModel, statespacehyperparams::StateSpaceHyperParams)
-    k_hps = statespacehyperparams[:k]
-    k = collect(range(k_hps.xmin, k_hps.xmax, length = k_hps.N))
-    y = production_function(m, k)
-    StateSpace((k = k,), (y = y,))
-end
-
 
 function RamseyCassKoopmansModel(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A = 0.6)
     RamseyCassKoopmansModel(γ, α, ρ, δ, A)

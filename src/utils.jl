@@ -62,45 +62,17 @@ Base.getindex(statespace::StateSpace, x::Symbol) = statespace.state[x]
 
 struct HyperParams{T} 
     N::Int64
-    dx::Union{T, Vector{T}}
     xmin::T
     xmax::T
-    function HyperParams(; N = 1000, xmin = 0.001, xmax = 10.0, dx = (xmax - xmin) / (N - 1))
-        new{T}(N, dx, xmin, xmax)
+    coef::T
+    power::T
+    function HyperParams(; N = 1000, xmin = 0.001, xmax = 10.0,  coef = 0.0, power = 0.0)
+        new{eltype(xmin)}(N, xmin, xmax, coef, power)
     end
 end
 
-function Hyperparams(coef, pow; N = 1000, xmin = 0.001, xmax = 10.0)
-    x = range(0, 1, length = N)
-    uneven_x = x .+ coef * x.^power
-    uneven_xmax = maximum(uneven_x)
-    uneven_xmin = minimum(uneven_x)
 
-    x_grid = xmin .+ ((xmax - xmin) ./ (uneven_xmax - uneven_xmin)) .* uneven_x
-    dx = [diff(x_grid); 0.0]
 
-    
-end
-
-coef = 5
-power = 10
-xmin = 0.001
-xmax = 50_000
-N = 1000
-x = range(0, 1, length = N)
-uneven_x = x .+ coef * x.^power
-uneven_xmax = maximum(uneven_x)
-uneven_xmin = minimum(uneven_x)
-
-x_grid = xmin .+ ((xmax - xmin) ./ (uneven_xmax - uneven_xmin)) .* uneven_x
-
-plot(x, x, label="x", xlabel="x", ylabel="x")
-plot(x, x_grid)
-
-vline!(x, x_grid, label="x", xlabel="x", ylabel="x")
-diff(x_grid)
-
-plot(x, [0.0; diff(x_grid)])
 
 
 
@@ -119,15 +91,20 @@ Base.size(h::HyperParams) = (h.N,)
 
 
 
-
+function generate_grid(N, xmin, xmax, coef, power)
+    x = range(0, 1, length = N)
+    uneven_x = x .+ coef * x.^power
+    uneven_xmax = maximum(uneven_x)
+    uneven_xmin = minimum(uneven_x)
+    x_grid = xmin .+ ((xmax - xmin) ./ (uneven_xmax - uneven_xmin)) .* uneven_x
+    return x_grid
+end
 
 
 function StateSpace(statespacehyperparams::StateSpaceHyperParams{N, D}, aux_state::NamedTuple) where {N, D}
     names = keys(statespacehyperparams.hyperparams)
     values = map(
-        x -> collect(
-            range(x.xmin, x.xmax, length = x.N)
-        ), statespacehyperparams.hyperparams)
+        x -> generate_grid(x.N, x.xmin, x.xmax, x.coef, x.power), statespacehyperparams.hyperparams)
     state = NamedTuple(zip(names, values))
     T = typeof(first(values))
     StateSpace{T, N, D, typeof(state), typeof(aux_state)}(state, aux_state)
@@ -135,10 +112,10 @@ end
 
 
 # Dispatch for stochastic models
-function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001, Nz = 40) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
+function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001, Nz = 40, coef = 0.0, power = 0.0) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
     kssH = k_steady_state_hi(m)
     kmin, kmax = kmin_f*kssH, kmax_f*kssH
-    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin)
+    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin, coef = coef, power = power)
     # z_hps
     zmean = process_mean(m.stochasticprocess)
     zmin = zmean*0.8
@@ -147,10 +124,9 @@ function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3
     return StateSpaceHyperParams((k = k_hps, z = z_hps))
 end
 
-function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001, Nz = 2) where {T <: Real, S <: PoissonProcess}
-    kssH = k_steady_state_hi(m)
+function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001, Nz = 2, coef = 0.0, power = 0.0) where {T <: Real, S <: PoissonProcess}
     kmin, kmax = kmin_f*kssH, kmax_f*kssH
-    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin)
+    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin, coef = coef, power = power)
     # z_hps
     zmin = minimum(m.stochasticprocess.z)
     zmax = maximum(m.stochasticprocess.z)
@@ -161,8 +137,8 @@ end
 function StateSpace(m::StochasticModel{T, S}, statespacehyperparams::StateSpaceHyperParams) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
     k_hps = statespacehyperparams[:k]
     z_hps = statespacehyperparams[:z]
-    k = collect(range(k_hps.xmin, k_hps.xmax, length = k_hps.N))
-    z = collect(range(z_hps.xmin, z_hps.xmax, length = z_hps.N))
+    k = generate_grid(k_hps.N, k_hps.xmin, k_hps.xmax, k_hps.coef, k_hps.power)
+    z = generate_grid(z_hps.N, z_hps.xmin, z_hps.xmax, z_hps.coef, z_hps.power) 
     # z' creates Nk x Nz matrix
     y = production_function(m, k, z')
     StateSpace((k = k, z = z), (y = y,))
@@ -171,13 +147,31 @@ end
 function StateSpace(m::StochasticModel{T, S}, statespacehyperparams::StateSpaceHyperParams) where {T <: Real, S <: PoissonProcess}
     k_hps = statespacehyperparams[:k]
     z_hps = statespacehyperparams[:z]
-    k = collect(range(k_hps.xmin, k_hps.xmax, length = k_hps.N))
-    z = collect(range(z_hps.xmin, z_hps.xmax, length = z_hps.N))
+    k = generate_grid(k_hps.N, k_hps.xmin, k_hps.xmax, k_hps.coef, k_hps.power)
+    z = generate_grid(z_hps.N, z_hps.xmin, z_hps.xmax, z_hps.coef, z_hps.power) 
     z = vcat(z_hps.xmin, z_hps.xmax)
     # z' creates Nk x Nz matrix
     y = production_function(m, k, z')
     StateSpace((k = k, z = z), (y = y,))
 end
+
+
+function StateSpaceHyperParams(m::DeterministicModel{T}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001, coef = 0.0, power = 0.0) where {T <: Real}
+    kss = last(k_steady_state(m))
+    kmin, kmax = kmin_f*kss, kmax_f*kss
+    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin, coef = coef, power = power)
+    return StateSpaceHyperParams((k = k_hps,))
+end
+
+
+function StateSpace(m::DeterministicModel{T}, statespacehyperparams::StateSpaceHyperParams) where {T <: Real}
+    k_hps = statespacehyperparams[:k]
+    k = generate_grid(k_hps.N, k_hps.xmin, k_hps.xmax, k_hps.coef, k_hps.power)
+    y = production_function(m, k)
+    StateSpace((k = k,), (y = y,))
+end
+
+
 
 
 

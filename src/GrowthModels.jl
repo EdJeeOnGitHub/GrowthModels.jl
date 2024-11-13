@@ -80,7 +80,7 @@ module GrowthModels
 
 
     function show(io::IO, h::HyperParams)
-        print(io, "HyperParams(N = ", h.N, ", dk = ", @sprintf("%.3g", h.dx), ", kmax = ", @sprintf("%.3g", h.xmax), ", kmin = ", @sprintf("%.3g", h.xmin), ")")
+        print(io, "HyperParams(N = ", h.N, ", kmax = ", @sprintf("%.3g", h.xmax), ", kmin = ", @sprintf("%.3g", h.xmin), ")")
     end
 
     function show(io::IO, v::Value)

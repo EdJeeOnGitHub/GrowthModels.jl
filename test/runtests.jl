@@ -48,8 +48,59 @@ using ForwardDiff
     @test r_skiba.production_function_prime(0.1) == skiba_model.A_L * skiba_model.α * 0.1^(skiba_model.α - 1)
 
     @test isa(r_skiba, SolvedModel)
+end
+
+@testset "Non-Uniform Grid" begin
+    skiba_model = SkibaModel()
+    k_hps_non_unif = HyperParams(coef = 5.0, power = 10.0, N = 1000, xmax = 5.0, xmin = 1e-3);
+    k_hps_unif = HyperParams(N = 1000, xmax = 5.0, xmin = 1e-3);
+
+    k_hps_non_unif.power
+
+    skiba_hyperparams_non_unif = StateSpaceHyperParams((k = k_hps_non_unif,));
+    skiba_hyperparams_unif = StateSpaceHyperParams((k = k_hps_unif,));
+
+    skiba_state_unif = StateSpace(skiba_model, skiba_hyperparams_unif)
+    skiba_state_non_unif = StateSpace(skiba_model, skiba_hyperparams_non_unif)
+
+
+
+    skiba_init_value_unif = Value(skiba_state_unif);
+    skiba_init_value_non_unif = Value(skiba_state_non_unif);
+
+
+
+    fit_value_unif, fit_variables_unif, fit_iter_unif = solve_HJB(
+        skiba_model, 
+        skiba_hyperparams_unif, 
+        init_value = skiba_init_value_unif, maxit = 1000);
+    
+    fit_value_non_unif, fit_variables_non_unif, fit_iter_non_unif = solve_HJB(
+        skiba_model, 
+        skiba_hyperparams_non_unif, 
+        init_value = skiba_init_value_non_unif, maxit = 1000);
+
+
+
+    @test fit_value_non_unif.convergence_status == true
+    @test fit_value_non_unif.v !== zeros(skiba_hyperparams_non_unif[:k].N)
+
+    # make sure not changing in place
+    # Graphs
+    plot_diagnostics_output = plot_diagnostics(skiba_model, fit_value_non_unif, fit_variables_non_unif, skiba_hyperparams_non_unif)
+    plot_model_output = plot_model(skiba_model, fit_value_non_unif, fit_variables_non_unif)
+
+    @test isa(plot_model_output, Plots.Plot) 
+    @test isa(plot_diagnostics_output, Plots.Plot) 
+    # Model Output
+    r_skiba = SolvedModel(skiba_model, fit_value_non_unif, fit_variables_non_unif)
+
+    @test r_skiba.production_function_prime(0.1) == skiba_model.A_L * skiba_model.α * 0.1^(skiba_model.α - 1)
+
+    @test isa(r_skiba, SolvedModel)
 
 end
+
 
 
 model_names = ["RamseyCassKoopmansModel", "SkibaModel", "SmoothSkibaModel"]
@@ -113,7 +164,7 @@ model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
 @testset "Stochastic Model Tests for $model_name" for model_name in model_names
     # Dynamically instantiate the model based on its name
     m = eval(Meta.parse(model_name))()
-    hyperparams = StateSpaceHyperParams(m, Nz = 40, Nk = 100)
+    hyperparams = StateSpaceHyperParams(m, Nz = 40, Nk = 100, coef = 5, power = 10, kmax_f = 5.0)
     state = StateSpace(m, hyperparams)
     init_value = Value(state)
 
@@ -150,7 +201,6 @@ end
 
 
 @testset "Poisson Skiba" begin
-
     p = PoissonProcess(z = [-0.4, 0.0], λ = [9/10, 1/10])
     m = StochasticSkibaModel(p) 
     k_hps = HyperParams(N = 1000, xmax = 20, xmin = 1e-3)

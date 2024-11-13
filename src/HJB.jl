@@ -1,18 +1,42 @@
 
+function generate_dx(x::VecOrMat)
+    dxf = ones(size(x))
+    dxb = ones(size(x))
+    dxf[1:end-1] = x[2:end] .- x[1:end-1]
+    dxb[2:end] = x[2:end] .- x[1:end-1]
+    dxf[end] = dxf[end-1]
+    dxb[1] = dxb[2]
+    return dxf, dxb
+end
+
+function generate_dx(x::VecOrMat{T}) where {T <: ForwardDiff.Dual}
+    # dxf = ones(size(x))
+    # dxb = ones(size(x))
+    # x_value = ForwardDiff.value.(x)
+    # dxf .= [x_value[2:end] .- x_value[1:end-1]; x_value[end] - x_value[end-1]]
+    # dxb .= [x_value[2] - x_value[1]; x_value[2:end] .- x_value[1:end-1]]
+    dxf = [diff(x); x[end] - x[end-1]]
+    dxb = [x[2] - x[1]; diff(x)]
+    return dxf, dxb
+end
+
+
 function update_v(m::DeterministicModel, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v}
     γ, ρ, δ = m.γ, m.ρ, m.δ
     (; v, dVf, dVb, dV0, dist) = value
     k, y = state[:k], state.aux_state[:y] # y isn't really a state but avoid computing it each iteration this way
-    (; N, dx, xmax, xmin) = hyperparams[:k]
-    dk, kmax, kmin = dx, xmax, xmin
+    (; N, xmax, xmin) = hyperparams[:k]
+    kmax, kmin =  xmax, xmin
+
+    dkf, dkb = generate_dx(k)
 
 
     V = v
     # forward difference
-    dVf[1:(N-1), 1] = (V[2:N, 1] .- V[1:(N-1), 1])/dk
+    dVf[1:(N-1), 1] = (V[2:N, 1] .- V[1:(N-1), 1]) ./ dkf[1:(N-1)]
     dVf[N, 1] = (y[N] - δ*kmax)^(-γ) # state constraint, for stability
     # backward difference
-    dVb[2:N, 1] = (V[2:N, 1] .- V[1:(N-1), 1])/dk
+    dVb[2:N, 1] = (V[2:N, 1] .- V[1:(N-1), 1]) ./ dkb[2:N]
     dVb[1, 1] = (y[1] - δ*kmin)^(-γ) # state constraint, for stability
 
     # consumption and savings with forward difference
@@ -44,9 +68,9 @@ function update_v(m::DeterministicModel, value::Value{T, N_v}, state::StateSpace
     u = (c.^(1-γ))/(1-γ)
 
     # CONSTRUCT MATRIX
-    X = -Ib .* mub/dk
-    Y = -If .* muf/dk + Ib .* mub/dk
-    Z = If .* muf/dk
+    X = -Ib .* mub ./ dkb
+    Y = -If .* muf ./ dkf + Ib .* mub ./ dkb
+    Z = If .* muf ./ dkf
 
 
     A = spdiagm(
@@ -126,6 +150,7 @@ function update_value_function!(init_value, res)
     end
 end
 
+
 """
 construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess, state::StateSpace, hyperparams::StateSpaceHyperParams)
 
@@ -144,8 +169,15 @@ function construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess,
     z = state[:z]
     k_hps, z_hps = hyperparams[:k], hyperparams[:z]
 
-    Nk, dk, kmax, kmin = k_hps.N, k_hps.dx, k_hps.xmax, k_hps.xmin
-    Nz, dz, zmax, zmin = z_hps.N, z_hps.dx, z_hps.xmax, z_hps.xmin
+    Nk, kmax, kmin = k_hps.N, k_hps.xmax, k_hps.xmin
+    Nz, zmax, zmin = z_hps.N, z_hps.xmax, z_hps.xmin
+
+    dz_emp = diff(z)
+    if (maximum(dz_emp) - minimum(dz_emp)) > 10^(-6)
+        throw("Non-uniform grid spacing for z")
+    end
+    # for now, assume dz constant (no endogenous grid)
+    dz = (zmax - zmin) / (Nz - 1)
 
     dz2 = dz^2
 
@@ -215,8 +247,10 @@ function update_v(m::StochasticModel{T, S}, value::Value{T, N_v}, state::StateSp
 
 
     
-    Nk, dk, kmax, kmin = k_hps.N, k_hps.dx, k_hps.xmax, k_hps.xmin
-    Nz, dz, zmax, zmin = z_hps.N, z_hps.dx, z_hps.xmax, z_hps.xmin
+    Nk, kmax, kmin = k_hps.N, k_hps.xmax, k_hps.xmin
+    Nz, zmax, zmin = z_hps.N, z_hps.xmax, z_hps.xmin
+
+    dkf, dkb = generate_dx(k)
 
 
     kk = repeat(reshape(k, :, 1), 1, Nz);
@@ -227,12 +261,12 @@ function update_v(m::StochasticModel{T, S}, value::Value{T, N_v}, state::StateSp
     V = v
 
     # Forward difference
-    dVf[1:Nk-1, :] .= (V[2:Nk, :] - V[1:Nk-1, :]) ./ dk
+    dVf[1:Nk-1, :] .= (V[2:Nk, :] - V[1:Nk-1, :]) ./ dkf[1:Nk-1]
     # dVf[Nk, :] .= (y[Nk, :] .- δ .* k[Nk, :]) .^ (-γ) # State constraint at kmax
     dVf[Nk, :] .= 0
 
     # Backward difference
-    dVb[2:Nk, :] .= (V[2:Nk, :] - V[1:Nk-1, :]) ./ dk
+    dVb[2:Nk, :] .= (V[2:Nk, :] - V[1:Nk-1, :]) ./ dkb[2:Nk]
     dVb[1, :] .= (y[1, :] .- δ .* k[1, :]).^(-γ) # State constraint at kmin
 
     # Indicator whether value function is concave
@@ -259,9 +293,9 @@ function update_v(m::StochasticModel{T, S}, value::Value{T, N_v}, state::StateSp
     u = c.^(1 - γ) / (1 - γ)
 
     # Construct matrix A
-    X = -min.(sb, 0) ./ dk
-    Y = -max.(sf, 0) ./ dk + min.(sb, 0) ./ dk
-    Z = max.(sf, 0) ./ dk
+    X = -min.(sb, 0) ./ dkb
+    Y = -max.(sf, 0) ./ dkf + min.(sb, 0) ./ dkb
+    Z = max.(sf, 0) ./ dkf
 
 
 
