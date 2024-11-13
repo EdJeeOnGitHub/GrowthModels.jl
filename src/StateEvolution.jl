@@ -29,6 +29,13 @@ function iterate_g(g, A_t; time_step = 1)
     return evolution \ g
 end
 
+function iterate_g_w_inv(g, AT_inv)
+    return AT_inv * g
+end
+function iterate_g_w_inv!(g, AT_inv)
+    g .= AT_inv * g
+end
+
 function StateEvolution(S::Array{T}, times::Vector{T}, g::Vector{T}, A::SparseMatrixCSC) where T <: Real
     return StateEvolution{T}(S, times, g, A)
 end
@@ -37,9 +44,12 @@ end
 # 1 unit each time
 function StateEvolution(g::Vector{R}, A_t::SparseMatrixCSC, T::Int, v_dim) where {R <: Real}
     S = zeros((size(g, 1), T))
+    I_A = sparse(I, size(A_t))
+    timestep = 1
+    AT_inv = inv(I_A - timestep * A_t)
     S[:, 1] .= g
     for t in 2:T
-        S[:, t] .= iterate_g(S[:, t-1], A_t)
+        S[:, t] .= iterate_g_w_inv(S[:, t-1], AT_inv)
     end
     # if no shock dimension, return S
     if v_dim[1] == size(g, 1)
