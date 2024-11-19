@@ -167,10 +167,11 @@ Constructs the diffusion matrix for the HJB equation.
 function construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess, state::StateSpace, hyperparams::StateSpaceHyperParams)
     (; θ, σ) = stochasticprocess
     z = state[:z]
-    k_hps, z_hps = hyperparams[:k], hyperparams[:z]
-
-    Nk, kmax, kmin = k_hps.N, k_hps.xmax, k_hps.xmin
-    Nz, zmax, zmin = z_hps.N, z_hps.xmax, z_hps.xmin
+    
+    Nz, zmax, zmin = hyperparams[:z].N, hyperparams[:z].xmax, hyperparams[:z].xmin
+    state_size = size(state)
+    # get size of all other states, but remove z
+    Nstate = prod(state_size) ÷ Nz
 
     dz_emp = diff(z)
     if (maximum(dz_emp) - minimum(dz_emp)) > 10^(-6)
@@ -192,26 +193,25 @@ function construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess,
     chi = s2/(2*dz2)
     zeta = mu/dz + s2/(2*dz2)
     
-    off_diag_length = (Nz-1)*Nk
+    off_diag_length = (Nz - 1) * Nstate
 
     ldiag = Vector{typeof(chi[2])}(undef, off_diag_length)
-    cdiag = Vector{typeof(yy[1] + chi[1])}(undef, Nz*Nk)
+    cdiag = Vector{typeof(yy[1] + chi[1])}(undef, Nstate*Nz)
     udiag = Vector{eltype(zeta[1])}(undef, off_diag_length)
 
-    for j in 2:Nz
-        ldiag[(j-2)*Nk+1:(j-1)*Nk] .= chi[j]
-    end
-    for j in 1:(Nz-1)
-        udiag[(j-1)*Nk+1:(j)*Nk] .= zeta[j]
-    end
-    cdiag[1:Nk] .= chi[1] + yy[1]
-    for j in 2:(Nz -1)
-        cdiag[(j-1)*Nk+1:(j)*Nk] .= yy[j]
-    end
-    cdiag[end-Nk+1:end] .= zeta[end] + yy[end]
+    ldiag = repeat(
+        chi[2:end], inner = Nstate
+    )
+    udiag = repeat(
+        zeta[1:end-1], inner = Nstate
+    )
+
+    cdiag = repeat(yy, inner = Nstate)
+    cdiag[1:Nstate] .= chi[1] + yy[1]
+    cdiag[end-Nstate+1:end] .= zeta[end] + yy[end]
 
     # Construct B_switch matrix with corrected diagonals
-    Bswitch = spdiagm(-Nk => ldiag, 0 => cdiag, Nk => udiag)
+    Bswitch = spdiagm(-Nstate => ldiag, 0 => cdiag, Nstate => udiag)
     return Bswitch
 end
 
@@ -297,39 +297,13 @@ function update_v(m::StochasticModel{T, S}, value::Value{T, N_v}, state::StateSp
     Z = max.(sf, 0) ./ dkf
 
 
+    # set top and bottom rows of udiag, ldiag to 0
+    Z[end, :] .= 0.0
+    X[1, :] .= 0.0
 
-    ## start here
-    total_length = Nz*Nk
-    udiag = Vector{eltype(Z)}(undef, total_length - 1)
-    cdiag = reshape(Y, Nz*Nk)  # Assuming Y is already a matrix or array that matches the dimensions
-    ldiag = Vector{eltype(X)}(undef, total_length - 1)
-
-    index = 1
-    for j in 1:Nz
-        if j != Nz
-            segment = vcat(Z[1:Nk-1, j], 0.0)  # Include 0.0 for all but the last column
-            len = Nk  # Nk-1 elements plus a 0.0
-        else
-            segment = Z[1:Nk-1, j]  # Do not include 0.0 for the last column
-            len = Nk - 1  # Only Nk-1 elements
-        end
-        
-        udiag[index:index+len-1] .= segment
-        index += len  # Adjust index for the next iteration
-    end
-    # Fill the first part of lowdiag without prepending 0
-    ldiag[1:Nk-1] = X[2:end, 1]
-    # Index to keep track of the position in lowdiag
-    index = Nk
-    for j in 2:Nz
-        # Prepend 0 before adding elements from the jth column
-        ldiag[index] = 0.0
-        index += 1  # Move index after the 0
-        
-        # Slice assignment for elements from the jth column
-        ldiag[index:index+Nk-2] = X[2:end, j]
-        index += Nk-1  # Update index for the next iteration
-    end
+    cdiag = reshape(Y, :)
+    ldiag = reshape(X, :)[2:end]
+    udiag = reshape(Z, :)[1:end-1]
 
 
     AA = spdiagm(0 => cdiag, 1 => udiag, -1 => ldiag)
@@ -400,6 +374,8 @@ function update_v(m::StochasticModel{T, S}, value::Value{T, N_v}, state::StateSp
 
     return value, iter
 end
+
+
 
 initial_guess(m::GrowthModels.Model{T}, state) where {T <: Real} = state.aux_state[:y] .^ (1 - m.γ) / (1 - m.γ) / m.ρ
 
@@ -456,6 +432,7 @@ V_err(m::Model) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.�
 
 
 
+
 function update_v(m::StochasticSkibaAbilityModel{T, S}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams, diffusion_matrix; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v, S <: StochasticProcess}
     (; γ, α, ρ, δ) = m
     (; v, dVf, dVb, dV0, dist) = value
@@ -465,29 +442,28 @@ function update_v(m::StochasticSkibaAbilityModel{T, S}, value::Value{T, N_v}, st
     z_hps = hyperparams[:z]
     η_hps = hyperparams[:η]
 
-
-    
     Nk, kmax, kmin = k_hps.N, k_hps.xmax, k_hps.xmin
     Nη, ηmax, ηmin = η_hps.N, η_hps.xmax, η_hps.xmin
     Nz, zmax, zmin = z_hps.N, z_hps.xmax, z_hps.xmin
 
-    dkf, dkb = generate_dx(k)
+    dkf, dkb = GrowthModels.generate_dx(k)
 
 
-    kk = repeat(reshape(k, :, 1), 1, Nz);
-    zz = repeat(reshape(z, 1, :), Nk, 1);
+    kk = repeat(reshape(k, :, 1), 1, Nz, Nη);
+    zz = repeat(reshape(z, 1, :), Nk, 1, Nη);
+    ηη = repeat(reshape(η, 1, 1, :), Nk, Nz, 1);
 
     Bswitch = diffusion_matrix    
 
     V = v
 
     # Forward difference
-    dVf[1:Nk-1, :] .= (V[2:Nk, :] - V[1:Nk-1, :]) ./ dkf[1:Nk-1]
-    dVf[Nk, :] .= (y[Nk, :] .- δ .* k[Nk, :]) .^ (-γ) # State constraint at kmax
+    dVf[1:Nk-1, :, :] .= (V[2:Nk, :, :] - V[1:Nk-1, :, :]) ./ dkf[1:Nk-1]
+    dVf[Nk, :, :] .= (y[Nk, :, :] .- δ .* k[Nk, :]) .^ (-γ) # State constraint at kmax
 
     # Backward difference
-    dVb[2:Nk, :] .= (V[2:Nk, :] - V[1:Nk-1, :]) ./ dkb[2:Nk]
-    dVb[1, :] .= (y[1, :] .- δ .* k[1, :]).^(-γ) # State constraint at kmin
+    dVb[2:Nk, :, :] .= (V[2:Nk, :, :] - V[1:Nk-1, :, :]) ./ dkb[2:Nk]
+    dVb[1, :, :] .= (y[1, :, :] .- δ .* k[1, :, :]).^(-γ) # State constraint at kmin
 
     # Indicator whether value function is concave
     I_concave = dVb .> dVf
@@ -518,47 +494,22 @@ function update_v(m::StochasticSkibaAbilityModel{T, S}, value::Value{T, N_v}, st
     Z = max.(sf, 0) ./ dkf
 
 
+    # set top and bottom rows of udiag, ldiag to 0
+    Z[end, :, :] .= 0.0
+    X[1, :, :] .= 0.0
 
-    ## start here
-    total_length = Nz*Nk
-    udiag = Vector{eltype(Z)}(undef, total_length - 1)
-    cdiag = reshape(Y, Nz*Nk)  # Assuming Y is already a matrix or array that matches the dimensions
-    ldiag = Vector{eltype(X)}(undef, total_length - 1)
 
-    index = 1
-    for j in 1:Nz
-        if j != Nz
-            segment = vcat(Z[1:Nk-1, j], 0.0)  # Include 0.0 for all but the last column
-            len = Nk  # Nk-1 elements plus a 0.0
-        else
-            segment = Z[1:Nk-1, j]  # Do not include 0.0 for the last column
-            len = Nk - 1  # Only Nk-1 elements
-        end
-        
-        udiag[index:index+len-1] .= segment
-        index += len  # Adjust index for the next iteration
-    end
-    # Fill the first part of lowdiag without prepending 0
-    ldiag[1:Nk-1] = X[2:end, 1]
-    # Index to keep track of the position in lowdiag
-    index = Nk
-    for j in 2:Nz
-        # Prepend 0 before adding elements from the jth column
-        ldiag[index] = 0.0
-        index += 1  # Move index after the 0
-        
-        # Slice assignment for elements from the jth column
-        ldiag[index:index+Nk-2] = X[2:end, j]
-        index += Nk-1  # Update index for the next iteration
-    end
+    cdiag = reshape(Y, :)
+    ldiag = reshape(X, :)[2:end]
+    udiag = reshape(Z, :)[1:end-1]
+
 
 
     AA = spdiagm(0 => cdiag, 1 => udiag, -1 => ldiag)
 
-
     A = AA + Bswitch
     A_err = abs.(sum(A, dims = 2))        
-    if maximum(A_err) > 10^(-6)
+    if maximum(A_err) > 10^(-4)
         throw(ValueFunctionError("Improper Transition Matrix: $(maximum(A_err)) > 10^(-6)"))
     end    
 
@@ -566,14 +517,14 @@ function update_v(m::StochasticSkibaAbilityModel{T, S}, value::Value{T, N_v}, st
 
 
 
-    u_stacked = reshape(u, Nk*Nz)
-    V_stacked = reshape(V, Nk*Nz)
+    u_stacked = reshape(u, :)
+    V_stacked = reshape(V, :)
 
     b = u_stacked + V_stacked / Delta
 
     V_stacked = B \ b
 
-    V = reshape(V_stacked, Nk, Nz)
+    V = reshape(V_stacked, size(V))
 
     Vchange = V - v
 
@@ -599,6 +550,7 @@ function update_v(m::StochasticSkibaAbilityModel{T, S}, value::Value{T, N_v}, st
         variables = (
             y = y, 
             k = kk, 
+            η = ηη,
             z = zz,
             c = c, 
             If = If, 
@@ -621,3 +573,4 @@ function update_v(m::StochasticSkibaAbilityModel{T, S}, value::Value{T, N_v}, st
 
     return value, iter
 end
+

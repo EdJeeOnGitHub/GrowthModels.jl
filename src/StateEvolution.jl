@@ -97,10 +97,10 @@ function StateEvolution(g::Vector{R}, A_t::SparseMatrixCSC, T::Int, v_dim, grid_
         E_stationary = E_S[:, end]
     else 
         # otherwise, average
-        E_S = sum(reshape(S, (v_dim..., T)), dims = 2)[:, 1, :]
+        E_S = sum(reshape(S, (v_dim..., T)), dims = 2) |> x -> dropdims(x, dims = 2)
         # use infinite time step to get stationary distribution
         stationary_distribution = StationaryDistribution(A_t, grid_diag)
-        E_stationary = sum(reshape(stationary_distribution, v_dim), dims = 2)[:, 1, :]
+        E_stationary = sum(reshape(stationary_distribution, v_dim), dims = 2) |> x -> dropdims(x, dims = 2)
     end
     return StateEvolution(S, collect(0:(T-1)), g, A_t, E_S, E_stationary)
 end
@@ -121,23 +121,26 @@ function StateEvolution(g::Vector{T}, A_t::SparseMatrixCSC, times::Vector, v_dim
         # also don't use infinite time step - just pass last time step
         E_stationary = E_S[:, end]
     else
-        # otherwise average
-        E_S = sum(reshape(S, (v_dim..., length(times))), dims = 2)[:, 1, :]
+        # otherwise, average
+        E_S = sum(reshape(S, (v_dim..., T)), dims = 2) |> x -> dropdims(x, dims = 2)
+        # use infinite time step to get stationary distribution
         stationary_distribution = StationaryDistribution(A_t, grid_diag)
-        E_stationary = sum(reshape(stationary_distribution, v_dim), dims = 2)[:, 1, :]
+        E_stationary = sum(reshape(stationary_distribution, v_dim), dims = 2) |> x -> dropdims(x, dims = 2)
     end
     return StateEvolution(S, times, g, A_t, E_S, E_stationary)
 end
 
+
 function StateEvolution(g, sm::SolvedModel{S}, T::Int) where {S <: Model}
-    if S <: StochasticModel 
-        dz = size(sm.variables.z, 2)
-        k = sm.variables.k[:, 1]
+    # get all ks along k - using first dim of other states
+    slice_tuple = CartesianIndices((1:size(sm.variables.k, 1), fill(1, ndims(sm.variables.k) - 1)...))
+    if S <: StochasticModel
+        Nstate = prod(size(sm.variables.z)[2:end])
     else
-        dz = 1
-        k = sm.variables.k
+        Nstate = 1
     end
-    grid_diag = create_grid_diag(k, dz)
+    k = sm.variables.k[slice_tuple][:]
+    grid_diag = create_grid_diag(k, Nstate)
     A_t = sparse(sm.value.A')
     return StateEvolution(g, A_t, T, size(sm.value.v), grid_diag)
 end

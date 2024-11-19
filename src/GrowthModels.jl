@@ -43,7 +43,8 @@ module GrowthModels
            RamseyCassKoopmansModel,
            StochasticSkibaModel,
            StochasticRamseyCassKoopmansModel,
-           StochasticTwoAssetKinkedModel
+           StochasticTwoAssetKinkedModel,
+           StochasticSkibaAbilityModel
        
     export StateEvolution, iterate_g, create_group_ids
     # stochastic stuff
