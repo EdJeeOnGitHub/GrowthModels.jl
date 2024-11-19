@@ -61,3 +61,16 @@ struct StochasticSkibaModel{T <: Real, S <: StochasticProcess} <: StochasticMode
     κ::T
     stochasticprocess::S
 end
+
+
+struct StochasticSkibaAbilityModel{T <: Real, S <: StochasticProcess} <: StochasticModel{T, S}
+    γ::T
+    α::T
+    ρ::T
+    δ::T
+    A_H::T
+    A_L::T
+    κ::T
+    η_mean::T
+    stochasticprocess::S
+end

@@ -176,7 +176,7 @@ function construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess,
     if (maximum(dz_emp) - minimum(dz_emp)) > 10^(-6)
         throw("Non-uniform grid spacing for z")
     end
-    # for now, assume dz constant (no endogenous grid)
+    # for now, assume dz constant (no non-uniform grid for z)
     dz = (zmax - zmin) / (Nz - 1)
 
     dz2 = dz^2
@@ -452,3 +452,172 @@ end
 dV_Upwind(::Model, value::Value, variables::NamedTuple) = value.dVf .* variables.If .+ value.dVb .* variables.Ib .+ value.dV0 .* variables.I0
 V_err(m::Model) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.γ) / (1-m.γ) .+ dV_Upwind(m, value, variables) .* statespace_k_dot(m)(variables) .- m.ρ .* value.v
 
+
+
+
+
+function update_v(m::StochasticSkibaAbilityModel{T, S}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams, diffusion_matrix; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v, S <: StochasticProcess}
+    (; γ, α, ρ, δ) = m
+    (; v, dVf, dVb, dV0, dist) = value
+    k, z, η = state[:k], state[:z]', state[:η]' # y isn't really a state but avoid computing it each iteration this way
+    y = state.aux_state[:y]
+    k_hps = hyperparams[:k]
+    z_hps = hyperparams[:z]
+    η_hps = hyperparams[:η]
+
+
+    
+    Nk, kmax, kmin = k_hps.N, k_hps.xmax, k_hps.xmin
+    Nη, ηmax, ηmin = η_hps.N, η_hps.xmax, η_hps.xmin
+    Nz, zmax, zmin = z_hps.N, z_hps.xmax, z_hps.xmin
+
+    dkf, dkb = generate_dx(k)
+
+
+    kk = repeat(reshape(k, :, 1), 1, Nz);
+    zz = repeat(reshape(z, 1, :), Nk, 1);
+
+    Bswitch = diffusion_matrix    
+
+    V = v
+
+    # Forward difference
+    dVf[1:Nk-1, :] .= (V[2:Nk, :] - V[1:Nk-1, :]) ./ dkf[1:Nk-1]
+    dVf[Nk, :] .= (y[Nk, :] .- δ .* k[Nk, :]) .^ (-γ) # State constraint at kmax
+
+    # Backward difference
+    dVb[2:Nk, :] .= (V[2:Nk, :] - V[1:Nk-1, :]) ./ dkb[2:Nk]
+    dVb[1, :] .= (y[1, :] .- δ .* k[1, :]).^(-γ) # State constraint at kmin
+
+    # Indicator whether value function is concave
+    I_concave = dVb .> dVf
+
+    # Consumption and savings with forward difference
+    cf = max.(dVf, eps()).^(-1 / γ)
+    sf = y - δ .* kk - cf
+    # Consumption and savings with backward difference
+    cb = max.(dVb, eps()).^(-1 / γ)
+    sb = y - δ .* kk - cb
+    # Consumption and derivative of value function at steady state
+    c0 = y - δ .* kk
+    dV0 .= max.(c0, eps()).^(-γ)
+
+    # Decision on forward or backward differences based on the sign of the drift
+    If = sf .> 0 # positive drift -> forward difference
+    Ib = sb .< 0 # negative drift -> backward difference
+    I0 = 1 .- If .- Ib # at steady state
+
+    V_Upwind = dVf .* If + dVb .* Ib + dV0 .* I0
+
+    c = max.(V_Upwind, eps()).^(-1 / γ)
+    u = c.^(1 - γ) / (1 - γ)
+
+    # Construct matrix A
+    X = -min.(sb, 0) ./ dkb
+    Y = -max.(sf, 0) ./ dkf + min.(sb, 0) ./ dkb
+    Z = max.(sf, 0) ./ dkf
+
+
+
+    ## start here
+    total_length = Nz*Nk
+    udiag = Vector{eltype(Z)}(undef, total_length - 1)
+    cdiag = reshape(Y, Nz*Nk)  # Assuming Y is already a matrix or array that matches the dimensions
+    ldiag = Vector{eltype(X)}(undef, total_length - 1)
+
+    index = 1
+    for j in 1:Nz
+        if j != Nz
+            segment = vcat(Z[1:Nk-1, j], 0.0)  # Include 0.0 for all but the last column
+            len = Nk  # Nk-1 elements plus a 0.0
+        else
+            segment = Z[1:Nk-1, j]  # Do not include 0.0 for the last column
+            len = Nk - 1  # Only Nk-1 elements
+        end
+        
+        udiag[index:index+len-1] .= segment
+        index += len  # Adjust index for the next iteration
+    end
+    # Fill the first part of lowdiag without prepending 0
+    ldiag[1:Nk-1] = X[2:end, 1]
+    # Index to keep track of the position in lowdiag
+    index = Nk
+    for j in 2:Nz
+        # Prepend 0 before adding elements from the jth column
+        ldiag[index] = 0.0
+        index += 1  # Move index after the 0
+        
+        # Slice assignment for elements from the jth column
+        ldiag[index:index+Nk-2] = X[2:end, j]
+        index += Nk-1  # Update index for the next iteration
+    end
+
+
+    AA = spdiagm(0 => cdiag, 1 => udiag, -1 => ldiag)
+
+
+    A = AA + Bswitch
+    A_err = abs.(sum(A, dims = 2))        
+    if maximum(A_err) > 10^(-6)
+        throw(ValueFunctionError("Improper Transition Matrix: $(maximum(A_err)) > 10^(-6)"))
+    end    
+
+    B = (1 / Delta + ρ) * sparse(I, size(A)) .- A
+
+
+
+    u_stacked = reshape(u, Nk*Nz)
+    V_stacked = reshape(V, Nk*Nz)
+
+    b = u_stacked + V_stacked / Delta
+
+    V_stacked = B \ b
+
+    V = reshape(V_stacked, Nk, Nz)
+
+    Vchange = V - v
+
+    # If using forward diff, want this just to be value part
+    distance = ForwardDiff.value(maximum(abs.(Vchange)))
+    push!(dist, distance)
+
+    if distance < crit
+        if verbose
+            println("Value Function Converged, Iteration = ", iter)
+        end
+        push!(dist, distance)
+        value = Value{T, N_v}(
+            v = V, 
+            dVf = dVf, 
+            dVb = dVb, 
+            dV0 = dV0, 
+            A = A,
+            dist = dist,
+            convergence_status = true,
+            iter = iter
+            )
+        variables = (
+            y = y, 
+            k = kk, 
+            z = zz,
+            c = c, 
+            If = If, 
+            Ib = Ib, 
+            I0 = I0
+            )
+        return value, iter, variables
+    end
+
+    value = Value{T,N_v}(
+        v = V, 
+        dVf = dVf, 
+        dVb = dVb, 
+        dV0 = dV0, 
+        A = A,
+        dist = dist,
+        convergence_status = false,
+        iter = iter
+        )
+
+    return value, iter
+end

@@ -107,7 +107,7 @@ function StateSpace(statespacehyperparams::StateSpaceHyperParams{N, D}, aux_stat
 end
 
 
-# Dispatch for stochastic models
+# Stochastic Model + OU Process
 function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001, Nz = 40, coef = 0.0, power = 0.0) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
     kssH = k_steady_state_hi(m)
     kmin, kmax = kmin_f*kssH, kmax_f*kssH
@@ -120,6 +120,26 @@ function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3
     return StateSpaceHyperParams((k = k_hps, z = z_hps))
 end
 
+# Stochastic Skiba Model + OU Process + Ability
+function StateSpaceHyperParams(m::StochasticSkibaAbilityModel{T, S}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001, Nz = 40, Nη = 5, coef = 0.0, power = 0.0) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
+    kssH = k_steady_state_hi(m)
+    # k_hps
+    kmin, kmax = kmin_f*kssH, kmax_f*kssH
+    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin, coef = coef, power = power)
+    # z_hps
+    zmean = process_mean(m.stochasticprocess)
+    zmin = zmean*0.8
+    zmax = zmean*1.2
+    z_hps = HyperParams(N = Nz, xmax = zmax, xmin = zmin)
+    # η_hps
+    ηmean = m.η_mean
+    ηmin = ηmean*0.8
+    ηmax = ηmean*1.2
+    η_hps = HyperParams(N = Nη, xmax = ηmax, xmin = ηmin)
+    return StateSpaceHyperParams((k = k_hps, z = z_hps, η = η_hps))
+end
+
+# Stochastic Model + Poisson Process
 function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001, Nz = 2, coef = 0.0, power = 0.0) where {T <: Real, S <: PoissonProcess}
     kmin, kmax = kmin_f*kssH, kmax_f*kssH
     k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin, coef = coef, power = power)
@@ -129,6 +149,8 @@ function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3
     z_hps = HyperParams(N = Nz, xmax = zmax, xmin = zmin)
     return StateSpaceHyperParams((k = k_hps, z = z_hps))
 end
+
+
 
 function StateSpace(m::StochasticModel{T, S}, statespacehyperparams::StateSpaceHyperParams) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
     k_hps = statespacehyperparams[:k]
@@ -144,11 +166,22 @@ function StateSpace(m::StochasticModel{T, S}, statespacehyperparams::StateSpaceH
     k_hps = statespacehyperparams[:k]
     z_hps = statespacehyperparams[:z]
     k = generate_grid(k_hps.N, k_hps.xmin, k_hps.xmax, k_hps.coef, k_hps.power)
-    z = generate_grid(z_hps.N, z_hps.xmin, z_hps.xmax, z_hps.coef, z_hps.power) 
     z = vcat(z_hps.xmin, z_hps.xmax)
     # z' creates Nk x Nz matrix
     y = production_function(m, k, z')
     StateSpace((k = k, z = z), (y = y,))
+end
+
+function StateSpace(m::StochasticSkibaAbilityModel{T, S}, statespacehyperparams::StateSpaceHyperParams) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
+    k_hps = statespacehyperparams[:k]
+    z_hps = statespacehyperparams[:z]
+    η_hps = statespacehyperparams[:η]
+    k = generate_grid(k_hps.N, k_hps.xmin, k_hps.xmax, k_hps.coef, k_hps.power)
+    z = generate_grid(z_hps.N, z_hps.xmin, z_hps.xmax, z_hps.coef, z_hps.power)
+    η = generate_grid(η_hps.N, η_hps.xmin, η_hps.xmax, η_hps.coef, η_hps.power)
+    η_reshape = reshape(η, 1, 1, size(η, 1))
+    y = production_function(m, k, z', η_reshape)
+    StateSpace((k = k, z = z, η = η), (y = y,))
 end
 
 

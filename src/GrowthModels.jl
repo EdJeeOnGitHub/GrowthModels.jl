@@ -82,6 +82,7 @@ module GrowthModels
     include("StochasticRamseyCassKoopmans.jl")
     include("StochasticSkiba.jl")
     include("StochasticTwoAssetKinked.jl")
+    include("StochasticSkibaAbility.jl")
     include("SolvedModel.jl")
     include("StateEvolution.jl")
 
