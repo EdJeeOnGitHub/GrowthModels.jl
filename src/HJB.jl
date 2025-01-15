@@ -10,11 +10,6 @@ function generate_dx(x::VecOrMat)
 end
 
 function generate_dx(x::VecOrMat{T}) where {T <: ForwardDiff.Dual}
-    # dxf = ones(size(x))
-    # dxb = ones(size(x))
-    # x_value = ForwardDiff.value.(x)
-    # dxf .= [x_value[2:end] .- x_value[1:end-1]; x_value[end] - x_value[end-1]]
-    # dxb .= [x_value[2] - x_value[1]; x_value[2:end] .- x_value[1:end-1]]
     dxf = [diff(x); x[end] - x[end-1]]
     dxb = [x[2] - x[1]; diff(x)]
     return dxf, dxb
@@ -167,11 +162,12 @@ Constructs the diffusion matrix for the HJB equation.
 function construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess, state::StateSpace, hyperparams::StateSpaceHyperParams)
     (; θ, σ) = stochasticprocess
     z = state[:z]
-    
-    Nz, zmax, zmin = hyperparams[:z].N, hyperparams[:z].xmax, hyperparams[:z].xmin
+    k_hps, z_hps = hyperparams[:k], hyperparams[:z]
+
     state_size = size(state)
     # get size of all other states, but remove z
-    Nstate = prod(state_size) ÷ Nz
+    Nk, kmax, kmin = k_hps.N, k_hps.xmax, k_hps.xmin
+    Nz, zmax, zmin = z_hps.N, z_hps.xmax, z_hps.xmin
 
     dz_emp = diff(z)
     if (maximum(dz_emp) - minimum(dz_emp)) > 10^(-6)
@@ -193,27 +189,43 @@ function construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess,
     chi = s2/(2*dz2)
     zeta = mu/dz + s2/(2*dz2)
     
-    off_diag_length = (Nz - 1) * Nstate
+    off_diag_length = (Nz-1)*Nk
 
     ldiag = Vector{typeof(chi[2])}(undef, off_diag_length)
-    cdiag = Vector{typeof(yy[1] + chi[1])}(undef, Nstate*Nz)
+    cdiag = Vector{typeof(yy[1] + chi[1])}(undef, Nz*Nk)
     udiag = Vector{eltype(zeta[1])}(undef, off_diag_length)
 
-    ldiag = repeat(
-        chi[2:end], inner = Nstate
-    )
-    udiag = repeat(
-        zeta[1:end-1], inner = Nstate
-    )
+    for j in 2:Nz
+        ldiag[(j-2)*Nk+1:(j-1)*Nk] .= chi[j]
+    end
+    for j in 1:(Nz-1)
+        udiag[(j-1)*Nk+1:(j)*Nk] .= zeta[j]
+    end
+    cdiag[1:Nk] .= chi[1] + yy[1]
+    for j in 2:(Nz -1)
+        cdiag[(j-1)*Nk+1:(j)*Nk] .= yy[j]
+    end
+    cdiag[end-Nk+1:end] .= zeta[end] + yy[end]
 
-    cdiag = repeat(yy, inner = Nstate)
-    cdiag[1:Nstate] .= chi[1] + yy[1]
-    cdiag[end-Nstate+1:end] .= zeta[end] + yy[end]
+    # if only two dimensions (i.e. k and z), then Bswitch is a tridiagonal matrix
+    if length(state_size) == 2
+        Bswitch = spdiagm(-Nk => ldiag, 0 => cdiag, Nk => udiag)
+        return Bswitch
+    else
+        # if more than two dimensions, then Bswitch is a block tridiagonal matrix
+        # where there are gaps between the blocks of size Nk
+        N_other_states = prod(state_size[3:end])
+        new_cdiag = repeat(cdiag, outer = N_other_states)
+        new_ldiag = repeat([ldiag; fill(0, Nk)], outer = N_other_states)[1:end-Nk]
+        new_udiag = repeat([fill(0, Nk); udiag], outer = N_other_states)[Nk+1:end]
 
-    # Construct B_switch matrix with corrected diagonals
-    Bswitch = spdiagm(-Nstate => ldiag, 0 => cdiag, Nstate => udiag)
-    return Bswitch
+        Bswitch = spdiagm(-Nk => new_ldiag, 0 => new_cdiag, Nk => new_udiag)
+        return Bswitch
+    end
 end
+
+
+
 
 """
     construct_diffusion_matrix(stochasticprocess::PoissonProcess, state::StateSpace, hyperparams::StateSpaceHyperParams)
@@ -249,6 +261,11 @@ function update_v(m::StochasticModel{T, S}, value::Value{T, N_v}, state::StateSp
     
     Nk, kmax, kmin = k_hps.N, k_hps.xmax, k_hps.xmin
     Nz, zmax, zmin = z_hps.N, z_hps.xmax, z_hps.xmin
+
+
+    state_size = size(state)
+    # get size of all other states, but remove z
+    Nstate = prod(state_size) ÷ Nz
 
     dkf, dkb = generate_dx(k)
 
@@ -372,7 +389,7 @@ function update_v(m::StochasticModel{T, S}, value::Value{T, N_v}, state::StateSp
         iter = iter
         )
 
-    return value, iter
+    return value, iter, AA
 end
 
 
@@ -571,6 +588,6 @@ function update_v(m::StochasticSkibaAbilityModel{T, S}, value::Value{T, N_v}, st
         iter = iter
         )
 
-    return value, iter
+    return value, iter, AA
 end
 

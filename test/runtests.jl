@@ -203,8 +203,6 @@ model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
 end
 
 
-
-
 @testset "Poisson Skiba" begin
     p = PoissonProcess(z = [-0.4, 0.0], λ = [9/10, 1/10])
     m = StochasticSkibaModel(p) 
@@ -228,25 +226,35 @@ end
 end
 
 @testset "Stochastic Ability Skiba" begin
-    m = GrowthModels.StochasticSkibaAbilityModel()
-    k_hps = HyperParams(coef = 5.0, power = 10.0, N = 1000, xmax = 20.0, xmin = 1e-3);
-    z_hps = HyperParams(coef = 0.0, power = 0.0, N = 40, xmax = 1.5, xmin = 0.5);
-    η_hps = HyperParams(coef = 0.0, power = 0.0, N = 5, xmax = 1.5, xmin = 0.5);
-    hyperparams = StateSpaceHyperParams((k = k_hps, z = z_hps, η = η_hps))
-    state = StateSpace(m, hyperparams)
-    value = Value(state);
-    value.v[:] = GrowthModels.initial_guess(m, state)
+    Nk = 1000
+    Nz = 40
+    Nη = 5
 
+    m_a = GrowthModels.StochasticSkibaAbilityModel()
+    k_hps = HyperParams(coef = 5.0, power = 10.0, N = Nk, xmax = 20.0, xmin = 1e-3);
+    z_hps = HyperParams(coef = 0.0, power = 0.0, N = Nz, xmax = 1.5, xmin = 0.5);
+    η_hps = HyperParams(coef = 0.0, power = 0.0, N = Nη, xmax = 1.5, xmin = 0.5);
+    hyperparams_a = StateSpaceHyperParams((k = k_hps, z = z_hps, η = η_hps))
+    state_a = StateSpace(m_a, hyperparams_a)
+    value_a = Value(state_a);
+    value_a.v[:] = GrowthModels.initial_guess(m_a, state_a)
     fit_value, fit_variables, fit_iter = solve_HJB(
-        m, 
-        hyperparams, 
-        init_value = value, maxit = 1000);
+        m_a, 
+        hyperparams_a, 
+        init_value = value_a, maxit = 1000);
 
-    plot_model_output = plot_model(m, fit_value, fit_variables)
+    Bswitch_a = GrowthModels.construct_diffusion_matrix(m_a.stochasticprocess, state_a, hyperparams_a)
+    @test all(isapprox.(sum(Bswitch_a, dims = 2), zeros(size(Bswitch_a, 1)); atol = 1e-10)  .== 1)
 
-    r = SolvedModel(m, fit_value, fit_variables)
 
-    sm = SolvedModel(m, fit_value, fit_variables)
+    plot_model_output = plot_model(m_a, fit_value, fit_variables)
+
+
+
+
+    r = SolvedModel(m_a, fit_value, fit_variables)
+
+    sm = SolvedModel(m_a, fit_value, fit_variables)
     A_t = sparse(sm.value.A')
     g = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
     g = g ./ sum(g)
