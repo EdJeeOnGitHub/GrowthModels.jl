@@ -139,6 +139,24 @@ function StateSpaceHyperParams(m::StochasticSkibaAbilityModel{T, S}; Nk = 1000, 
     return StateSpaceHyperParams((k = k_hps, z = z_hps, η = η_hps))
 end
 
+
+# Stochastic Skiba Model + OU Process + Ability
+function StateSpaceHyperParams(m::StochasticNPAbilityModel{T, S}; Nk = 1000, kmax = 10.0, kmin = 0.001, Nz = 40, Nη = 5, coef = 0.0, power = 0.0) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
+    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin, coef = coef, power = power)
+    # z_hps
+    zmean = process_mean(m.stochasticprocess)
+    zmin = zmean*0.8
+    zmax = zmean*1.2
+    z_hps = HyperParams(N = Nz, xmax = zmax, xmin = zmin)
+    # η_hps
+    ηmean = m.η_mean
+    ηmin = ηmean*0.8
+    ηmax = ηmean*1.2
+    η_hps = HyperParams(N = Nη, xmax = ηmax, xmin = ηmin)
+    return StateSpaceHyperParams((k = k_hps, z = z_hps, η = η_hps))
+end
+
+
 # Stochastic Model + Poisson Process
 function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001, Nz = 2, coef = 0.0, power = 0.0) where {T <: Real, S <: PoissonProcess}
     kmin, kmax = kmin_f*kssH, kmax_f*kssH
@@ -172,7 +190,9 @@ function StateSpace(m::StochasticModel{T, S}, statespacehyperparams::StateSpaceH
     StateSpace((k = k, z = z), (y = y,))
 end
 
-function StateSpace(m::StochasticSkibaAbilityModel{T, S}, statespacehyperparams::StateSpaceHyperParams) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
+
+
+function StateSpace(m::Union{StochasticNPAbilityModel{T,S},StochasticSkibaAbilityModel{T,S}}, statespacehyperparams::StateSpaceHyperParams) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
     k_hps = statespacehyperparams[:k]
     z_hps = statespacehyperparams[:z]
     η_hps = statespacehyperparams[:η]
