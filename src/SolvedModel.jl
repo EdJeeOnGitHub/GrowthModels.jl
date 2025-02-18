@@ -8,7 +8,6 @@ end
 
 
 
-
 function plot_model(m::StochasticModel, value::Value, variables::NamedTuple)
     (; k, z, y, c) = variables
     (; v, dVf, dVb, dV0, dist) = value
@@ -176,7 +175,7 @@ function SolvedModel(m::T, res::NamedTuple) where T <: Model
 end
 
 
-function SolvedModel(m::StochasticSkibaAbilityModel, value::Value, variables::NamedTuple) 
+function SolvedModel(m::Union{StochasticSkibaAbilityModel,StochasticNPAbilityModel}, value::Value, variables::NamedTuple) 
     c_interpolation = interpolate(
         (variables.k[:, 1, 1], variables.z[1, :, 1], variables.η[1, 1, :]),
         variables.c,
@@ -246,7 +245,7 @@ function show(io::IO, r::SolvedModel{T})  where {T <: StochasticModel}
     )
 end
 
-function show(io::IO, r::SolvedModel{T})  where {T <: StochasticSkibaAbilityModel}
+function show(io::IO, r::SolvedModel{T})  where {T <: Union{StochasticSkibaAbilityModel,StochasticNPAbilityModel}}
     median_idx = round(Int, size(r.variables.k, 2) / 2)
     median_3rd_idx = round(Int, size(r.variables.k, 3) / 2)
     print(
@@ -262,10 +261,9 @@ end
 
 
 
-function plot_model(m::StochasticSkibaAbilityModel, value::Value, variables::NamedTuple)
+function plot_model(m::Union{StochasticSkibaAbilityModel,StochasticNPAbilityModel}, value::Value, variables::NamedTuple)
     (; k, z, y, c, η) = variables
     (; v, dVf, dVb, dV0, dist) = value
-    kstar = k_star(m)
     fit_kdot = GrowthModels.statespace_k_dot(m)(variables)
 
     η_reshape = reshape(η[1, 1, :], 1, 1, size(η, 3))

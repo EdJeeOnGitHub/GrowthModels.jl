@@ -450,8 +450,8 @@ V_err(m::Model) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.�
 
 
 
-function update_v(m::StochasticSkibaAbilityModel{T, S}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams, diffusion_matrix; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v, S <: StochasticProcess}
-    (; γ, α, ρ, δ) = m
+function update_v(m::Union{StochasticSkibaAbilityModel{T, S},StochasticNPAbilityModel{T,S}}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams, diffusion_matrix; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v, S <: StochasticProcess}
+    (; γ, ρ, δ) = m
     (; v, dVf, dVb, dV0, dist) = value
     k, z, η = state[:k], state[:z]', state[:η]' # y isn't really a state but avoid computing it each iteration this way
     y = state.aux_state[:y]
