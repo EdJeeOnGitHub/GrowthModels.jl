@@ -6,8 +6,6 @@ using ForwardDiff
 
 
 
-
-
 @testset "Skiba" begin
     skiba_model = SkibaModel()
     skiba_hyperparams = StateSpaceHyperParams(skiba_model)
@@ -287,6 +285,35 @@ end
 
     plot_model(np_model, fit_value, fit_variables)
 end
+
+
+
+
+@testset "Stochastic NP Ability - Poisson" begin
+
+    z = [0.4, 1.0, 3.5]
+    Q = [-9/10 8/10 1/10; 1/10 -2/10 1/10; 1/10 1/10 -2/10]
+    p = PoissonProcess(z = z, Q = Q)
+
+    np_model = StochasticNPAbilityModel(p)
+
+    np_hyperparams = StateSpaceHyperParams(np_model)
+    np_state = StateSpace(np_model, np_hyperparams)
+    np_init_value = Value(np_state)
+
+    fit_value, fit_variables, fit_iter = solve_HJB(np_model, np_hyperparams, init_value = np_init_value, maxit = 1000)
+
+    np_sm = SolvedModel(np_model, fit_value, fit_variables)
+
+
+    A_t = sparse(np_sm.value.A')
+    g = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
+    g = g ./ sum(g)
+    distribution_time_series =  StateEvolution(g, np_sm, 5);
+
+    plot_model(np_model, fit_value, fit_variables)
+end
+
 
 # Differentiation tests
 include("test-differentiable.jl")
