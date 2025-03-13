@@ -162,8 +162,6 @@ function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3
     kmin, kmax = kmin_f*kssH, kmax_f*kssH
     k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin, coef = coef, power = power)
     # z_hps
-    zmin = minimum(m.stochasticprocess.z)
-    zmax = maximum(m.stochasticprocess.z)
     z_hps = HyperParams(N = Nz, xmax = zmax, xmin = zmin)
     return StateSpaceHyperParams((k = k_hps, z = z_hps))
 end
@@ -184,7 +182,7 @@ function StateSpace(m::StochasticModel{T, S}, statespacehyperparams::StateSpaceH
     k_hps = statespacehyperparams[:k]
     z_hps = statespacehyperparams[:z]
     k = generate_grid(k_hps.N, k_hps.xmin, k_hps.xmax, k_hps.coef, k_hps.power)
-    z = vcat(z_hps.xmin, z_hps.xmax)
+    z = m.stochasticprocess.z
     # z' creates Nk x Nz matrix
     y = production_function(m, k, z')
     StateSpace((k = k, z = z), (y = y,))

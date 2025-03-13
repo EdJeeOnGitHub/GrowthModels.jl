@@ -2,15 +2,17 @@
 
 struct PoissonProcess{T <: Real} <: StochasticProcess
     z::AbstractVector{T}
-    λ::AbstractVector{T}
+    Q::AbstractMatrix{T}
 end
-function PoissonProcess(; z::AbstractVector{T}, λ::AbstractVector{T}) where T <: Real
-    PoissonProcess(z, λ)
+function PoissonProcess(; z::AbstractVector{T}, Q::AbstractMatrix{T}) where T <: Real
+    PoissonProcess(z, Q)
 end
+
 function process_mean(p::PoissonProcess)
-    z_1, z_2 = p.z
-    λ_1, λ_2 = p.λ
-    return (z_1 * λ_2 + z_2 * λ_1) / sum(p.λ)
+    (; z, Q) = p
+    π = nullspace(Q')[:, 1]
+    π = π / sum(π)
+    return dot(π, z)
 end
 
 

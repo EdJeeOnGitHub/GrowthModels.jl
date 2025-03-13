@@ -208,7 +208,8 @@ end
 
 
 @testset "Poisson Skiba" begin
-    p = PoissonProcess(z = [-0.4, 0.0], λ = [9/10, 1/10])
+    Q = [-9/10 9/10; 1/10 -1/10]
+    p = PoissonProcess(z = [-0.4, 0.0], Q = Q)
     m = StochasticSkibaModel(p) 
     k_hps = HyperParams(N = 1000, xmax = 20, xmin = 1e-3)
     z_hps = HyperParams(N = 2, xmax = maximum(p.z), xmin = minimum(p.z))
