@@ -228,7 +228,7 @@ end
     distribution_time_series =  StateEvolution(g, sm, 200);
 end
 
-@testset "Stochastic Ability Skiba" begin
+# @testset "Stochastic Ability Skiba" begin
     Nk = 1000
     Nz = 40
     Nη = 5
@@ -259,8 +259,43 @@ end
 
     sm = SolvedModel(m_a, fit_value, fit_variables)
     A_t = sparse(sm.value.A')
+    eta_dens = rand(Nη)
+    eta_dens = eta_dens ./ sum(eta_dens)
+    eta_dens_rs = reshape(eta_dens, (1, 1, Nη))
+
     g = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
-    g = g ./ sum(g)
+    g_grid = reshape(g, (Nk, Nz, Nη))
+    # renormalize by Nk x Nz and then multiply by η density
+    g_grid = g_grid ./ sum(g_grid, dims = [1, 2])
+    g_grid = g_grid .* eta_dens_rs
+    
+    init_dens = dropdims(sum(g_grid, dims = [1, 2]), dims = (1, 2))
+    # Test initial density matches our eta density
+    @test all(init_dens .≈ eta_dens)
+
+    distribution_time_series =  StateEvolution(g, sm, 10);
+
+    S = distribution_time_series.E_S
+
+        size(sm.value.v)
+    1000 * 40 * 5
+    S = distribution_time_series.S
+    S_grid = reshape(S, (size(sm.value.v)..., 10)) 
+
+    dropdims(sum(S_grid, dims = [1, 2]), dims = (1, 2))
+
+        E_S = sum(reshape(S, (v_dim..., T)), dims = 2) |> x -> dropdims(x, dims = 2)
+    distribution_time_series.S
+    
+    dropdims(sum(S, dims = [1]), dims = 1)
+
+    eta_dens
+
+
+
+
+
+    sum(g_grid, dims = 1)
     distribution_time_series =  StateEvolution(g, sm, 5);
 end
 
