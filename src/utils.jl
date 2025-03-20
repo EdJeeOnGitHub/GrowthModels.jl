@@ -156,26 +156,9 @@ function StateSpaceHyperParams(m::StochasticNPAbilityModel{T, S}; Nk = 1000, kma
     return StateSpaceHyperParams((k = k_hps, z = z_hps, η = η_hps))
 end
 
-function StateSpaceHyperParams(m::StochasticNPAbilityModel{T, S}; Nk = 1000, kmax = 10.0, kmin = 0.001, Nη = 5, coef = 0.0, power = 0.0) where {T <: Real, S <: PoissonProcess}
-    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin, coef = coef, power = power)
-    # z_hps
-    z = m.stochasticprocess.z
-    zmin = z[1]
-    zmax = z[end]
-    Nz = length(z)
-    z_hps = HyperParams(N = Nz, xmax = zmax, xmin = zmin)
-    # η_hps
-    ηmean = m.η_mean
-    ηmin = ηmean*0.8
-    ηmax = ηmean*1.2
-    η_hps = HyperParams(N = Nη, xmax = ηmax, xmin = ηmin)
-    return StateSpaceHyperParams((k = k_hps, z = z_hps, η = η_hps))
-end
-
 
 # Stochastic Model + Poisson Process
 function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001, Nz = 2, coef = 0.0, power = 0.0) where {T <: Real, S <: PoissonProcess}
-    kssH = k_steady_state_hi(m)
     kmin, kmax = kmin_f*kssH, kmax_f*kssH
     k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin, coef = coef, power = power)
     # z_hps
@@ -206,18 +189,8 @@ function StateSpace(m::StochasticModel{T, S}, statespacehyperparams::StateSpaceH
 end
 
 
-function StateSpace(m::Union{StochasticNPAbilityModel{T,S},StochasticSkibaAbilityModel{T,S}}, statespacehyperparams::StateSpaceHyperParams) where {T <: Real, S <: PoissonProcess}
-    k_hps = statespacehyperparams[:k]
-    η_hps = statespacehyperparams[:η]
-    k = generate_grid(k_hps.N, k_hps.xmin, k_hps.xmax, k_hps.coef, k_hps.power)
-    z = m.stochasticprocess.z
-    η = generate_grid(η_hps.N, η_hps.xmin, η_hps.xmax, η_hps.coef, η_hps.power)
-    η_reshape = reshape(η, 1, 1, size(η, 1))
-    y = production_function(m, k, z', η_reshape)
-    StateSpace((k = k, z = z, η = η), (y = y,))
-end
 
-function StateSpace(m::Union{StochasticNPAbilityModel{T,S},StochasticSkibaAbilityModel{T,S}}, statespacehyperparams::StateSpaceHyperParams) where {T <: Real, S <: StochasticProcess}
+function StateSpace(m::Union{StochasticNPAbilityModel{T,S},StochasticSkibaAbilityModel{T,S}}, statespacehyperparams::StateSpaceHyperParams) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
     k_hps = statespacehyperparams[:k]
     z_hps = statespacehyperparams[:z]
     η_hps = statespacehyperparams[:η]

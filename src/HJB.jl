@@ -207,16 +207,19 @@ function construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess,
     end
     cdiag[end-Nk+1:end] .= zeta[end] + yy[end]
 
-    Bswitch_2dim = spdiagm(-Nk => ldiag, 0 => cdiag, Nk => udiag)
     # if only two dimensions (i.e. k and z), then Bswitch is a tridiagonal matrix
     if length(state_size) == 2
-        return Bswitch_2dim
+        Bswitch = spdiagm(-Nk => ldiag, 0 => cdiag, Nk => udiag)
+        return Bswitch
     else
         # if more than two dimensions, then Bswitch is a block tridiagonal matrix
         # where there are gaps between the blocks of size Nk
         N_other_states = prod(state_size[3:end])
-        Bswitch = kron(sparse(I, N_other_states, N_other_states), Bswitch_2dim)
+        new_cdiag = repeat(cdiag, outer = N_other_states)
+        new_ldiag = repeat([ldiag; fill(0, Nk)], outer = N_other_states)[1:end-Nk]
+        new_udiag = repeat([fill(0, Nk); udiag], outer = N_other_states)[Nk+1:end]
 
+        Bswitch = spdiagm(-Nk => new_ldiag, 0 => new_cdiag, Nk => new_udiag)
         return Bswitch
     end
 end
@@ -239,16 +242,10 @@ Constructs the diffusion matrix for the HJB equation.
 """
 function construct_diffusion_matrix(stochasticprocess::PoissonProcess, state::StateSpace, hyperparams::StateSpaceHyperParams) 
     (; Q) = stochasticprocess
-    state_size = size(state)
     D = size(hyperparams)
-    N_k = D[1]
-    I_A = sparse(I, N_k, N_k)
+    N_grid_size = prod(D[1:end - 1])
+    I_A = sparse(I, N_grid_size, N_grid_size)
     B_switch = kron(Q, I_A)
-
-    if length(state_size) > 2
-        N_other_states = prod(state_size[3:end])
-        B_switch = kron(sparse(I, N_other_states, N_other_states), B_switch)
-    end
     return B_switch
 end
 

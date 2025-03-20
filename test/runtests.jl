@@ -229,8 +229,8 @@ end
 end
 
 # @testset "Stochastic Ability Skiba" begin
-    Nk = 1000
-    Nz = 40
+    Nk = 10
+    Nz = 4
     Nη = 5
 
     m_a = GrowthModels.StochasticSkibaAbilityModel()
@@ -263,11 +263,12 @@ end
     eta_dens = eta_dens ./ sum(eta_dens)
     eta_dens_rs = reshape(eta_dens, (1, 1, Nη))
 
-    g = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
-    g_grid = reshape(g, (Nk, Nz, Nη))
+    g_init = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
+    g_grid = reshape(g_init, (Nk, Nz, Nη))
     # renormalize by Nk x Nz and then multiply by η density
     g_grid = g_grid ./ sum(g_grid, dims = [1, 2])
     g_grid = g_grid .* eta_dens_rs
+    g = vec(g_grid)
     
     init_dens = dropdims(sum(g_grid, dims = [1, 2]), dims = (1, 2))
     # Test initial density matches our eta density
@@ -275,14 +276,30 @@ end
 
     distribution_time_series =  StateEvolution(g, sm, 10);
 
-    S = distribution_time_series.E_S
+    # S = distribution_time_series.E_S
+    E_S = distribution_time_series.E_S
+    size(E_S)
+    eta_by_t = dropdims(sum(E_S, dims = [1]), dims = 1)
+    pct_diff =  (eta_by_t .- eta_dens) ./  eta_dens
+    plot(
+        eta_dens',
+        pct_diff,
+        seriestype = :scatter
+    )
+    Plots.abline!(1, 0)
 
-        size(sm.value.v)
-    1000 * 40 * 5
+    eta_by_t[:, end] 
+    eta_dens
+
+    sum(abs2, eta_by_t .- eta_dens)
+
+
+
     S = distribution_time_series.S
-    S_grid = reshape(S, (size(sm.value.v)..., 10)) 
+    S_grid = reshape(S, (size(sm.value.v)..., 10));
 
-    dropdims(sum(S_grid, dims = [1, 2]), dims = (1, 2))
+    init_dens
+    sum(S_grid, dims = [1, 2])
 
         E_S = sum(reshape(S, (v_dim..., T)), dims = 2) |> x -> dropdims(x, dims = 2)
     distribution_time_series.S

@@ -18,26 +18,26 @@ function Base.getindex(s::StateEvolution, t)
 end
 
 # Implicit Euler method
-function iterate_g!(g, A_t; time_step = 1)
+function iterate_g!(g, A_t; time_step = 0.1)
     I_A = sparse(I, size(A_t))
     evolution = I_A - time_step * A_t
     g .= evolution \ g
 end
 # Implicit Euler method
-function iterate_g(g, A_t; time_step = 1)
+function iterate_g(g, A_t; time_step = 0.1)
     I_A = sparse(I, size(A_t))
     evolution = I_A - time_step * A_t
     return evolution \ g
 end
 
-function iterate_g(g, A_t, grid_diag; time_step = 1)
+function iterate_g(g, A_t, grid_diag; time_step = 0.1)
     g_tilde = grid_diag * g
     g_new_tilde = iterate_g(g_tilde, A_t, time_step = time_step)
     g_new = grid_diag \ g_new_tilde
     return g_new
 end
 
-function iterate_g!(g, A_t, grid_diag; time_step = 1)
+function iterate_g!(g, A_t, grid_diag; time_step = 0.1)
     g_tilde = grid_diag * g
     g_new_tilde = iterate_g(g_tilde, A_t, time_step = time_step)
     g .= grid_diag \ g_new_tilde
@@ -86,7 +86,7 @@ function StateEvolution(g::Vector{R}, A_t::SparseMatrixCSC, T::Int, v_dim, grid_
     S = zeros((size(g, 1), T))
     S[:, 1] .= g
     for t in 2:T
-        S[:, t] .= iterate_g(S[:, t-1], A_t, grid_diag; time_step = 1)
+        S[:, t] .= iterate_g(S[:, t-1], A_t, grid_diag; time_step = 0.01)
     end
     
 
