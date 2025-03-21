@@ -18,26 +18,26 @@ function Base.getindex(s::StateEvolution, t)
 end
 
 # Implicit Euler method
-function iterate_g!(g, A_t; time_step = 0.1)
+function iterate_g!(g, A_t; time_step = 1)
     I_A = sparse(I, size(A_t))
     evolution = I_A - time_step * A_t
     g .= evolution \ g
 end
 # Implicit Euler method
-function iterate_g(g, A_t; time_step = 0.1)
+function iterate_g(g, A_t; time_step = 1)
     I_A = sparse(I, size(A_t))
     evolution = I_A - time_step * A_t
     return evolution \ g
 end
 
-function iterate_g(g, A_t, grid_diag; time_step = 0.1)
+function iterate_g(g, A_t, grid_diag; time_step = 1)
     g_tilde = grid_diag * g
     g_new_tilde = iterate_g(g_tilde, A_t, time_step = time_step)
     g_new = grid_diag \ g_new_tilde
     return g_new
 end
 
-function iterate_g!(g, A_t, grid_diag; time_step = 0.1)
+function iterate_g!(g, A_t, grid_diag; time_step = 1)
     g_tilde = grid_diag * g
     g_new_tilde = iterate_g(g_tilde, A_t, time_step = time_step)
     g .= grid_diag \ g_new_tilde
@@ -80,29 +80,32 @@ function StationaryDistribution(A_t::SparseMatrixCSC, grid_diag)
    return gg
 end
 
-# Given a stopping time T, iterate the state evolution T times with a timestep of 
-# 1 unit each time
-function StateEvolution(g::Vector{R}, A_t::SparseMatrixCSC, T::Int, v_dim, grid_diag) where {R <: Real}
-    S = zeros((size(g, 1), T))
+# Given a stopping time T, iterate the state evolution T times with a timestep of 1/implicit_steps
+function StateEvolution(g::Vector{R}, A_t::SparseMatrixCSC, T::Int, v_dim, grid_diag; implicit_steps = 1) where {R <: Real}
+    T_total = T*implicit_steps
+    S = zeros((size(g, 1), T_total))
     S[:, 1] .= g
-    for t in 2:T
-        S[:, t] .= iterate_g(S[:, t-1], A_t, grid_diag; time_step = 0.01)
+    for t in 2:T_total
+        S[:, t] .= iterate_g(S[:, t-1], A_t, grid_diag; time_step = 1.0/implicit_steps)
     end
     
+    S_thinned = S[:, 1:implicit_steps:end]
+    T_thinned = size(S_thinned, 2)
+    T_thinned_vec = collect(0:(T_thinned - 1)) 
 
     # if no shock dimension, return S
     if v_dim[1] == size(g, 1)
-        E_S = S
+        E_S = S_thinned
         # also don't use infinite time step - just pass last time step
         E_stationary = E_S[:, end]
     else 
         # otherwise, average
-        E_S = sum(reshape(S, (v_dim..., T)), dims = 2) |> x -> dropdims(x, dims = 2)
+        E_S = sum(reshape(S_thinned, (v_dim..., T_thinned)), dims = 2) |> x -> dropdims(x, dims = 2)
         # use infinite time step to get stationary distribution
         stationary_distribution = StationaryDistribution(A_t, grid_diag)
         E_stationary = sum(reshape(stationary_distribution, v_dim), dims = 2) |> x -> dropdims(x, dims = 2)
     end
-    return StateEvolution(S, collect(0:(T-1)), g, A_t, E_S, E_stationary)
+    return StateEvolution(S_thinned, T_thinned_vec, g, A_t, E_S, E_stationary)
 end
 
 # Given a vector of times, iterate the state evolution to each time step
@@ -131,7 +134,7 @@ function StateEvolution(g::Vector{T}, A_t::SparseMatrixCSC, times::Vector, v_dim
 end
 
 
-function StateEvolution(g, sm::SolvedModel{S}, T::Int) where {S <: Model}
+function StateEvolution(g, sm::SolvedModel{S}, T::Int; implicit_steps = 1) where {S <: Model}
     # get all ks along k - using first dim of other states
     slice_tuple = CartesianIndices((1:size(sm.variables.k, 1), fill(1, ndims(sm.variables.k) - 1)...))
     if S <: StochasticModel
@@ -142,7 +145,7 @@ function StateEvolution(g, sm::SolvedModel{S}, T::Int) where {S <: Model}
     k = sm.variables.k[slice_tuple][:]
     grid_diag = create_grid_diag(k, Nstate)
     A_t = sparse(sm.value.A')
-    return StateEvolution(g, A_t, T, size(sm.value.v), grid_diag)
+    return StateEvolution(g, A_t, T, size(sm.value.v), grid_diag, implicit_steps = implicit_steps)
 end
 
 function StateEvolution(g, sm::SolvedModel{S}, times::Vector) where {S <: Model}

@@ -144,8 +144,10 @@ model_names = ["RamseyCassKoopmansModel", "SkibaModel", "SmoothSkibaModel"]
     sm = SolvedModel(m, fit_value, fit_variables)
     g = fill(1, size(sm.value.A', 1)) 
     g = g ./ sum(g)
-    distribution_time_series = StateEvolution(g, sm, 101)
-    min_dist = minimum(abs.(vec(sm.variables[:k])[argmax(distribution_time_series[100])] .- k_steady_state(m)))
+    T_max = 10
+    distribution_time_series = StateEvolution(g, sm, T_max)
+
+    min_dist = minimum(abs.(vec(sm.variables[:k])[argmax(distribution_time_series[T_max-1])] .- k_steady_state(m)))
     # smooth skiba steady state not actually calculated analytically
     if !isa(m, SmoothSkibaModel)
         @test min_dist < 1e-2
@@ -200,7 +202,7 @@ model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
     g = g ./ sum(g)
     v_dim = size(init_value.v)
     
-    distribution_time_series = StateEvolution(g, sm, 100)
+    distribution_time_series = StateEvolution(g, sm, 10)
     @test isa(distribution_time_series, StateEvolution)
 end
 
@@ -225,10 +227,10 @@ end
     A_t = sparse(sm.value.A')
     g = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
     g = g ./ sum(g)
-    distribution_time_series =  StateEvolution(g, sm, 200);
+    distribution_time_series =  StateEvolution(g, sm, 200; implicit_steps = 10);
 end
 
-function create_ability_density_to_test(sm, eta_dens, g_init, dims)
+function create_ability_density_to_test(sm, eta_dens, g_init, dims; implicit_steps = 10)
     g_grid =  reshape(g_init, dims)
     g_grid = g_grid ./ sum(g_grid, dims = [1, 2])
     eta_dens_rs = reshape(eta_dens, (1, 1, size(eta_dens, 1)))
@@ -237,16 +239,39 @@ function create_ability_density_to_test(sm, eta_dens, g_init, dims)
     g = vec(g_grid)
     init_dens = dropdims(sum(g_grid, dims = [1, 2]), dims = (1, 2))
     @test all(init_dens .≈ eta_dens)
-    distribution_time_series =  StateEvolution(g, sm, 10);
+    distribution_time_series =  StateEvolution(g, sm, 10, implicit_steps = implicit_steps);
     eta_by_t = dropdims(sum(distribution_time_series.E_S, dims = [1]), dims = 1)
-    pct_diff = 100 .* abs.(eta_by_t .- eta_dens) ./ eta_dens
-    return pct_diff, eta_by_t, distribution_time_series
+    abs_diff = abs.(eta_by_t .- eta_dens)
+    return abs_diff, eta_by_t, distribution_time_series
 
 end
 
+# Check that transition matrices never try and move people across abilities
+function index_checker(grid_dims, A, B; idx_to_check = 1)
+    (Nk, Nz, Nη) = grid_dims
+    # this gives a vector of length Nk * Nz * Nη
+    # where we can give it a number in Nk*Nz*Nη and it will return the 
+    # corresponding CartesianIndex
+    cart_idxs = CartesianIndices((Nk, Nz, Nη))
+
+    A_nz = findnz(A[idx_to_check, :])[1]
+    B_nz = findnz(B[idx_to_check, :])[1]
+
+    A_carts = cart_idxs[A_nz]
+    B_carts = cart_idxs[B_nz]
+
+    A_abilities = [x[3] for x in A_carts]
+    B_abilities = [x[3] for x in B_carts]
+
+    A_check = all(cart_idxs[idx_to_check][3] .== A_abilities)
+    B_check = all(cart_idxs[idx_to_check][3] .== B_abilities)
+    return A_check, B_check
+end
+
+
 @testset "Stochastic Ability Skiba" begin
-    Nk = 10
-    Nz = 4
+    Nk = 1000
+    Nz = 40
     Nη = 5
 
     m_a = GrowthModels.StochasticSkibaAbilityModel()
@@ -269,6 +294,20 @@ end
     plot_model_output = plot_model(m_a, fit_value, fit_variables)
 
 
+    grid_dims = (Nk, Nz, Nη)
+    is_to_check = collect(1:prod(grid_dims))
+    is_to_check = sample(is_to_check, 1000)
+    idx_checks = []
+    for idx_to_check in is_to_check
+        id_c = index_checker(grid_dims, fit_value.A, Bswitch_a; idx_to_check = idx_to_check)
+        push!(idx_checks, id_c)
+    end
+
+    for idx_check in idx_checks
+        @test idx_check[1] == true
+        @test idx_check[2] == true
+    end
+
 
 
     r = SolvedModel(m_a, fit_value, fit_variables)
@@ -280,9 +319,8 @@ end
     eta_dens = eta_dens ./ sum(eta_dens)
     g_init = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
 
-    pct_diff, eta_by_t, distribution_time_series = create_ability_density_to_test(sm, eta_dens, g_init, (Nk, Nz, Nη))
-    @test maximum(pct_diff) < 0.5
-
+    abs_diff, eta_by_t, distribution_time_series = create_ability_density_to_test(sm, eta_dens, g_init, (Nk, Nz, Nη); implicit_steps = 1)
+    @test maximum(abs_diff) < 0.15
 end
 
 
@@ -299,6 +337,7 @@ end
 
     np_sm = SolvedModel(np_model, fit_value, fit_variables)
 
+    Bswitch = GrowthModels.construct_diffusion_matrix(np_model.stochasticprocess, np_state, np_hyperparams)
 
     A_t = sparse(np_sm.value.A')
     g = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
@@ -307,8 +346,25 @@ end
     eta_dens = rand(np_hyperparams[:η].N)
     eta_dens = eta_dens ./ sum(eta_dens)
 
-    pct_diff, eta_by_t, distribution_time_series = create_ability_density_to_test(np_sm, eta_dens, g, size(np_sm.value.v))
-    @test maximum(pct_diff) < 0.5
+
+    grid_dims = size(np_sm.value.v)
+    is_to_check = collect(1:prod(grid_dims))
+    is_to_check = sample(is_to_check, 1000)
+    idx_checks = []
+
+    for idx_to_check in is_to_check
+        id_c = index_checker(grid_dims, fit_value.A, Bswitch; idx_to_check = idx_to_check)
+        push!(idx_checks, id_c)
+    end
+
+    for idx_check in idx_checks
+        @test idx_check[1] == true
+        @test idx_check[2] == true
+    end
+
+
+    abs_diff, eta_by_t, distribution_time_series = create_ability_density_to_test(np_sm, eta_dens, g, size(np_sm.value.v); implicit_steps = 1)
+    @test maximum(abs_diff) < 1e-3
 
     distribution_time_series =  StateEvolution(g, np_sm, 5);
 
@@ -333,17 +389,33 @@ end
 
     np_sm = SolvedModel(np_model, fit_value, fit_variables)
 
+    Bswitch = GrowthModels.construct_diffusion_matrix(np_model.stochasticprocess, np_state, np_hyperparams)
+
 
     A_t = sparse(np_sm.value.A')
     g = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
     g = g ./ sum(g)
 
+    grid_dims = size(np_sm.value.v)
+    is_to_check = collect(1:prod(grid_dims))
+    is_to_check = sample(is_to_check, 1000)
+    idx_checks = []
+
+    for idx_to_check in is_to_check
+        id_c = index_checker(grid_dims, fit_value.A, Bswitch; idx_to_check = idx_to_check)
+        push!(idx_checks, id_c)
+    end
+
+    for idx_check in idx_checks
+        @test idx_check[1] == true
+        @test idx_check[2] == true
+    end
 
     eta_dens = rand(np_hyperparams[:η].N)
     eta_dens = eta_dens ./ sum(eta_dens)
 
-    pct_diff, eta_by_t, distribution_time_series = create_ability_density_to_test(np_sm, eta_dens, g, size(np_sm.value.v))
-    @test maximum(pct_diff) < 0.5
+    abs_diff, eta_by_t, distribution_time_series = create_ability_density_to_test(np_sm, eta_dens, g, size(np_sm.value.v); implicit_steps = 10)
+    @test maximum(abs_diff) < 0.1
 
     distribution_time_series =  StateEvolution(g, np_sm, 5);
 
