@@ -228,7 +228,23 @@ end
     distribution_time_series =  StateEvolution(g, sm, 200);
 end
 
-# @testset "Stochastic Ability Skiba" begin
+function create_ability_density_to_test(sm, eta_dens, g_init, dims)
+    g_grid =  reshape(g_init, dims)
+    g_grid = g_grid ./ sum(g_grid, dims = [1, 2])
+    eta_dens_rs = reshape(eta_dens, (1, 1, size(eta_dens, 1)))
+    # renormalize by Nk x Nz and then multiply by η density
+    g_grid = g_grid .* eta_dens_rs
+    g = vec(g_grid)
+    init_dens = dropdims(sum(g_grid, dims = [1, 2]), dims = (1, 2))
+    @test all(init_dens .≈ eta_dens)
+    distribution_time_series =  StateEvolution(g, sm, 10);
+    eta_by_t = dropdims(sum(distribution_time_series.E_S, dims = [1]), dims = 1)
+    pct_diff = 100 .* abs.(eta_by_t .- eta_dens) ./ eta_dens
+    return pct_diff, eta_by_t, distribution_time_series
+
+end
+
+@testset "Stochastic Ability Skiba" begin
     Nk = 10
     Nz = 4
     Nη = 5
@@ -259,62 +275,16 @@ end
 
     sm = SolvedModel(m_a, fit_value, fit_variables)
     A_t = sparse(sm.value.A')
+
     eta_dens = rand(Nη)
     eta_dens = eta_dens ./ sum(eta_dens)
-    eta_dens_rs = reshape(eta_dens, (1, 1, Nη))
-
     g_init = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
-    g_grid = reshape(g_init, (Nk, Nz, Nη))
-    # renormalize by Nk x Nz and then multiply by η density
-    g_grid = g_grid ./ sum(g_grid, dims = [1, 2])
-    g_grid = g_grid .* eta_dens_rs
-    g = vec(g_grid)
-    
-    init_dens = dropdims(sum(g_grid, dims = [1, 2]), dims = (1, 2))
-    # Test initial density matches our eta density
-    @test all(init_dens .≈ eta_dens)
 
-    distribution_time_series =  StateEvolution(g, sm, 10);
+    pct_diff, eta_by_t, distribution_time_series = create_ability_density_to_test(sm, eta_dens, g_init, (Nk, Nz, Nη))
+    @test maximum(pct_diff) < 0.5
 
-    # S = distribution_time_series.E_S
-    E_S = distribution_time_series.E_S
-    size(E_S)
-    eta_by_t = dropdims(sum(E_S, dims = [1]), dims = 1)
-    pct_diff =  (eta_by_t .- eta_dens) ./  eta_dens
-    plot(
-        eta_dens',
-        pct_diff,
-        seriestype = :scatter
-    )
-    Plots.abline!(1, 0)
-
-    eta_by_t[:, end] 
-    eta_dens
-
-    sum(abs2, eta_by_t .- eta_dens)
-
-
-
-    S = distribution_time_series.S
-    S_grid = reshape(S, (size(sm.value.v)..., 10));
-
-    init_dens
-    sum(S_grid, dims = [1, 2])
-
-        E_S = sum(reshape(S, (v_dim..., T)), dims = 2) |> x -> dropdims(x, dims = 2)
-    distribution_time_series.S
-    
-    dropdims(sum(S, dims = [1]), dims = 1)
-
-    eta_dens
-
-
-
-
-
-    sum(g_grid, dims = 1)
-    distribution_time_series =  StateEvolution(g, sm, 5);
 end
+
 
 
 @testset "Stochastic NP Ability" begin
@@ -333,6 +303,13 @@ end
     A_t = sparse(np_sm.value.A')
     g = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
     g = g ./ sum(g)
+
+    eta_dens = rand(np_hyperparams[:η].N)
+    eta_dens = eta_dens ./ sum(eta_dens)
+
+    pct_diff, eta_by_t, distribution_time_series = create_ability_density_to_test(np_sm, eta_dens, g, size(np_sm.value.v))
+    @test maximum(pct_diff) < 0.5
+
     distribution_time_series =  StateEvolution(g, np_sm, 5);
 
     plot_model(np_model, fit_value, fit_variables)
@@ -342,7 +319,6 @@ end
 
 
 @testset "Stochastic NP Ability - Poisson" begin
-
     z = [0.4, 1.0, 3.5]
     Q = [-9/10 8/10 1/10; 1/10 -2/10 1/10; 1/10 1/10 -2/10]
     p = PoissonProcess(z = z, Q = Q)
@@ -361,6 +337,14 @@ end
     A_t = sparse(np_sm.value.A')
     g = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
     g = g ./ sum(g)
+
+
+    eta_dens = rand(np_hyperparams[:η].N)
+    eta_dens = eta_dens ./ sum(eta_dens)
+
+    pct_diff, eta_by_t, distribution_time_series = create_ability_density_to_test(np_sm, eta_dens, g, size(np_sm.value.v))
+    @test maximum(pct_diff) < 0.5
+
     distribution_time_series =  StateEvolution(g, np_sm, 5);
 
     plot_model(np_model, fit_value, fit_variables)
