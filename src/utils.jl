@@ -246,7 +246,14 @@ function StateSpace(m::DeterministicModel{T}, statespacehyperparams::StateSpaceH
 end
 
 
-
+# Allow passing eta directly
+function StateSpace(m::Union{StochasticNPAbilityModel{T,S},StochasticSkibaAbilityModel{T,S}}, k_hps::HyperParams, η) where {T <: Real, S <: PoissonProcess}
+    k = generate_grid(k_hps.N, k_hps.xmin, k_hps.xmax, k_hps.coef, k_hps.power)
+    z = m.stochasticprocess.z
+    η_reshape = reshape(η, 1, 1, size(η, 1))
+    y = production_function(m, k, z', η_reshape)
+    StateSpace((k = k, z = z, η = η), (y = y,))
+end
 
 
 
