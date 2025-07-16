@@ -31,16 +31,18 @@ function iterate_g(g, A_t; time_step = 1)
 end
 
 function iterate_g(g, A_t, grid_diag; time_step = 1)
-    g_tilde = grid_diag * g
-    g_new_tilde = iterate_g(g_tilde, A_t, time_step = time_step)
-    g_new = grid_diag \ g_new_tilde
-    return g_new
+    evolution = sparse(I, size(A_t)) - time_step * A_t
+    new_g = evolution \ g
+    # normalize with grid spacing
+    normalized_g = normalize_by_weighted_mass(new_g, grid_diag)
+    return normalized_g
 end
 
 function iterate_g!(g, A_t, grid_diag; time_step = 1)
-    g_tilde = grid_diag * g
-    g_new_tilde = iterate_g(g_tilde, A_t, time_step = time_step)
-    g .= grid_diag \ g_new_tilde
+    evolution = sparse(I, size(A_t)) - time_step * A_t
+    g .= evolution \ g
+    # normalize with grid spacing
+    normalize_by_weighted_mass!(g, grid_diag)
 end
 
 function StateEvolution(S::Array{T}, times::Vector{T}, g::Vector{T}, A::SparseMatrixCSC) where T <: Real
@@ -56,6 +58,40 @@ function create_grid_diag(x, N_second_dim)
     dx_tilde_stacked = repeat(dx_tilde, N_second_dim)
     grid_diag = spdiagm(0 => dx_tilde_stacked)
     return grid_diag
+end
+
+# Utility functions for mass conservation
+"""
+    weighted_mass(g, grid_diag)
+
+Compute the weighted mass of distribution g using grid spacing from grid_diag.
+This is the correct way to measure total probability on non-uniform grids.
+"""
+function weighted_mass(g, grid_diag)
+    return sum(grid_diag .* g)
+end
+
+"""
+    normalize_by_weighted_mass!(g, grid_diag)
+
+Normalize distribution g by its weighted mass to ensure proper mass conservation.
+This modifies g in place.
+"""
+function normalize_by_weighted_mass!(g, grid_diag)
+    mass = weighted_mass(g, grid_diag)
+    g ./= mass
+    return g
+end
+
+"""
+    normalize_by_weighted_mass(g, grid_diag)
+
+Normalize distribution g by its weighted mass to ensure proper mass conservation.
+This returns a new normalized distribution.
+"""
+function normalize_by_weighted_mass(g, grid_diag)
+    mass = weighted_mass(g, grid_diag)
+    return g ./ mass
 end
 
 function StationaryDistribution(A_t::SparseMatrixCSC, grid_diag) 

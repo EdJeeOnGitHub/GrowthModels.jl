@@ -58,7 +58,10 @@ module GrowthModels
     export StateEvolution,
                  create_grid_diag,
                  iterate_g, iterate_g!,
-                 StationaryDistribution
+                 StationaryDistribution,
+                 weighted_mass,
+                 normalize_by_weighted_mass,
+                 normalize_by_weighted_mass!
 
 
 

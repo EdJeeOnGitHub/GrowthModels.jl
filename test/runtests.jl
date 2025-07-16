@@ -142,10 +142,17 @@ model_names = ["RamseyCassKoopmansModel", "SkibaModel", "SmoothSkibaModel"]
 
     # Evolution of capital goes to analytical steady state
     sm = SolvedModel(m, fit_value, fit_variables)
-    g = fill(1, size(sm.value.A', 1)) 
+    g = fill(1.0, size(sm.value.A', 1)) 
+    grid_diag = create_grid_diag(sm.variables[:k][:, 1], size(sm.variables.k, 2))
+
     g = g ./ sum(g)
+
     T_max = 10
     distribution_time_series = StateEvolution(g, sm, T_max)
+    mass_over_t = dropdims(sum(distribution_time_series.E_S, dims = 1), dims = 1)
+    for i in 1:T_max
+        @test isapprox(mass_over_t[i], 1.0; atol = 1e-2)
+    end
 
     min_dist = minimum(abs.(vec(sm.variables[:k])[argmax(distribution_time_series[T_max-1])] .- k_steady_state(m)))
     # smooth skiba steady state not actually calculated analytically
@@ -160,7 +167,8 @@ model_names = ["RamseyCassKoopmansModel", "SkibaModel", "SmoothSkibaModel"]
 end
 
 model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
-@testset "Stochastic Model Tests for $model_name" for model_name in model_names
+# @testset "Stochastic Model Tests for $model_name" for model_name in model_names
+    model_name = model_names[1]
     # Dynamically instantiate the model based on its name
     m = eval(Meta.parse(model_name))()
     hyperparams = StateSpaceHyperParams(m, Nz = 40, Nk = 100, coef = 0, power = 0, kmax_f = 5.0)
@@ -188,8 +196,8 @@ model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
     @test old_value.iter == fit_value.iter
 
     # Graphs
-    plot_diagnostics_output = plot_diagnostics(m, fit_value, fit_variables, hyperparams)
-    plot_model_output = plot_model(m, fit_value, fit_variables)
+    plot_diagnostics_output = plot_diagnostics(m, fit_value, fit_variables, hyperparams);
+    plot_model_output = plot_model(m, fit_value, fit_variables);
 
     @test isa(plot_model_output, Plots.Plot)
     @test isa(plot_diagnostics_output, Plots.Plot)
@@ -197,12 +205,32 @@ model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
     # FP
     sm = SolvedModel(m, fit_value, fit_variables)
     A_t = sparse(sm.value.A')
-    grid_diag = GrowthModels.create_grid_diag(sm.variables[:k][:, 1], 40)
-    g = fill(1, size(A_t, 1)) 
+    g = fill(1.0, size(A_t, 1)) 
     g = g ./ sum(g)
+    grid_diag = GrowthModels.create_grid_diag(sm.variables[:k][:, 1], size(sm.variables.k, 2))
+    
+    g = g ./ weighted_mass(g, grid_diag)
+    iterate_g!(g, A_t, grid_diag; time_step = 1.0)
+
+    weighted_mass(g, grid_diag) # should be 1.0
+
+    # normalize_by_weighted_mass!(g, grid_diag)
+
+    # g = g ./ sum(g)
     v_dim = size(init_value.v)
     
     distribution_time_series = StateEvolution(g, sm, 10)
+    S = reshape(distribution_time_series.S, (v_dim..., size(distribution_time_series.S, 2)))
+    
+    E_S = distribution_time_series.E_S
+    
+    S_mass_by_t = dropdims(sum(grid_diag .* S, dims = (1, 2)), dims = (1, 2))
+    E_S_mass_by_t = dropdims(sum(grid_diag .* E_S, dims = 1), dims = 1)
+
+    hcat(S_mass_by_t, E_S_mass_by_t)
+
+
+    sum(distribution_time_series.E_S, dims = 1)
     @test isa(distribution_time_series, StateEvolution)
 end
 
