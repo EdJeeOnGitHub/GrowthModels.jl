@@ -206,6 +206,10 @@ model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
     # FP
     sm = SolvedModel(m, fit_value, fit_variables)
     A_t = sparse(sm.value.A')
+    # test colsums of A close to 0
+    for i in 1:size(A_t, 2)
+        @test isapprox(sum(A_t[:, i]), 0.0; atol = 1e-10)
+    end
     g = fill(1.0, size(A_t, 1)) 
     dx_stacked = GrowthModels.create_dx_stacked(sm.variables[:k][:, 1], size(sm.variables.k, 2))
     
@@ -331,6 +335,14 @@ end
 
     r = SolvedModel(m_a, fit_value, fit_variables)
     sm = SolvedModel(m_a, fit_value, fit_variables)
+
+    A_t = sparse(sm.value.A')
+    # test colsums of A close to 0
+    for i in 1:size(A_t, 2)
+        @test isapprox(sum(A_t[:, i]), 0.0; atol = 1e-10)
+    end
+
+
     g_init = abs.(sin.(range(0, stop = 2π, length = size(r.value.A', 1))))
     g_init = g_init ./ sum(g_init)
     init_ability, ability_by_t, evolution, dx_stacked = setup_ability_check(sm, g_init)
@@ -358,6 +370,10 @@ end
     Bswitch = GrowthModels.construct_diffusion_matrix(np_model.stochasticprocess, np_state, np_hyperparams)
 
     A_t = sparse(np_sm.value.A')
+    # test colsums of A close to 0
+    for i in 1:size(A_t, 2)
+        @test isapprox(sum(A_t[:, i]), 0.0; atol = 1e-10)
+    end
     g = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
     g = g ./ sum(g)
 
@@ -408,6 +424,10 @@ end
 
 
     A_t = sparse(np_sm.value.A')
+    # test colsums of A close to 0
+    for i in 1:size(A_t, 2)
+        @test isapprox(sum(A_t[:, i]), 0.0; atol = 1e-10)
+    end
     g = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
     g = g ./ sum(g)
 

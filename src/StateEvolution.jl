@@ -20,19 +20,17 @@ end
 
 # Implicit Euler method
 function iterate_g!(g, A_t; time_step = 1)
-    I_A = sparse(I, size(A_t))
-    evolution = I_A - time_step * A_t
+    evolution = I - time_step * A_t
     g .= evolution \ g
 end
 # Implicit Euler method
 function iterate_g(g, A_t; time_step = 1)
-    I_A = sparse(I, size(A_t))
-    evolution = I_A - time_step * A_t
+    evolution = I - time_step * A_t
     return evolution \ g
 end
 
 function iterate_g(g, A_t, dx_stacked; time_step = 1)
-    evolution = sparse(I, size(A_t)) - time_step * A_t
+    evolution = I - time_step * A_t
     new_g = evolution \ g
     # normalize with grid spacing
     normalized_g = normalize_by_weighted_mass(new_g, dx_stacked)
@@ -40,7 +38,7 @@ function iterate_g(g, A_t, dx_stacked; time_step = 1)
 end
 
 function iterate_g!(g, A_t, dx_stacked; time_step = 1)
-    evolution = sparse(I, size(A_t)) - time_step * A_t
+    evolution = I - time_step * A_t
     g .= evolution \ g
     # normalize with grid spacing
     normalize_by_weighted_mass!(g, dx_stacked)
@@ -57,7 +55,6 @@ function create_dx_stacked(x, N_second_dim)
     dx_tilde[1] = 0.5*dxf[1]
     dx_tilde[end] = 0.5*dxb[end]
     dx_tilde_stacked = repeat(dx_tilde, N_second_dim)
-    # dx_stacked = spdiagm(0 => dx_tilde_stacked)
     return dx_tilde_stacked
 end
 
