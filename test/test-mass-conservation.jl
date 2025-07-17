@@ -90,9 +90,9 @@ function create_2d_test_setup(; uniform_grid = true, Nk = 100, Nz = 40)
     
     # Create grid spacing for 2D case
     k = sm.variables.k[:, 1]  # Extract k dimension
-    grid_diag = create_grid_diag(k, Nz)
+    dx_stacked = create_dx_stacked(k, Nz)
     
-    return A_t, grid_diag, sm, (Nk, Nz)
+    return A_t, dx_stacked, sm, (Nk, Nz)
 end
 
 # Helper function to create 2D test setup with Poisson process
@@ -126,15 +126,15 @@ function create_2d_poisson_test_setup(; uniform_grid = true, Nk = 100)
     
     # Create grid spacing for 2D case
     k = sm.variables.k[:, 1]  # Extract k dimension
-    grid_diag = create_grid_diag(k, Nz)
+    dx_stacked = create_dx_stacked(k, Nz)
     
-    return A_t, grid_diag, sm, (Nk, Nz)
+    return A_t, dx_stacked, sm, (Nk, Nz)
 end
 
 @testset "Mass Conservation Tests" begin
     @testset "Issue #1: Raw g summing vs weighted mass" begin
         @testset "Uniform Grid" begin
-            A_t, grid_diag, dx_tilde, sm = create_test_setup(uniform_grid = true, N = 100)
+            A_t, dx_stacked, dx_tilde, sm = create_test_setup(uniform_grid = true, N = 100)
             g_init = create_initial_distribution(size(A_t, 1), normalized = false)
             
             # Normalize by weighted mass (correct approach)
@@ -149,7 +149,7 @@ end
             @test abs(weighted_mass - raw_mass * dx_tilde[2]) < 1e-10  # Should be proportional
             
             # Test evolution preserves weighted mass
-            g_evolved = GrowthModels.iterate_g(g_init_normalized, A_t, grid_diag, time_step = 0.1)
+            g_evolved = GrowthModels.iterate_g(g_init_normalized, A_t, dx_stacked, time_step = 0.1)
             evolved_weighted_mass = sum(g_evolved .* dx_tilde)
             
             @test evolved_weighted_mass ≈ weighted_mass atol = 1e-10
@@ -162,7 +162,7 @@ end
         end
         
         @testset "Non-uniform Grid" begin
-            A_t, grid_diag, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
+            A_t, dx_stacked, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
             g_init = create_initial_distribution(size(A_t, 1), normalized = false)
             
             # Normalize by weighted mass (correct approach)
@@ -177,7 +177,7 @@ end
             @test abs(raw_mass - weighted_mass) > 1e-2
             
             # Test evolution preserves weighted mass
-            g_evolved = GrowthModels.iterate_g(g_init_normalized, A_t, grid_diag, time_step = 0.1)
+            g_evolved = GrowthModels.iterate_g(g_init_normalized, A_t, dx_stacked, time_step = 0.1)
             evolved_weighted_mass = sum(g_evolved .* dx_tilde)
             
             @test evolved_weighted_mass ≈ 1.0 atol = 1e-10
@@ -188,7 +188,7 @@ end
         end
         
         @testset "Multiple Time Steps" begin
-            A_t, grid_diag, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
+            A_t, dx_stacked, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
             g = create_initial_distribution(size(A_t, 1), normalized = false)
             
             # Normalize by weighted mass
@@ -200,7 +200,7 @@ end
             push!(weighted_masses, sum(g .* dx_tilde))
             
             for i in 1:10
-                g = GrowthModels.iterate_g(g, A_t, grid_diag, time_step = 0.1)
+                g = GrowthModels.iterate_g(g, A_t, dx_stacked, time_step = 0.1)
                 push!(weighted_masses, sum(g .* dx_tilde))
             end
             
@@ -215,12 +215,12 @@ end
     
     @testset "Demonstration of Issue" begin
         # This test demonstrates why raw summing fails on non-uniform grids
-        A_t, grid_diag, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
+        A_t, dx_stacked, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
         g = create_initial_distribution(size(A_t, 1), normalized = false)
         
         # Normalize by RAW sum (incorrect approach)
         g_raw_normalized = g ./ sum(g)
-        normalize_by_weighted_mass!(g_raw_normalized, grid_diag)
+        normalize_by_weighted_mass!(g_raw_normalized, dx_stacked)
         
         # Test evolution - this should show mass drift
         raw_masses = Float64[]
@@ -229,8 +229,8 @@ end
         g_current = copy(g_raw_normalized)
         for i in 1:10
             push!(raw_masses, sum(g_current))
-            push!(weighted_masses, sum(grid_diag .* g_current))
-            g_current = GrowthModels.iterate_g(g_current, A_t, grid_diag, time_step = 0.1)
+            push!(weighted_masses, sum(dx_stacked .* g_current))
+            g_current = GrowthModels.iterate_g(g_current, A_t, dx_stacked, time_step = 0.1)
         end
         
         println("Raw masses (should drift): ", raw_masses)
@@ -244,13 +244,13 @@ end
     end
     
     @testset "New Utility Functions" begin
-        A_t, grid_diag, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
+        A_t, dx_stacked, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
         g = create_initial_distribution(size(A_t, 1), normalized = false)
         
         @testset "weighted_mass function" begin
             # Test weighted_mass function
             manual_weighted_mass = sum(g .* dx_tilde)
-            utility_weighted_mass = weighted_mass(g, grid_diag)
+            utility_weighted_mass = weighted_mass(g, dx_stacked)
 
             
             @test manual_weighted_mass ≈ utility_weighted_mass atol = 1e-14
@@ -260,16 +260,16 @@ end
         
         @testset "normalize_by_weighted_mass function" begin
             # Test normalize_by_weighted_mass (non-mutating)
-            g_normalized = normalize_by_weighted_mass(g, grid_diag)
-            normalized_mass = weighted_mass(g_normalized, grid_diag)
+            g_normalized = normalize_by_weighted_mass(g, dx_stacked)
+            normalized_mass = weighted_mass(g_normalized, dx_stacked)
             
             @test normalized_mass ≈ 1.0 atol = 1e-14
             @test g != g_normalized  # Original should be unchanged
             
             # Test normalize_by_weighted_mass! (mutating)
             g_copy = copy(g)
-            normalize_by_weighted_mass!(g_copy, grid_diag)
-            mutated_mass = weighted_mass(g_copy, grid_diag)
+            normalize_by_weighted_mass!(g_copy, dx_stacked)
+            mutated_mass = weighted_mass(g_copy, dx_stacked)
             
             @test mutated_mass ≈ 1.0 atol = 1e-14
             @test g_copy ≈ g_normalized atol = 1e-14
@@ -279,28 +279,14 @@ end
         end
     end
     
-    # @testset "StationaryDistribution Fix" begin
-    #     A_t, grid_diag, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
-        
-    #     # Test that StationaryDistribution now produces properly normalized distributions
-    #     stationary_dist = StationaryDistribution(A_t, grid_diag)
-    #     stationary_mass = weighted_mass(stationary_dist, grid_diag)
-        
-    #     @test stationary_mass ≈ 1.0 atol = 1e-10
-    #     @test all(stationary_dist .>= 0)  # All probabilities should be non-negative
-        
-    #     println("Stationary distribution weighted mass: ", stationary_mass)
-    #     println("Stationary distribution min/max: ", minimum(stationary_dist), " / ", maximum(stationary_dist))
-    # end
-
     
     @testset "StateEvolution with SolvedModel" begin
         # Test that the high-level StateEvolution interface works correctly
-        A_t, grid_diag, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
+        A_t, dx_stacked, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
         g = create_initial_distribution(size(A_t, 1), normalized = false)
         
         # Normalize properly
-        g_normalized = normalize_by_weighted_mass(g, grid_diag)
+        g_normalized = normalize_by_weighted_mass(g, dx_stacked)
         
         # Test StateEvolution constructor that takes SolvedModel
         state_evolution = StateEvolution(g_normalized, sm, 5)
@@ -310,7 +296,7 @@ end
         
         # Check that mass is conserved throughout evolution
         for i in 1:size(state_evolution.S, 2)
-            mass_at_time_i = weighted_mass(state_evolution.S[:, i], grid_diag)
+            mass_at_time_i = weighted_mass(state_evolution.S[:, i], dx_stacked)
             println("Mass at time ", i, ": ", mass_at_time_i)
             @test mass_at_time_i ≈ 1.0 atol = 1e-10
         end
@@ -321,19 +307,19 @@ end
     @testset "Multivariate State Mass Conservation" begin
         @testset "2D States (k, z) with Ornstein-Uhlenbeck Process" begin
             @testset "Uniform Grid" begin
-                A_t, grid_diag, sm, (Nk, Nz) = create_2d_test_setup(uniform_grid = true, Nk = 50, Nz = 20)
+                A_t, dx_stacked, sm, (Nk, Nz) = create_2d_test_setup(uniform_grid = true, Nk = 50, Nz = 20)
                 g_init = create_initial_distribution(size(A_t, 1), normalized = false)
                 
                 # Normalize by weighted mass (correct approach)
-                g_init_normalized = normalize_by_weighted_mass(g_init, grid_diag)
+                g_init_normalized = normalize_by_weighted_mass(g_init, dx_stacked)
                 
                 # Check initial mass
-                initial_weighted_mass = weighted_mass(g_init_normalized, grid_diag)
+                initial_weighted_mass = weighted_mass(g_init_normalized, dx_stacked)
                 @test initial_weighted_mass ≈ 1.0 atol = 1e-10
                 
                 # Test evolution preserves weighted mass
-                g_evolved = GrowthModels.iterate_g(g_init_normalized, A_t, grid_diag, time_step = 0.1)
-                evolved_weighted_mass = weighted_mass(g_evolved, grid_diag)
+                g_evolved = GrowthModels.iterate_g(g_init_normalized, A_t, dx_stacked, time_step = 0.1)
+                evolved_weighted_mass = weighted_mass(g_evolved, dx_stacked)
                 
                 @test evolved_weighted_mass ≈ 1.0 atol = 1e-10
                 
@@ -343,19 +329,19 @@ end
             end
             
             @testset "Non-uniform Grid" begin
-                A_t, grid_diag, sm, (Nk, Nz) = create_2d_test_setup(uniform_grid = false, Nk = 50, Nz = 20)
+                A_t, dx_stacked, sm, (Nk, Nz) = create_2d_test_setup(uniform_grid = false, Nk = 50, Nz = 20)
                 g_init = create_initial_distribution(size(A_t, 1), normalized = false)
                 
                 # Normalize by weighted mass (correct approach)
-                g_init_normalized = normalize_by_weighted_mass(g_init, grid_diag)
+                g_init_normalized = normalize_by_weighted_mass(g_init, dx_stacked)
                 
                 # Check initial mass
-                initial_weighted_mass = weighted_mass(g_init_normalized, grid_diag)
+                initial_weighted_mass = weighted_mass(g_init_normalized, dx_stacked)
                 @test initial_weighted_mass ≈ 1.0 atol = 1e-10
                 
                 # Test evolution preserves weighted mass
-                g_evolved = GrowthModels.iterate_g(g_init_normalized, A_t, grid_diag, time_step = 0.1)
-                evolved_weighted_mass = weighted_mass(g_evolved, grid_diag)
+                g_evolved = GrowthModels.iterate_g(g_init_normalized, A_t, dx_stacked, time_step = 0.1)
+                evolved_weighted_mass = weighted_mass(g_evolved, dx_stacked)
                 
                 @test evolved_weighted_mass ≈ 1.0 atol = 1e-10
                 
@@ -365,19 +351,19 @@ end
             end
             
             @testset "Multiple Time Steps" begin
-                A_t, grid_diag, sm, (Nk, Nz) = create_2d_test_setup(uniform_grid = false, Nk = 50, Nz = 20)
+                A_t, dx_stacked, sm, (Nk, Nz) = create_2d_test_setup(uniform_grid = false, Nk = 50, Nz = 20)
                 g = create_initial_distribution(size(A_t, 1), normalized = false)
                 
                 # Normalize by weighted mass
-                g = normalize_by_weighted_mass(g, grid_diag)
+                g = normalize_by_weighted_mass(g, dx_stacked)
                 
                 # Test that weighted mass is preserved over multiple time steps
                 weighted_masses = Float64[]
-                push!(weighted_masses, weighted_mass(g, grid_diag))
+                push!(weighted_masses, weighted_mass(g, dx_stacked))
                 
                 for i in 1:10
-                    g = GrowthModels.iterate_g(g, A_t, grid_diag, time_step = 0.1)
-                    push!(weighted_masses, weighted_mass(g, grid_diag))
+                    g = GrowthModels.iterate_g(g, A_t, dx_stacked, time_step = 0.1)
+                    push!(weighted_masses, weighted_mass(g, dx_stacked))
                 end
                 
                 # All weighted masses should be approximately 1.0
@@ -391,19 +377,19 @@ end
         
         @testset "2D States (k, z) with Poisson Process" begin
             @testset "Uniform Grid" begin
-                A_t, grid_diag, sm, (Nk, Nz) = create_2d_poisson_test_setup(uniform_grid = true, Nk = 50)
+                A_t, dx_stacked, sm, (Nk, Nz) = create_2d_poisson_test_setup(uniform_grid = true, Nk = 50)
                 g_init = create_initial_distribution(size(A_t, 1), normalized = false)
                 
                 # Normalize by weighted mass (correct approach)
-                g_init_normalized = normalize_by_weighted_mass(g_init, grid_diag)
+                g_init_normalized = normalize_by_weighted_mass(g_init, dx_stacked)
                 
                 # Check initial mass
-                initial_weighted_mass = weighted_mass(g_init_normalized, grid_diag)
+                initial_weighted_mass = weighted_mass(g_init_normalized, dx_stacked)
                 @test initial_weighted_mass ≈ 1.0 atol = 1e-10
                 
                 # Test evolution preserves weighted mass
-                g_evolved = GrowthModels.iterate_g(g_init_normalized, A_t, grid_diag, time_step = 0.1)
-                evolved_weighted_mass = weighted_mass(g_evolved, grid_diag)
+                g_evolved = GrowthModels.iterate_g(g_init_normalized, A_t, dx_stacked, time_step = 0.1)
+                evolved_weighted_mass = weighted_mass(g_evolved, dx_stacked)
                 
                 @test evolved_weighted_mass ≈ 1.0 atol = 1e-10
                 
@@ -413,19 +399,19 @@ end
             end
             
             @testset "Non-uniform Grid" begin
-                A_t, grid_diag, sm, (Nk, Nz) = create_2d_poisson_test_setup(uniform_grid = false, Nk = 50)
+                A_t, dx_stacked, sm, (Nk, Nz) = create_2d_poisson_test_setup(uniform_grid = false, Nk = 50)
                 g_init = create_initial_distribution(size(A_t, 1), normalized = false)
                 
                 # Normalize by weighted mass (correct approach)
-                g_init_normalized = normalize_by_weighted_mass(g_init, grid_diag)
+                g_init_normalized = normalize_by_weighted_mass(g_init, dx_stacked)
                 
                 # Check initial mass
-                initial_weighted_mass = weighted_mass(g_init_normalized, grid_diag)
+                initial_weighted_mass = weighted_mass(g_init_normalized, dx_stacked)
                 @test initial_weighted_mass ≈ 1.0 atol = 1e-10
                 
                 # Test evolution preserves weighted mass
-                g_evolved = GrowthModels.iterate_g(g_init_normalized, A_t, grid_diag, time_step = 0.1)
-                evolved_weighted_mass = weighted_mass(g_evolved, grid_diag)
+                g_evolved = GrowthModels.iterate_g(g_init_normalized, A_t, dx_stacked, time_step = 0.1)
+                evolved_weighted_mass = weighted_mass(g_evolved, dx_stacked)
                 
                 @test evolved_weighted_mass ≈ 1.0 atol = 1e-10
                 
@@ -437,11 +423,11 @@ end
         
         @testset "StateEvolution with 2D SolvedModel" begin
             # Test that the high-level StateEvolution interface works correctly for 2D
-            A_t, grid_diag, sm, (Nk, Nz) = create_2d_test_setup(uniform_grid = false, Nk = 50, Nz = 20)
+            A_t, dx_stacked, sm, (Nk, Nz) = create_2d_test_setup(uniform_grid = false, Nk = 50, Nz = 20)
             g = create_initial_distribution(size(A_t, 1), normalized = false)
             
             # Normalize properly
-            g_normalized = normalize_by_weighted_mass(g, grid_diag)
+            g_normalized = normalize_by_weighted_mass(g, dx_stacked)
             
             # Test StateEvolution constructor that takes SolvedModel
             state_evolution = StateEvolution(g_normalized, sm, 5)
@@ -451,7 +437,7 @@ end
             
             # Check that mass is conserved throughout evolution
             for i in 1:size(state_evolution.S, 2)
-                mass_at_time_i = weighted_mass(state_evolution.S[:, i], grid_diag)
+                mass_at_time_i = weighted_mass(state_evolution.S[:, i], dx_stacked)
                 println("2D StateEvolution mass at time ", i, ": ", mass_at_time_i)
                 @test mass_at_time_i ≈ 1.0 atol = 1e-10
             end

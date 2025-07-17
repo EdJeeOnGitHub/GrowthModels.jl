@@ -56,7 +56,7 @@ module GrowthModels
            sample
     # state evolution
     export StateEvolution,
-                 create_grid_diag,
+                 create_dx_stacked,
                  iterate_g, iterate_g!,
                  StationaryDistribution,
                  weighted_mass,

@@ -8,6 +8,7 @@ end
 
 
 
+
 function plot_model(m::StochasticModel, value::Value, variables::NamedTuple)
     (; k, z, y, c) = variables
     (; v, dVf, dVb, dV0, dist) = value
@@ -291,4 +292,10 @@ function plot_model(m::Union{StochasticSkibaAbilityModel,StochasticNPAbilityMode
     subplot = plot(p1, p2, p3, p4, layout = (2, 2), size = (800, 600))
 
     return subplot
+end
+
+
+
+function plot_model(sm::SolvedModel)
+    plot_model(sm.m, sm.value, sm.variables)
 end

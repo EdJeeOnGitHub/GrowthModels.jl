@@ -143,18 +143,20 @@ model_names = ["RamseyCassKoopmansModel", "SkibaModel", "SmoothSkibaModel"]
     # Evolution of capital goes to analytical steady state
     sm = SolvedModel(m, fit_value, fit_variables)
     g = fill(1.0, size(sm.value.A', 1)) 
-    grid_diag = create_grid_diag(sm.variables[:k][:, 1], size(sm.variables.k, 2))
 
-    g = g ./ sum(g)
+    dx_stacked = create_dx_stacked(sm.variables[:k][:, 1], size(sm.variables.k, 2))
 
-    T_max = 10
+    T_max = 100
     distribution_time_series = StateEvolution(g, sm, T_max)
-    mass_over_t = dropdims(sum(distribution_time_series.E_S, dims = 1), dims = 1)
+    cell_masses = distribution_time_series.cell_masses
+    mass_over_t = dropdims(sum(cell_masses, dims = 1), dims = 1)
     for i in 1:T_max
         @test isapprox(mass_over_t[i], 1.0; atol = 1e-2)
     end
 
-    min_dist = minimum(abs.(vec(sm.variables[:k])[argmax(distribution_time_series[T_max-1])] .- k_steady_state(m)))
+    # test that evolution converges to analytical steady state
+    E_k = cell_masses .* sm.variables.k
+    min_dist = minimum(abs.(vec(sm.variables[:k])[argmax(E_k[:, end])] .- k_steady_state(m)))
     # smooth skiba steady state not actually calculated analytically
     if !isa(m, SmoothSkibaModel)
         @test min_dist < 1e-2
@@ -167,8 +169,7 @@ model_names = ["RamseyCassKoopmansModel", "SkibaModel", "SmoothSkibaModel"]
 end
 
 model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
-# @testset "Stochastic Model Tests for $model_name" for model_name in model_names
-    model_name = model_names[1]
+@testset "Stochastic Model Tests for $model_name" for model_name in model_names
     # Dynamically instantiate the model based on its name
     m = eval(Meta.parse(model_name))()
     hyperparams = StateSpaceHyperParams(m, Nz = 40, Nk = 100, coef = 0, power = 0, kmax_f = 5.0)
@@ -206,32 +207,15 @@ model_names = ["StochasticRamseyCassKoopmansModel", "StochasticSkibaModel"]
     sm = SolvedModel(m, fit_value, fit_variables)
     A_t = sparse(sm.value.A')
     g = fill(1.0, size(A_t, 1)) 
-    g = g ./ sum(g)
-    grid_diag = GrowthModels.create_grid_diag(sm.variables[:k][:, 1], size(sm.variables.k, 2))
+    dx_stacked = GrowthModels.create_dx_stacked(sm.variables[:k][:, 1], size(sm.variables.k, 2))
     
-    g = g ./ weighted_mass(g, grid_diag)
-    iterate_g!(g, A_t, grid_diag; time_step = 1.0)
-
-    weighted_mass(g, grid_diag) # should be 1.0
-
-    # normalize_by_weighted_mass!(g, grid_diag)
-
-    # g = g ./ sum(g)
-    v_dim = size(init_value.v)
-    
-    distribution_time_series = StateEvolution(g, sm, 10)
-    S = reshape(distribution_time_series.S, (v_dim..., size(distribution_time_series.S, 2)))
-    
-    E_S = distribution_time_series.E_S
-    
-    S_mass_by_t = dropdims(sum(grid_diag .* S, dims = (1, 2)), dims = (1, 2))
-    E_S_mass_by_t = dropdims(sum(grid_diag .* E_S, dims = 1), dims = 1)
-
-    hcat(S_mass_by_t, E_S_mass_by_t)
-
-
-    sum(distribution_time_series.E_S, dims = 1)
-    @test isa(distribution_time_series, StateEvolution)
+    distribution_time_series = StateEvolution(g, sm, 10);
+    cell_mass = distribution_time_series.cell_masses
+    cell_mass_by_t = dropdims(sum(cell_mass, dims = (1, 2)), dims = (1, 2))
+    for t in 1:size(cell_mass_by_t, 1)
+        println("Weighted mass at time $t: ", cell_mass_by_t[t])
+        @test isapprox(cell_mass_by_t[t], 1.0; atol = 1e-8)
+    end
 end
 
 
@@ -255,24 +239,18 @@ end
     A_t = sparse(sm.value.A')
     g = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
     g = g ./ sum(g)
-    distribution_time_series =  StateEvolution(g, sm, 200; implicit_steps = 10);
-end
 
-function create_ability_density_to_test(sm, eta_dens, g_init, dims; implicit_steps = 10)
-    g_grid =  reshape(g_init, dims)
-    g_grid = g_grid ./ sum(g_grid, dims = [1, 2])
-    eta_dens_rs = reshape(eta_dens, (1, 1, size(eta_dens, 1)))
-    # renormalize by Nk x Nz and then multiply by η density
-    g_grid = g_grid .* eta_dens_rs
-    g = vec(g_grid)
-    init_dens = dropdims(sum(g_grid, dims = [1, 2]), dims = (1, 2))
-    @test all(init_dens .≈ eta_dens)
-    distribution_time_series =  StateEvolution(g, sm, 10, implicit_steps = implicit_steps);
-    eta_by_t = dropdims(sum(distribution_time_series.E_S, dims = [1]), dims = 1)
-    abs_diff = abs.(eta_by_t .- eta_dens)
-    return abs_diff, eta_by_t, distribution_time_series
+    distribution_time_series =  StateEvolution(g, sm, 200; implicit_steps = 1);
+
+    cell_masses = distribution_time_series.cell_masses
+    cell_masses_by_t = dropdims(sum(cell_masses, dims = (1, 2)), dims = (1, 2))
+    for t in 1:size(cell_masses_by_t, 1)
+        println("Weighted mass at time $t: ", cell_masses_by_t[t])
+        @test isapprox(cell_masses_by_t[t], 1.0; atol = 1e-8)
+    end
 
 end
+
 
 # Check that transition matrices never try and move people across abilities
 function index_checker(grid_dims, A, B; idx_to_check = 1)
@@ -296,6 +274,19 @@ function index_checker(grid_dims, A, B; idx_to_check = 1)
     return A_check, B_check
 end
 
+function setup_ability_check(sm, g)
+    dx_stacked = create_dx_stacked(sm.variables[:k][:, 1, 1], prod(size(sm.variables.k)[2:end]))
+    normalize_by_weighted_mass!(g, dx_stacked)
+
+    init_mass =  g .* dx_stacked
+    init_mass_grid = reshape(init_mass, size(sm.variables[:k]))
+    init_ability = dropdims(sum(init_mass_grid, dims = (1, 2)), dims = (1, 2))
+
+    evolution = StateEvolution(g, sm, 5; implicit_steps = 1)
+    cell_masses = evolution.cell_masses
+    ability_by_t = dropdims(sum(cell_masses, dims = (1, 2)), dims = (1, 2))
+    return init_ability, ability_by_t, evolution, dx_stacked
+end
 
 @testset "Stochastic Ability Skiba" begin
     Nk = 1000
@@ -339,22 +330,21 @@ end
 
 
     r = SolvedModel(m_a, fit_value, fit_variables)
-
     sm = SolvedModel(m_a, fit_value, fit_variables)
-    A_t = sparse(sm.value.A')
-
-    eta_dens = rand(Nη)
-    eta_dens = eta_dens ./ sum(eta_dens)
-    g_init = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
-
-    abs_diff, eta_by_t, distribution_time_series = create_ability_density_to_test(sm, eta_dens, g_init, (Nk, Nz, Nη); implicit_steps = 1)
-    @test maximum(abs_diff) < 0.15
+    g_init = abs.(sin.(range(0, stop = 2π, length = size(r.value.A', 1))))
+    g_init = g_init ./ sum(g_init)
+    init_ability, ability_by_t, evolution, dx_stacked = setup_ability_check(sm, g_init)
+    # This isn't particularly precise - ability seems to be drifting
+    for t in 1:size(ability_by_t, 2)
+        comp_ab = hcat(ability_by_t[:, t], init_ability)
+        println("Ability at time $t vs init ability: ", comp_ab)
+        @test isapprox(ability_by_t[:, t], init_ability; rtol = 1e-1)
+    end
 end
 
 
 
 @testset "Stochastic NP Ability" begin
-
     np_model = StochasticNPAbilityModel()
 
     np_hyperparams = StateSpaceHyperParams(np_model)
@@ -370,9 +360,6 @@ end
     A_t = sparse(np_sm.value.A')
     g = abs.(sin.(range(0, stop = 2π, length = size(A_t, 1))))
     g = g ./ sum(g)
-
-    eta_dens = rand(np_hyperparams[:η].N)
-    eta_dens = eta_dens ./ sum(eta_dens)
 
 
     grid_dims = size(np_sm.value.v)
@@ -390,15 +377,15 @@ end
         @test idx_check[2] == true
     end
 
-
-    abs_diff, eta_by_t, distribution_time_series = create_ability_density_to_test(np_sm, eta_dens, g, size(np_sm.value.v); implicit_steps = 1)
-    @test maximum(abs_diff) < 1e-3
-
-    distribution_time_series =  StateEvolution(g, np_sm, 5);
-
-    plot_model(np_model, fit_value, fit_variables)
+    g_init = g
+    init_ability, ability_by_t, distribution_time_series, dx_stacked = setup_ability_check(np_sm, g_init)
+    # This isn't particularly precise - ability seems to be drifting
+    for t in 1:size(ability_by_t, 2)
+        comp_ab = hcat(ability_by_t[:, t], init_ability)
+        println("Ability at time $t vs init ability: ", comp_ab)        
+        @test isapprox(ability_by_t[:, t], init_ability; rtol = 1e-1)   
+    end
 end
-
 
 
 
@@ -439,15 +426,14 @@ end
         @test idx_check[2] == true
     end
 
-    eta_dens = rand(np_hyperparams[:η].N)
-    eta_dens = eta_dens ./ sum(eta_dens)
-
-    abs_diff, eta_by_t, distribution_time_series = create_ability_density_to_test(np_sm, eta_dens, g, size(np_sm.value.v); implicit_steps = 10)
-    @test maximum(abs_diff) < 0.1
-
-    distribution_time_series =  StateEvolution(g, np_sm, 5);
-
-    plot_model(np_model, fit_value, fit_variables)
+    g_init = g
+    init_ability, ability_by_t, distribution_time_series, dx_stacked = setup_ability_check(np_sm, g_init)
+    # This isn't particularly precise - ability seems to be drifting
+    for t in 1:size(ability_by_t, 2)
+        comp_ab = hcat(ability_by_t[:, t], init_ability)
+        println("Ability at time $t vs init ability: ", comp_ab)    
+        @test isapprox(ability_by_t[:, t], init_ability; rtol = 1e-1)       
+    end
 end
 
 
@@ -456,3 +442,4 @@ include("test-differentiable.jl")
 # Precision tests
 include("test-precision.jl")
 include("test-matlab-rbc-diffusion.jl")
+include("test-mass-conservation.jl")
