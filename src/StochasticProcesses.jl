@@ -50,7 +50,6 @@ end
 process_mean(p::OrnsteinUhlenbeckProcess) = p.ln_stationary_μ
 
 
-
 """
     sample(process::OrnsteinUhlenbeckProcess, x0, T, dt; seed=nothing)
 
@@ -80,22 +79,24 @@ function sample(process::OrnsteinUhlenbeckProcess, x0::Float64, T, dt; seed=noth
     if seed !== nothing
         Random.seed!(seed)
     end
-    N = round(Int, T/dt)  # Number of time steps
+    N = round(Int, T/dt)
     times = 0:dt:T
     values = zeros(N+1)
     values[1] = x0
 
-    for i in 2:N+1
-        dw = sqrt(dt) * randn()  # Wiener process increment
-        values[i] = values[i-1] + process.θ * (-values[i-1]) * dt + process.σ * dw
-    end
-    values = exp.(values)
+    # Exact solution parameters
+    ρ = exp(-process.θ * dt)
+    # The variance of the noise term in the exact solution
+    noise_std = process.σ * sqrt((1 - exp(-2 * process.θ * dt)) / (2 * process.θ))
 
+    for i in 2:N+1
+        # Exact update rule
+        values[i] = values[i-1] * ρ + noise_std * randn()
+    end
+  
+    values = exp.(values)
     return times, values
 end
-
-
-
 
 
 """
@@ -133,23 +134,25 @@ function sample(process::OrnsteinUhlenbeckProcess, x0s::Vector, T, dt; seed=noth
     if seed !== nothing
         Random.seed!(seed)
     end
-    N_traj = length(x0s)  # Number of trajectories
-    N_time = round(Int, T/dt)  # Number of time steps
+    N_traj = length(x0s)
+    N_time = round(Int, T/dt)
     times = 0:dt:T
     values = zeros(N_traj, N_time+1)
     
+    # Exact solution parameters
+    ρ = exp(-process.θ * dt)
+    noise_std = process.σ * sqrt((1 - exp(-2 * process.θ * dt)) / (2 * process.θ))
+
     for n in 1:N_traj
         values[n, 1] = x0s[n]
         for i in 2:N_time+1
-            dw = sqrt(dt) * randn()  # Wiener process increment
-            values[n, i] = values[n, i-1] + process.θ * (-values[n, i-1]) * dt + process.σ * dw
+            # Exact update rule
+            values[n, i] = values[n, i-1] * ρ + noise_std * randn()
         end
     end
     values = exp.(values)
-
     return times, values
 end
-
 """
     sample(process::OrnsteinUhlenbeckProcess, x0, T, dt, K; seed=nothing)
 
@@ -184,20 +187,27 @@ function sample(process::OrnsteinUhlenbeckProcess, x0, T, dt, K; seed=nothing)
     if seed !== nothing
         Random.seed!(seed)
     end
-    N_dim = length(x0)  # Dimension of x0
-    N_time = round(Int, T/dt)  # Number of time steps
+    N_dim = length(x0)
+    N_time = round(Int, T/dt)
     times = 0:dt:T
     values = zeros(N_dim, N_time+1, K)
     
+    # Exact solution parameters
+    ρ = exp(-process.θ * dt)
+    noise_std = process.σ * sqrt((1 - exp(-2 * process.θ * dt)) / (2 * process.θ))
+
     for k in 1:K
-        current_x = copy(x0)  # Copy initial condition for this trajectory
+        values[:, 1, k] = x0
         for i in 2:N_time+1
-            dw = sqrt(dt) * randn(N_dim)  # Multidimensional Wiener process increment
-            current_x .= current_x .+ process.θ .* (-current_x) .* dt .+ process.σ .* dw
-            values[:, i, k] = current_x
+            dw = randn(N_dim)
+            # Exact update rule for each dimension
+            values[:, i, k] = values[:, i-1, k] .* ρ .+ noise_std .* dw
         end
     end
     values = exp.(values)
-
     return times, values
 end
+
+
+
+
