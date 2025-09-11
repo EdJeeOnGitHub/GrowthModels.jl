@@ -465,6 +465,52 @@ end
     end
 end
 
+@testset "Stochastic Ability Skiba - Flat Transfer" begin
+    Nk = 100
+    Nz = 10
+    Nη = 5
+
+    m_a = GrowthModels.StochasticSkibaAbilityModel()
+    k_hps = HyperParams(coef = 5.0, power = 10.0, N = Nk, xmax = 20.0, xmin = 1e-3);
+    z_hps = HyperParams(coef = 0.0, power = 0.0, N = Nz, xmax = 1.5, xmin = 0.5);
+    η_hps = HyperParams(coef = 0.0, power = 0.0, N = Nη, xmax = 1.5, xmin = 0.5);
+    hyperparams_a = StateSpaceHyperParams((k = k_hps, z = z_hps, η = η_hps))
+    state_a = StateSpace(m_a, hyperparams_a)
+    value_a = Value(state_a);
+    value_a.v[:] = GrowthModels.initial_guess(m_a, state_a)
+    fit_value, fit_variables, fit_iter = solve_HJB(
+        m_a, 
+        hyperparams_a, 
+        init_value = value_a, maxit = 1000, flat_transfer = 1.0);
+
+    Bswitch_a = GrowthModels.construct_diffusion_matrix(m_a.stochasticprocess, state_a, hyperparams_a)
+    @test all(isapprox.(sum(Bswitch_a, dims = 2), zeros(size(Bswitch_a, 1)); atol = 1e-10)  .== 1)
+
+
+    plot_model_output = plot_model(m_a, fit_value, fit_variables)
+
+
+    grid_dims = (Nk, Nz, Nη)
+    is_to_check = collect(1:prod(grid_dims))
+    is_to_check = sample(is_to_check, 1000)
+    idx_checks = []
+    for idx_to_check in is_to_check
+        id_c = index_checker(grid_dims, fit_value.A, Bswitch_a; idx_to_check = idx_to_check)
+        push!(idx_checks, id_c)
+    end
+
+    for idx_check in idx_checks
+        @test idx_check[1] == true
+        @test idx_check[2] == true
+    end
+
+
+
+    r = SolvedModel(m_a, fit_value, fit_variables)
+    sm = SolvedModel(m_a, fit_value, fit_variables)
+end
+
+
 
 # Differentiation tests
 include("test-differentiable.jl")

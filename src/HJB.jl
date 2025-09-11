@@ -16,10 +16,12 @@ function generate_dx(x::VecOrMat{T}) where {T <: ForwardDiff.Dual}
 end
 
 
-function update_v(m::DeterministicModel, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v}
+function update_v(m::DeterministicModel, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true, flat_transfer = 0.0) where {T, N_v}
     γ, ρ, δ = m.γ, m.ρ, m.δ
     (; v, dVf, dVb, dV0, dist) = value
-    k, y = state[:k], state.aux_state[:y] # y isn't really a state but avoid computing it each iteration this way
+    k, y_orig = state[:k], state.aux_state[:y] # y isn't really a state but avoid computing it each iteration this way
+    y = y_orig .+ flat_transfer
+
     (; N, xmax, xmin) = hyperparams[:k]
     kmax, kmin =  xmax, xmin
 
@@ -252,11 +254,12 @@ function construct_diffusion_matrix(stochasticprocess::PoissonProcess, state::St
     return B_switch
 end
 
-function update_v(m::StochasticModel{T, S}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams, diffusion_matrix; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v, S <: StochasticProcess}
+function update_v(m::StochasticModel{T, S}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams, diffusion_matrix; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true, flat_transfer = 0.0) where {T, N_v, S <: StochasticProcess}
     (; γ, α, ρ, δ) = m
     (; v, dVf, dVb, dV0, dist) = value
     k, z = state[:k], state[:z]' # y isn't really a state but avoid computing it each iteration this way
-    y = state.aux_state[:y]
+    y_orig = state.aux_state[:y]
+    y = y_orig .+ flat_transfer
     k_hps = hyperparams[:k]
     z_hps = hyperparams[:z]
 
@@ -399,15 +402,15 @@ end
 
 initial_guess(m::GrowthModels.Model{T}, state) where {T <: Real} = state.aux_state[:y] .^ (1 - m.γ) / (1 - m.γ) / m.ρ
 
-function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000, verbose = true)
+function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000, verbose = true, flat_transfer = 0.0)
     curr_iter = 0
     val = deepcopy(init_value)
     val.v[:] = initial_guess(m, state)
     for n in 1:maxit
         curr_iter += 1
-        output_value, curr_iter = update_v(m, val, state, hyperparams, iter = n, verbose = verbose)
+        output_value, curr_iter = update_v(m, val, state, hyperparams, iter = n, verbose = verbose, flat_transfer = flat_transfer)
         if output_value.convergence_status
-            fit_value, _, fit_variables = update_v(m, val, state, hyperparams, iter = curr_iter, verbose = verbose)
+            fit_value, _, fit_variables = update_v(m, val, state, hyperparams, iter = curr_iter, verbose = verbose, flat_transfer = flat_transfer)
             return (value = fit_value, variables = fit_variables, iter = curr_iter)
             break
         end
@@ -416,25 +419,25 @@ function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams, state::StateSpa
     return (value = val, variables = nothing, iter = curr_iter)
 end
 
-function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams; init_value = nothing, maxit = 1000, verbose = true)
+function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams; init_value = nothing, maxit = 1000, verbose = true, flat_transfer = 0.0)
     state = StateSpace(m, hyperparams)
     if isnothing(init_value)
         init_value = Value(state)
     end
-    return solve_HJB(m, hyperparams, state; init_value = init_value, maxit = maxit, verbose = verbose)
+    return solve_HJB(m, hyperparams, state; init_value = init_value, maxit = maxit, verbose = verbose, flat_transfer = flat_transfer)
 end
 
 
-function solve_HJB(m::StochasticModel, hyperparams::StateSpaceHyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000, verbose = true)
+function solve_HJB(m::StochasticModel, hyperparams::StateSpaceHyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000, verbose = true, flat_transfer = 0.0)
     curr_iter = 0
     val = deepcopy(init_value)
     val.v[:] = initial_guess(m, state)
     Bswitch = construct_diffusion_matrix(m.stochasticprocess, state, hyperparams)
     for n in 1:maxit
         curr_iter += 1
-        output_value, curr_iter = update_v(m, val, state, hyperparams, Bswitch, iter = n, verbose = verbose)
+        output_value, curr_iter = update_v(m, val, state, hyperparams, Bswitch, iter = n, verbose = verbose, flat_transfer = flat_transfer)
         if output_value.convergence_status
-            fit_value, _, fit_variables = update_v(m, val, state, hyperparams, Bswitch, iter = curr_iter, verbose = verbose)
+            fit_value, _, fit_variables = update_v(m, val, state, hyperparams, Bswitch, iter = curr_iter, verbose = verbose, flat_transfer = flat_transfer)
             return (value = fit_value, variables = fit_variables, iter = curr_iter)
             break
         end
@@ -453,11 +456,14 @@ V_err(m::Model) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.�
 
 
 
-function update_v(m::Union{StochasticSkibaAbilityModel{T, S},StochasticNPAbilityModel{T,S}}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams, diffusion_matrix; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true) where {T, N_v, S <: StochasticProcess}
+function update_v(m::Union{StochasticSkibaAbilityModel{T, S},StochasticNPAbilityModel{T,S}}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams, diffusion_matrix; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true, flat_transfer = 0.0) where {T, N_v, S <: StochasticProcess}
     (; γ, ρ, δ) = m
     (; v, dVf, dVb, dV0, dist) = value
     k, z, η = state[:k], state[:z]', state[:η]' # y isn't really a state but avoid computing it each iteration this way
-    y = state.aux_state[:y]
+    y_orig = state.aux_state[:y]
+    # Adding flat permanent transfer to income -- defaults to 0 but can be used for counterfactuals
+    y = y_orig .+ flat_transfer
+
     k_hps = hyperparams[:k]
     z_hps = hyperparams[:z]
     η_hps = hyperparams[:η]
