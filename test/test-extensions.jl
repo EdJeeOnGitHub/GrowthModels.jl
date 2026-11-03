@@ -20,6 +20,10 @@ GrowthModels.default_grid_spec(::ReviewedModel) = (k=(n=70,bounds=(.1,5.)),z=(n=
     @test fit.converged
     @test minimum(fit.policy.resources) > .1
     @test capital_drift(fit,(k=g.k[20],z=.8)) ≈ fit.policy.drift[20,1]
+    state=(k=1.,z=.8)
+    @test resources(ResourceModel(m),state) == resources(m,state)
+    adjusted=ResourceModel(ResourceModel(m;transfer=.2,income_floor=.8);transfer=.1,income_floor=.5)
+    @test resources(adjusted,state) == max(max(resources(m,state)+.2,.8)+.1,.5)
     @test preferences(ResourceModel(m)) == preferences(m)
     @test solve(ResourceModel(m),g).converged
     @test StateGrid(ResourceModel(m)).k == g.k

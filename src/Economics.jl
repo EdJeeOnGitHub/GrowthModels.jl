@@ -27,7 +27,7 @@ marginal_product(m::Model, state::NamedTuple) = ForwardDiff.derivative(k -> prod
 """
     ResourceModel(model; transfer=0, income_floor=-Inf, population=population(model))
 
-An economic specification with disposable income `max(production + transfer,
+An economic specification with disposable income `max(resources(model, state) + transfer,
 income_floor)`, before depreciation and consumption. The production model and
 population are owned snapshots. Custom model types can instead implement
 `resources(model, state)` directly.
@@ -53,7 +53,7 @@ is_deterministic(m::ResourceModel) = is_deterministic(m.model)
 population(m::ResourceModel) = m.population
 preferences(m::ResourceModel) = preferences(m.model)
 production(m::ResourceModel, state::NamedTuple) = production(m.model, state)
-resources(m::ResourceModel, state::NamedTuple) = max(production(m, state) + m.transfer, m.income_floor)
+resources(m::ResourceModel, state::NamedTuple) = max(resources(m.model, state) + m.transfer, m.income_floor)
 
 """A one-capital model with concrete callable production `f(k,z,ability)`."""
 struct FunctionalModel{T,F,S,P} <: Model{T}

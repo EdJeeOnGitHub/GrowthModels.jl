@@ -58,3 +58,12 @@ for the migrated package. It is a runnable adoption environment; it does not
 rewrite the aggregate-transfers root Manifest or migrate its historical notebooks
 and separate modeling packages. Use this environment for the migrated package
 until those separate callers have adopted the breaking API.
+
+## Compositional resource adjustments
+
+`ResourceModel(base; transfer, income_floor)` now computes
+`max(resources(base, state) + transfer, income_floor)`. Previously it started
+from `production(base, state)`, discarding custom resource rules and inner
+wrappers. Built-in models with unadjusted resources behave as before. Nested
+wrappers now apply in order; use the unwrapped production model explicitly when
+replacement rather than composition is intended.
