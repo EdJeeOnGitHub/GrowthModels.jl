@@ -29,7 +29,11 @@ k_star_Skiba(α::Real, A_H::Real, A_L::Real, κ::Real) = κ/(1-(A_L/A_H)^(1/α))
 k_steady_state_hi(m::SkibaModel) = (m.α*m.A_H/(m.ρ + m.δ))^(1/(1-m.α)) + m.κ
 k_steady_state_lo(m::SkibaModel) = (m.α*m.A_L/(m.ρ + m.δ))^(1/(1-m.α))
 k_steady_state(m::SkibaModel) = [k_steady_state_lo(m), k_steady_state_hi(m)]
-k_star(m::SkibaModel) = m.κ/(1-(m.A_L/m.A_H)^(1/m.α))
+"""Technology crossing of the two production branches; not the optimal Skiba threshold."""
+technology_crossing(m::Union{SkibaModel,StochasticSkibaModel,StochasticSkibaAbilityModel}) =
+    k_star_Skiba(m.α, m.A_H, m.A_L, m.κ)
+"""Compatibility name for `technology_crossing`; this is not a policy threshold."""
+k_star(m::SkibaModel) = technology_crossing(m)
 
 y_H(m::SkibaModel) = (k) -> m.A_H*max(k - m.κ,0)^m.α
 y_L(m::SkibaModel) = (k) -> m.A_L*k^m.α 
@@ -40,7 +44,7 @@ y_L(m::SkibaModel) = (k) -> m.A_L*k^m.α
 end
 # derivative of skiba production function
 @inline function skiba_production_function_prime(k, α, A_H, A_L, κ)
-    if k > κ
+    if A_H * max(k - κ, zero(k))^α > A_L * k^α
         A_H * α * pow(k - κ, α - 1)
     else
         A_L * α * pow(k, α - 1)

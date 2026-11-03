@@ -99,3 +99,14 @@ function solve_linear!(out, solver::TridiagonalHJBSolver, rhs)
     end
     return out
 end
+
+# Model layout suggests an optimization, but the generator decides whether it
+# is valid. Switching in a trailing state falls back to a full sparse solve.
+function independent_blocksize(A::SparseMatrixCSC, preferred)
+    for col in axes(A, 2), ptr in nzrange(A, col)
+        if (rowvals(A)[ptr] - 1) ÷ preferred != (col - 1) ÷ preferred && !iszero(nonzeros(A)[ptr])
+            return size(A, 1)
+        end
+    end
+    return preferred
+end

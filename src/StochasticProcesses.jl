@@ -22,7 +22,7 @@ struct OrnsteinUhlenbeckProcess{T <: Real} <: StochasticProcess
     # y = log(z) ~ N(0, ln_stationary_σ)
     # y ~ N(ln_mean, ln_stationary_σ)
 
-    # dlog(z) = -θ log(z) dt + σ^2 dW
+    # dlog(z) = -θ log(z) dt + σ dW
     # lognormal variance = exp(μ + σ^2 / 2) => exp(σ^2 / (2*θ) / 2 )
     # ln_stationary_σ = σ^2 / (2θ)
 
@@ -79,8 +79,9 @@ function sample(process::OrnsteinUhlenbeckProcess, x0::Float64, T, dt; seed=noth
     if seed !== nothing
         Random.seed!(seed)
     end
-    N = round(Int, T/dt)
+    T >= 0 && dt > 0 || throw(ArgumentError("T must be nonnegative and dt positive"))
     times = 0:dt:T
+    N = length(times) - 1
     values = zeros(N+1)
     values[1] = x0
 
@@ -135,8 +136,9 @@ function sample(process::OrnsteinUhlenbeckProcess, x0s::Vector, T, dt; seed=noth
         Random.seed!(seed)
     end
     N_traj = length(x0s)
-    N_time = round(Int, T/dt)
+    T >= 0 && dt > 0 || throw(ArgumentError("T must be nonnegative and dt positive"))
     times = 0:dt:T
+    N_time = length(times) - 1
     values = zeros(N_traj, N_time+1)
     
     # Exact solution parameters
@@ -188,8 +190,9 @@ function sample(process::OrnsteinUhlenbeckProcess, x0, T, dt, K; seed=nothing)
         Random.seed!(seed)
     end
     N_dim = length(x0)
-    N_time = round(Int, T/dt)
+    T >= 0 && dt > 0 || throw(ArgumentError("T must be nonnegative and dt positive"))
     times = 0:dt:T
+    N_time = length(times) - 1
     values = zeros(N_dim, N_time+1, K)
     
     # Exact solution parameters

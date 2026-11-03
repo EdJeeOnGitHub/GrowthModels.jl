@@ -56,8 +56,8 @@ function benchmark_performance()
         g0 = fill(1 / sum(weights), length(weights))
         reference, tr, br = measure(() -> uncached_path(g0, A_t, weights, 100))
         if isdefined(GrowthModels, :EvolutionWorkspace)
-            full, tf, bf = measure(() -> StateEvolution(g0, A_t, collect(0.0:0.25:25.0), dims, weights))
-            final, te, be = measure(() -> StateEvolution(g0, A_t, collect(0.0:0.25:25.0), dims, weights; save = :final))
+            full, tf, bf = measure(() -> StateEvolution(g0, A_t, collect(0.0:0.25:25.0), dims, weights; dt = 0.25))
+            final, te, be = measure(() -> StateEvolution(g0, A_t, collect(0.0:0.25:25.0), dims, weights; dt = 0.25, save = :final))
             @assert maximum(abs.(full.S - reference)) < 1e-12
             @assert final.final_density ≈ full.final_density
             @printf("DENSITY %-9s uncached %.6f s %.3f MiB; cached %.6f s %.3f MiB (%.1fx); final-only %.6f s %.3f MiB\n",

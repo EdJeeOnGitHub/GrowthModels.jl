@@ -41,13 +41,20 @@ next_fit = solve_HJB(next_model, hp;
 honored, including an all-zero guess. Omit it (or pass `nothing`) to use the
 model's default guess. Earlier results and their diagnostics are never mutated.
 `maxit=0` returns the supplied/default guess without iteration. Convergence
+requires both a small value update and a nonlinear HJB residual below `crit`;
+policies using a floored marginal value cannot certify convergence. The default
+pseudo-time step is `Delta=1` for γ<1 and `Delta=1000` otherwise. An explicit
+`Delta` overrides this choice. γ=1 (log utility) is currently unsupported and
+raises an explicit error. Constructing `SolvedModel` from a failed solve also
+raises an explanatory error. Convergence
 history contains one initial `Inf` and one distance per update. With dual
 numbers, convergence also requires their tangents to converge.
 
 Each solve allocates its geometry, policy arrays, and sparse structure once.
 The default `linear_solver=:auto` uses tridiagonal elimination for deterministic
 models and separate sparse blocks for fixed-ability groups. Sparse numerical
-factors are updated each iteration with a fixed symbolic pattern. Use
+factors are updated each iteration with a fixed symbolic pattern. A generator
+that couples ability groups automatically uses a full sparse solve. Use
 `linear_solver=:sparse` to cross-check against one full sparse system.
 Differentiated sparse solves share a primal factorization across all tangent
 right-hand sides, including nested dual numbers.
@@ -78,7 +85,11 @@ stores no trajectory. Every result has `final_density` and `final_time`.
 Callbacks run at observation times, including the initial time, independently of
 storage mode. The callback's mass buffer is borrowed: do not mutate it or retain
 it without copying. `dt` is a maximum internal step; each observation interval
-is divided into equal substeps that land exactly on its endpoint.
+is divided into equal substeps that land exactly on its endpoint. The default
+for real observation times is `dt=0.1`, independent of observation spacing.
+Explicit `dt=nothing` restores one step per observation interval. Adding times
+that do not align with the internal grid can still change the subdivision;
+check time-step refinement for the accuracy your application needs.
 
 Stationary computation is **no longer automatic**: `stationary_dist` is
 `nothing` unless `stationary=true` is requested. You can instead call
@@ -115,7 +126,10 @@ For fixed-ability models, `StateEvolution` automatically factors independent
 capital/productivity blocks. A manually constructed workspace can request this
 with `blocksize=Nk*Nz`; cross-block transitions are rejected. The initial density
 is normalized once by default; pass `normalize=false` to preserve a nonunit input
-mass. No renormalization is applied during time stepping.
+mass. No renormalization is applied during time stepping. When requested, the
+stationary density in an evolution result (including `StationaryDistribution(path)`)
+has the same total mass as that result. The matrix-taking stationary function
+continues to return a unit-mass probability density.
 
 ## Validation and benchmarks
 
@@ -143,3 +157,32 @@ An optional first argument loads another checkout using the current project's
 dependencies for an HJB/differentiation comparison. Timing is informational;
 correctness and reuse contracts, rather than machine-dependent timing limits,
 are enforced in tests.
+
+## Scientific defaults and remaining limitations
+
+Default OU productivity bounds are `exp(±z_width * σ / sqrt(2θ))`, with
+`z_width=4`. This represents a zero-mean OU process in log productivity.
+Parametric stochastic models size the upper capital bound from the highest
+productivity and ability, then apply `kmax_f`. Custom nonparametric production
+functions still require the caller to assess their chosen capital bounds.
+Wider grids at a fixed number of points have coarser resolution: refine both
+bounds and grid size when validating numerical results.
+
+`technology_crossing(model)` names the crossing of the two Skiba production
+branches. The historical `k_star` alias does **not** compute the optimal Skiba
+threshold. SmoothSkiba steady-state helpers remain asymptotic approximations;
+its high approximation no longer adds a capital shift absent from production.
+Stochastic steady-state helpers are reference values, not claims about the
+stationary distribution of optimal capital under uncertainty.
+
+State constraints are checked across **every lower-capital boundary state**.
+Negative net output at high capital is allowed when capital can drift inward;
+it is not, by itself, evidence of an invalid grid. Boundary derivatives use the
+same floored zero-drift marginal value convention throughout the solver.
+
+`flat_transfer` remains a solver option in this compatibility-preserving release,
+but is retained with the solved policy and included in interpolated capital
+drift. The unfinished two-asset model remains experimental and unsupported.
+The larger grid/result/evolution API redesign and further performance tuning
+are deferred. See [CORRECTNESS_REVIEW.md](CORRECTNESS_REVIEW.md) for validation
+and changes that require regenerating default-based results.

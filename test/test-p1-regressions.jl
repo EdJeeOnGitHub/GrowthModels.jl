@@ -105,7 +105,12 @@ using LinearAlgebra
             value = Value(state)
             value.v[:] = vec(repeat(reshape([0.0, 0.25, 4.25], 3, 1), 1, dims[2:end]...))
             diffusion = GrowthModels.construct_diffusion_matrix(process, state, hp)
-            output, _, variables = update_v(m, value, state, hp, diffusion; crit = Inf, verbose = false)
+            # Inspect the policy assembly directly. An infinite convergence
+            # tolerance must not be used to obtain an unconverged policy.
+            ws = GrowthModels.HJBWorkspace(m, state, hp; diffusion_matrix = diffusion)
+            GrowthModels.prepare_hjb_step!(ws, m, value.v, 1000)
+            variables = GrowthModels.hjb_variables(ws)
+            output = (A = ws.A,)
             @test all(variables.If .+ variables.Ib .+ variables.I0 .== 1)
             @test all(selectdim(variables.If, 1, 2))
             @test output.A * vec(kk) ≈ vec(y .- m.δ .* kk .- variables.c) atol = 1e-12

@@ -1,5 +1,9 @@
 # Performance and interface changes
 
+These are historical measurements of the performance implementation committed as
+`614172c`. Subsequent correctness changes alter numerical defaults; see
+[CORRECTNESS_REVIEW.md](CORRECTNESS_REVIEW.md) before comparing new results.
+
 Validated on 2026-11-03 against commit `caec88c`, which already contains the
 numerical correctness fixes. These comparisons isolate the performance changes
 from those earlier scientific corrections.

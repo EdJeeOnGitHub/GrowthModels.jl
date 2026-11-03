@@ -217,13 +217,21 @@ function StationaryDistribution(A_t::SparseMatrixCSC, dx_stacked;
     return mass ./ dx_stacked
 end
 
+# Subtracting large observation times introduces error on their scale, not
+# merely on the interval's scale. Avoid spurious half-steps on a regular grid.
+function evolution_substeps(interval, dt, left, right)
+    dt === nothing && return 1
+    tolerance = 8eps(max(abs(left), abs(right), abs(dt))) / dt
+    return max(1, ceil(Int, interval / dt - tolerance))
+end
+
 """
-    StateEvolution(g, sm, times; dt=nothing, save=:all, callback=nothing,
+    StateEvolution(g, sm, times; dt=0.1, save=:all, callback=nothing,
                    stationary=false, workspace=nothing, normalize=true)
 
 Evolve an initial density to strictly increasing real observation `times`.
 The first time labels the initial state. `dt` limits the internal step size;
-without it, take one implicit-Euler step per observation interval.
+the default maximum step is 0.1. Explicit `dt=nothing` requests one step per interval.
 
 `save=:all` stores only observation-time densities, `:final` stores only the
 last, and `:none` stores no trajectory. `final_density` is always available.
@@ -238,7 +246,7 @@ The legacy integer argument `T` means T observations at `0:T-1`;
 `implicit_steps` specifies the number of steps per unit interval.
 """
 function StateEvolution(g::AbstractVector, A_t::SparseMatrixCSC, times::AbstractVector,
-                        v_dim, dx_stacked; dt = nothing, save = :all,
+                        v_dim, dx_stacked; dt = 0.1, save = :all,
                         callback = nothing, stationary = false, workspace = nothing,
                         normalize = true)
     observations = Float64.(times)
@@ -250,8 +258,9 @@ function StateEvolution(g::AbstractVector, A_t::SparseMatrixCSC, times::Abstract
     all(x -> isfinite(x) && x >= 0, g) && weighted_mass(g, dx_stacked) > 0 ||
         throw(ArgumentError("Initial density must be finite, nonnegative, and have positive mass"))
     first_step = length(observations) > 1 ? observations[2] - observations[1] : 1.0
-    first_step = dt === nothing ? first_step : min(dt, first_step)
-    blocksize = length(v_dim) > 2 ? prod(v_dim[1:2]) : length(g)
+    first_step /= evolution_substeps(first_step, dt, observations[1], observations[min(2, end)])
+    preferred = length(v_dim) > 2 ? prod(v_dim[1:2]) : length(g)
+    blocksize = independent_blocksize(A_t, preferred)
     ws = if workspace === nothing
         EvolutionWorkspace(A_t, dx_stacked; time_step = first_step, blocksize = blocksize)
     else
@@ -269,8 +278,7 @@ function StateEvolution(g::AbstractVector, A_t::SparseMatrixCSC, times::Abstract
             interval = observations[i] - observations[i-1]
             # Equal substeps land exactly on the requested time without a
             # floating-point remainder creating a spurious extra tiny step.
-            ratio = dt === nothing ? 1.0 : interval / dt
-            steps = max(1, ceil(Int, ratio - 8eps(ratio)))
+            steps = evolution_substeps(interval, dt, observations[i-1], observations[i])
             step = interval / steps
             step == ws.time_step || update_evolution!(ws; time_step = step)
             for _ in 1:steps
@@ -285,8 +293,8 @@ function StateEvolution(g::AbstractVector, A_t::SparseMatrixCSC, times::Abstract
     end
     final = ws.mass ./ ws.dx_stacked
     masses = reshape(saved .* ws.dx_stacked, (v_dim..., length(saved_times)))
-    stationary_density = stationary ? StationaryDistribution(ws.A_t, ws.dx_stacked;
-        initial_density = initial) : nothing
+    stationary_density = stationary ? weighted_mass(initial, ws.dx_stacked) .*
+        StationaryDistribution(ws.A_t, ws.dx_stacked; initial_density = initial) : nothing
     return StateEvolution(saved, saved_times, initial, copy(ws.A_t), copy(ws.dx_stacked),
         masses, stationary_density, final, observations[end])
 end
@@ -311,7 +319,8 @@ function StateEvolution(g, sm::SolvedModel, times; kwargs...)
 end
 
 function StationaryDistribution(evolution::StateEvolution)
-    return StationaryDistribution(evolution.A, evolution.dx_stacked; initial_density = evolution.g)
+    return weighted_mass(evolution.g, evolution.dx_stacked) .*
+        StationaryDistribution(evolution.A, evolution.dx_stacked; initial_density = evolution.g)
 end
 
 function StationaryDistribution(sm::SolvedModel; initial_density = nothing)

@@ -178,10 +178,16 @@ function construct_diffusion_matrix(stochasticprocess::PoissonProcess, state::St
     return B_switch
 end
 
-initial_guess(m::GrowthModels.Model{T}, state) where {T <: Real} = state.aux_state[:y] .^ (1 - m.γ) / (1 - m.γ) / m.ρ
+utility(c, γ) = c^(1 - γ) / (1 - γ)
+function validate_utility(m)
+    isfinite(m.γ) && m.γ > 0 || throw(ArgumentError("Risk aversion γ must be finite and positive"))
+    m.γ != 1 || throw(ArgumentError("γ=1 (log utility) is not supported; the CRRA value normalization is singular there"))
+end
+initial_guess(m::GrowthModels.Model, state) = utility.(state.aux_state.y, m.γ) ./ m.ρ
 
 dV_Upwind(::Model, value::Value, variables::NamedTuple) = value.dVf .* variables.If .+ value.dVb .* variables.Ib .+ value.dV0 .* variables.I0
-V_err(m::Model) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.γ) / (1-m.γ) .+ dV_Upwind(m, value, variables) .* statespace_k_dot(m)(variables) .- m.ρ .* value.v
+V_err(m::Model) = (value::Value, variables::NamedTuple) -> reshape(
+    utility.(vec(variables.c), m.γ) .+ value.A * vec(value.v) .- m.ρ .* vec(value.v), size(value.v))
 
 
 

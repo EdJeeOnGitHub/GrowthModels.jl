@@ -89,11 +89,15 @@ Base.ndims(::StateSpace{T, N}) where {T, N} = N
 Base.size(statespace::StateSpace{T, N}) where {T, N} = ntuple(i -> length(statespace.state[i]), N)
 
 tuple_size(x) = ntuple(i -> length(x[i]), length(x))
-function StateSpace(state::NamedTuple{Names, <: NTuple{N, <: AbstractVector{T}}}, aux_state::NamedTuple{Names_a, <: NTuple{N_a, <: AbstractArray{T}}}) where {Names, N, T, Names_a, N_a}
-    StateSpace{T, N, tuple_size(state), typeof(state), typeof(aux_state)}(state, aux_state)
+function StateSpace(state::NamedTuple, aux_state::NamedTuple)
+    T = promote_type(map(eltype, values(state))..., map(eltype, values(aux_state))...)
+    coordinates = map(x -> T.(x), state)
+    auxiliary = map(x -> T.(x), aux_state)
+    N = length(coordinates)
+    return StateSpace{T, N, tuple_size(coordinates), typeof(coordinates), typeof(auxiliary)}(coordinates, auxiliary)
 end
-function Base.eltype(::StateSpace{T, N, <: NamedTuple{Names, V}}) where {T, N, Names, V}
-    NamedTuple{Names, NTuple{N, T}}
+function Base.eltype(::StateSpace{T,N,D,C}) where {T,N,D,C}
+    NamedTuple{fieldnames(C), NTuple{N,T}}
 end
 
 
@@ -154,51 +158,49 @@ function StateSpace(statespacehyperparams::StateSpaceHyperParams{N, D}, aux_stat
     values = map(
         x -> generate_grid(x.N, x.xmin, x.xmax, x.coef, x.power), statespacehyperparams.hyperparams)
     state = NamedTuple(zip(names, values))
-    T = typeof(first(values))
-    StateSpace{T, N, D, typeof(state), typeof(aux_state)}(state, aux_state)
+    return StateSpace(state, aux_state)
 end
 
 
-# Stochastic Model + OU Process
-function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001, Nz = 40, coef = 0.0, power = 0.0) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
-    kssH = k_steady_state_hi(m)
-    kmin, kmax = kmin_f*kssH, kmax_f*kssH
-    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin, coef = coef, power = power)
-    # z_hps
-    zmean = process_mean(m.stochasticprocess)
-    zmin = zmean*0.8
-    zmax = zmean*1.2
-    z_hps = HyperParams(N = Nz, xmax = zmax, xmin = zmin)
-    return StateSpaceHyperParams((k = k_hps, z = z_hps))
+# Bounds for log productivity use the stationary log standard deviation.
+function productivity_bounds(p::OrnsteinUhlenbeckProcess, standard_deviations = 4)
+    p.θ > 0 && p.σ > 0 || throw(ArgumentError("OU grid requires positive mean reversion and volatility"))
+    standard_deviations > 0 || throw(ArgumentError("z_width must be positive"))
+    width = standard_deviations * p.σ / sqrt(2p.θ)
+    return exp(-width), exp(width)
 end
 
-# Stochastic Skiba Model + OU Process + Ability
-function StateSpaceHyperParams(m::StochasticSkibaAbilityModel{T, S}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001, Nz = 40, Nη = 5, coef = 0.0, power = 0.0) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
-    kssH = k_steady_state_hi(m)
-    # k_hps
-    kmin, kmax = kmin_f*kssH, kmax_f*kssH
-    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin, coef = coef, power = power)
-    # z_hps
-    zmean = process_mean(m.stochasticprocess)
-    zmin = zmean*0.8
-    zmax = zmean*1.2
-    z_hps = HyperParams(N = Nz, xmax = zmax, xmin = zmin)
-    # η_hps
-    ηmean = m.η_mean
-    ηmin = ηmean*0.8
-    ηmax = ηmean*1.2
-    η_hps = HyperParams(N = Nη, xmax = ηmax, xmin = ηmin)
-    return StateSpaceHyperParams((k = k_hps, z = z_hps, η = η_hps))
+function capital_reference(m::StochasticModel, z, η = one(z))
+    shock = m.stochasticprocess isa OrnsteinUhlenbeckProcess ? z : one(z)
+    if m isa StochasticRamseyCassKoopmansModel
+        return (m.α * m.A * shock / (m.ρ + m.δ))^(1 / (1 - m.α))
+    end
+    return max((m.α * m.A_H * shock * η / (m.ρ + m.δ))^(1 / (1 - m.α)) + m.κ,
+        (m.α * m.A_L * shock * η / (m.ρ + m.δ))^(1 / (1 - m.α)))
 end
 
+function StateSpaceHyperParams(m::StochasticModel{T,S}; Nk = 1000, kmax_f = 1.3,
+        kmin_f = 0.001, Nz = 40, coef = 0.0, power = 0.0, z_width = 4) where {T <: Real,S <: OrnsteinUhlenbeckProcess}
+    zmin, zmax = productivity_bounds(m.stochasticprocess, z_width)
+    k_hps = HyperParams(N = Nk, xmin = kmin_f * k_steady_state_hi(m),
+        xmax = kmax_f * capital_reference(m, zmax), coef = coef, power = power)
+    return StateSpaceHyperParams((k = k_hps, z = HyperParams(N = Nz, xmin = zmin, xmax = zmax)))
+end
 
-# Stochastic Skiba Model + OU Process + Ability
-function StateSpaceHyperParams(m::StochasticNPAbilityModel{T, S}; Nk = 1000, kmax = 10.0, kmin = 0.001, Nz = 40, Nη = 5, coef = 0.0, power = 0.0) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
+function StateSpaceHyperParams(m::StochasticSkibaAbilityModel{T,S}; Nk = 1000, kmax_f = 1.3,
+        kmin_f = 0.001, Nz = 40, Nη = 5, coef = 0.0, power = 0.0, z_width = 4) where {T <: Real,S <: OrnsteinUhlenbeckProcess}
+    zmin, zmax = productivity_bounds(m.stochasticprocess, z_width)
+    ηmin, ηmax = m.η_mean * 0.8, m.η_mean * 1.2
+    k_hps = HyperParams(N = Nk, xmin = kmin_f * k_steady_state_hi(m),
+        xmax = kmax_f * capital_reference(m, zmax, ηmax), coef = coef, power = power)
+    return StateSpaceHyperParams((k = k_hps, z = HyperParams(N = Nz, xmin = zmin, xmax = zmax),
+        η = HyperParams(N = Nη, xmin = ηmin, xmax = ηmax)))
+end
+
+function StateSpaceHyperParams(m::StochasticNPAbilityModel{T, S}; Nk = 1000, kmax = 10.0, kmin = 0.001, Nz = 40, Nη = 5, coef = 0.0, power = 0.0, z_width = 4) where {T <: Real, S <: OrnsteinUhlenbeckProcess}
     k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin, coef = coef, power = power)
     # z_hps
-    zmean = process_mean(m.stochasticprocess)
-    zmin = zmean*0.8
-    zmax = zmean*1.2
+    zmin, zmax = productivity_bounds(m.stochasticprocess, z_width)
     z_hps = HyperParams(N = Nz, xmax = zmax, xmin = zmin)
     # η_hps
     ηmean = m.η_mean
@@ -225,14 +227,19 @@ function StateSpaceHyperParams(m::StochasticNPAbilityModel{T, S}; Nk = 1000, kma
 end
 
 
-# Stochastic Model + Poisson Process
-function StateSpaceHyperParams(m::StochasticModel{T, S}; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001, Nz = 2, coef = 0.0, power = 0.0) where {T <: Real, S <: PoissonProcess}
-    kssH = k_steady_state_hi(m)
-    kmin, kmax = kmin_f*kssH, kmax_f*kssH
-    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin, coef = coef, power = power)
-    # z_hps
-    z_hps = HyperParams(N = Nz, xmax = zmax, xmin = zmin)
-    return StateSpaceHyperParams((k = k_hps, z = z_hps))
+# Poisson state counts and support belong to the process.
+function StateSpaceHyperParams(m::StochasticModel{T,S}; Nk = 1000, kmax_f = 1.3,
+        kmin_f = 0.001, Nz = length(m.stochasticprocess.z), coef = 0.0, power = 0.0,
+        Nη = 5) where {T <: Real,S <: PoissonProcess}
+    z = m.stochasticprocess.z
+    Nz == length(z) || throw(DimensionMismatch("Nz must match the Poisson process support"))
+    ability = m isa StochasticSkibaAbilityModel
+    ηmax = ability ? m.η_mean * 1.2 : one(eltype(z))
+    k_hps = HyperParams(N = Nk, xmin = kmin_f * k_steady_state_hi(m),
+        xmax = kmax_f * capital_reference(m, maximum(z), ηmax), coef = coef, power = power)
+    base = (k = k_hps, z = HyperParams(N = Nz, xmin = minimum(z), xmax = maximum(z)))
+    return StateSpaceHyperParams(ability ? merge(base,
+        (η = HyperParams(N = Nη, xmin = m.η_mean * 0.8, xmax = ηmax),)) : base)
 end
 
 
@@ -402,12 +409,10 @@ Check if statespace (non-negativity of capital) is satisfied even with 0 consump
     domain error if not.
 """
 function check_statespace_constraints(statespace::StateSpace, p)
-    # Check state constraint satisfied and exit early if not 
-    max_statespace_constraint = statespace.aux_state.y[end] - p.δ * maximum(statespace[:k])
-    min_statespace_constraint = statespace.aux_state.y[1] - p.δ * minimum(statespace[:k])
-    if max_statespace_constraint < 0 || min_statespace_constraint < 0
-        throw(DomainError(p, "State space constraint violated"))
-    end
+    net = statespace.aux_state.y .- p.δ .* statespace[:k]
+    all(x -> isfinite(x) && x > 0, selectdim(net, 1, 1)) ||
+        throw(DomainError(net, "Positive net output is required at every lower-capital boundary state"))
+    return nothing
 end
 
 """
@@ -466,8 +471,7 @@ end
 function solve_growth_model(m::Model)
     hyperparams = StateSpaceHyperParams(m)
     state = StateSpace(m, hyperparams)
-    init_value = Value(state)
-    res = solve_HJB(m, hyperparams, init_value = init_value, maxit = 1000, verbose = false)
+    res = solve_HJB(m, hyperparams, maxit = 1000, verbose = false)
     sm = SolvedModel(m, res)
     return sm, res
 end
@@ -475,8 +479,7 @@ end
 function solve_growth_model(m::Model, hp_args)
     hyperparams = StateSpaceHyperParams(m; hp_args...)
     state = StateSpace(m, hyperparams)
-    init_value = Value(state)
-    res = solve_HJB(m, hyperparams, init_value = init_value, maxit = 1000, verbose = false)
+    res = solve_HJB(m, hyperparams, maxit = 1000, verbose = false)
     sm = SolvedModel(m, res)
     return sm, res
 end

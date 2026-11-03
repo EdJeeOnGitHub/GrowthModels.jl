@@ -25,12 +25,12 @@ end
 k_steady_state_hi(m::StochasticSkibaModel{T, S}) where {T <: Real, S <: OrnsteinUhlenbeckProcess}= (m.α*m.A_H*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α)) + m.κ
 k_steady_state_lo(m::StochasticSkibaModel{T, S}) where {T <: Real, S <: OrnsteinUhlenbeckProcess} = (m.α*m.A_L*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α))
 # PoissonProcess
-k_steady_state_hi(m::StochasticSkibaModel{T, S}) where {T <: Real, S <: PoissonProcess}= (m.α*m.A_H/(m.ρ + m.δ))^(1/(1-m.α)) + m.κ + process_mean(m.stochasticprocess)
-k_steady_state_lo(m::StochasticSkibaModel{T, S}) where {T <: Real, S <: PoissonProcess} = (m.α*m.A_L/(m.ρ + m.δ))^(1/(1-m.α)) + process_mean(m.stochasticprocess)
+k_steady_state_hi(m::StochasticSkibaModel{T, S}) where {T <: Real, S <: PoissonProcess}= (m.α*m.A_H/(m.ρ + m.δ))^(1/(1-m.α)) + m.κ
+k_steady_state_lo(m::StochasticSkibaModel{T, S}) where {T <: Real, S <: PoissonProcess} = (m.α*m.A_L/(m.ρ + m.δ))^(1/(1-m.α))
 
 
 k_steady_state(m::StochasticSkibaModel) = [k_steady_state_lo(m), k_steady_state_hi(m)]
-k_star(m::StochasticSkibaModel) = m.κ/(1-(m.A_L/m.A_H)^(1/m.α))
+k_star(m::StochasticSkibaModel) = technology_crossing(m)
 
 #### Production Function -------------------------------------------------------
 # OU uses productivity shock
@@ -41,22 +41,15 @@ end
 @inline function stochastic_skiba_production_function(::Union{PoissonProcess,Type{PoissonProcess}}, k, z, α, A_H, A_L, κ)
      max.(max.(A_H .* max.(k .- κ, 0) .^ α, A_L .* k .^ α) .+ z, 1e-3)
 end
-# derivative of skiba production function
+# Differentiate the active production branch, including the income floor.
 @inline function stochastic_skiba_production_function_prime(::Union{OrnsteinUhlenbeckProcess,Type{OrnsteinUhlenbeckProcess}}, k, z, α, A_H, A_L, κ)
-    if k .> κ
-        z .* A_H .* α .* (k .- κ) .^ (α - 1)
-    else
-        z .* A_L .* α .* k .^ (α - 1)
-    end
+    return z .* skiba_production_function_prime.(k, α, A_H, A_L, κ)
+end
+@inline function stochastic_skiba_production_function_prime(::Union{PoissonProcess,Type{PoissonProcess}}, k, z, α, A_H, A_L, κ)
+    active = (skiba_production_function.(k, α, A_H, A_L, κ) .+ z) .> 1e-3
+    return ifelse.(active, skiba_production_function_prime.(k, α, A_H, A_L, κ), zero.(k))
 end
 
-@inline function stochastic_skiba_production_function_prime(::Union{PoissonProcess,Type{PoissonProcess}}, k, z, α, A_H, A_L, κ)
-    if k .> κ
-         A_H .* α .* (k .- κ) .^ (α - 1)
-    else
-         A_L .* α .* k .^ (α - 1)
-    end
-end
 # Method dispatch for various forms of arguments
 # k, z, and params passed directly
 @inline production_function(::StochasticSkibaModel{T,S}, k, z, α::Real, A_H::Real, A_L::Real, κ::Real) where {T <: Real, S <: StochasticProcess} = stochastic_skiba_production_function(S, k, z, α, A_H, A_L, κ)

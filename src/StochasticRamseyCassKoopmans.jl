@@ -1,7 +1,7 @@
 
 #### Util Functions to Instantiate Model ---------------------------------------
 function StochasticRamseyCassKoopmansModel(
-    stochasticprocess::Union{StochasticProcess,Nothing}; 
+    stochasticprocess::Union{StochasticProcess,Nothing};
      γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A = 0.6)
     if isnothing(stochasticprocess)
         stochasticprocess = OrnsteinUhlenbeckProcess(θ = -log(0.9), σ =  0.1)
@@ -17,14 +17,14 @@ end
 
 #### K Steady State + Star Helpers ---------------------------------------------
 # OrnsteinUhlenbeckProcess
-k_steady_state_hi(m::StochasticRamseyCassKoopmansModel{T, S}) where {T <: Real, S <: OrnsteinUhlenbeckProcess} = (m.α*m.A*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α)) 
-k_steady_state_lo(m::StochasticRamseyCassKoopmansModel{T, S}) where {T <: Real, S <: OrnsteinUhlenbeckProcess} = (m.α*m.A*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α)) 
+k_steady_state_hi(m::StochasticRamseyCassKoopmansModel{T, S}) where {T <: Real, S <: OrnsteinUhlenbeckProcess} = (m.α*m.A*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α))
+k_steady_state_lo(m::StochasticRamseyCassKoopmansModel{T, S}) where {T <: Real, S <: OrnsteinUhlenbeckProcess} = (m.α*m.A*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α))
 # Poisson
-k_steady_state_hi(m::StochasticRamseyCassKoopmansModel{T, S}) where {T <: Real, S <: PoissonProcess} = (m.α*m.A/(m.ρ + m.δ))^(1/(1-m.α)) + process_mean(m.stochasticprocess)
-k_steady_state_lo(m::StochasticRamseyCassKoopmansModel{T, S}) where {T <: Real, S <: PoissonProcess} = (m.α*m.A/(m.ρ + m.δ))^(1/(1-m.α))  + process_mean(m.stochasticprocess)
+k_steady_state_hi(m::StochasticRamseyCassKoopmansModel{T, S}) where {T <: Real, S <: PoissonProcess} = (m.α*m.A/(m.ρ + m.δ))^(1/(1-m.α))
+k_steady_state_lo(m::StochasticRamseyCassKoopmansModel{T, S}) where {T <: Real, S <: PoissonProcess} = (m.α*m.A/(m.ρ + m.δ))^(1/(1-m.α))
 
 k_star(m::StochasticRamseyCassKoopmansModel{T, S})  where {T <: Real, S <: OrnsteinUhlenbeckProcess}= (m.α*m.A*process_mean(m.stochasticprocess)/(m.ρ + m.δ))^(1/(1-m.α))
-k_star(m::StochasticRamseyCassKoopmansModel{T, S})  where {T <: Real, S <: PoissonProcess} = (m.α*m.A/(m.ρ + m.δ))^(1/(1-m.α)) + process_mean(m.stochasticprocess)
+k_star(m::StochasticRamseyCassKoopmansModel{T, S})  where {T <: Real, S <: PoissonProcess} = (m.α*m.A/(m.ρ + m.δ))^(1/(1-m.α))
 
 k_steady_state(m::StochasticRamseyCassKoopmansModel) = vcat(k_steady_state_lo(m), k_steady_state_hi(m))
 

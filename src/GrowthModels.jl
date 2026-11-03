@@ -55,6 +55,7 @@ module GrowthModels
            PoissonProcess,
            sample
     # state evolution
+    export technology_crossing
     export EvolutionWorkspace, update_evolution!,
                  StateEvolution,
                  create_dx_stacked,

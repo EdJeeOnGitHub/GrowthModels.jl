@@ -42,6 +42,8 @@ function HJBWorkspace(m::Model, state::StateSpace, hp::StateSpaceHyperParams;
     y = T.(state.aux_state.y .+ flat_transfer)
     size(y) == dims || throw(DimensionMismatch("Production must match the state grid"))
     c0 = y .- m.δ .* coordinates.k
+    all(x -> isfinite(x) && x > 0, selectdim(c0, 1, 1)) ||
+        throw(DomainError(c0, "Positive net output is required at every lower-capital boundary state"))
     dkf, dkb = generate_dx(T.(state[:k]))
     all(x -> isfinite(x) && x > 0, dkf) || throw(ArgumentError("Capital grid must be strictly increasing"))
     n = prod(dims)
@@ -92,8 +94,8 @@ function prepare_hjb_step!(ws::HJBWorkspace, m, v, Delta)
     copyto!(rates, ws.diffusion_values)
     for offset in 0:Nk:length(v)-1, k in 1:Nk
         i = offset + k
-        vf = k < Nk ? (v[i+1] - v[i]) / ws.dkf[k] : ws.c0[i]^(-m.γ)
-        vb = k > 1 ? (v[i] - v[i-1]) / ws.dkb[k] : ws.c0[i]^(-m.γ)
+        vf = k < Nk ? (v[i+1] - v[i]) / ws.dkf[k] : ws.dV0[i]
+        vb = k > 1 ? (v[i] - v[i-1]) / ws.dkb[k] : ws.dV0[i]
         ws.dVf[i], ws.dVb[i] = vf, vb
         c, If, Ib, I0, sf, sb = upwind_choice(vf, vb, ws.c0[i], m.γ, k, Nk)
         ws.c[i], ws.If[i], ws.Ib[i], ws.I0[i] = c, If, Ib, I0
@@ -102,7 +104,7 @@ function prepare_hjb_step!(ws::HJBWorkspace, m, v, Delta)
         rates[ws.diagonal[i]] -= x + z
         k > 1 && (rates[ws.backward[i]] += x)
         k < Nk && (rates[ws.forward[i]] += z)
-        ws.rhs[i] = c^(1 - m.γ) / (1 - m.γ) + v[i] / Delta
+        ws.rhs[i] = utility(c, m.γ) + v[i] / Delta
     end
     # The diffusion was checked at construction; selected capital rates are
     # nonnegative by construction and each row adds (-x-z, x, z).
@@ -120,7 +122,7 @@ function hjb_linear_solver(ws, m, method)
     if method == :auto && m isa DeterministicModel
         return TridiagonalHJBSolver(ws.B)
     end
-    return SparseBlockSolver(ws.B; blocksize = method == :auto ? ws.blocksize : size(ws.B, 1))
+    return SparseBlockSolver(ws.B; blocksize = method == :auto ? independent_blocksize(ws.B, ws.blocksize) : size(ws.B, 1))
 end
 
 convergence_norm(x::Real) = abs(x)
@@ -139,17 +141,22 @@ function hjb_distance(ws, v)
     return distance
 end
 
+function admissible_hjb_policy(ws)
+    return all(i -> isfinite(ws.c[i]) && ws.c[i] > 0 &&
+        (!ws.If[i] || ws.dVf[i] > eps()) && (!ws.Ib[i] || ws.dVb[i] > eps()), eachindex(ws.c))
+end
+
 function hjb_value(ws, v, dist, converged, iter)
     return Value(v, ws.dVf, ws.dVb, ws.dV0, ws.A, dist, converged, iter)
 end
 
-function hjb_variables(ws)
-    return merge((y = ws.y,), ws.coordinates, (c = ws.c, If = ws.If, Ib = ws.Ib, I0 = ws.I0))
+function hjb_variables(ws, flat_transfer = 0.0)
+    return merge((y = ws.y,), ws.coordinates, (c = ws.c, If = ws.If, Ib = ws.Ib, I0 = ws.I0, flat_transfer = flat_transfer))
 end
 
 """
     solve_HJB(model, hyperparams[, state]; init_value=nothing, maxit=1000,
-              crit=1e-6, Delta=1000, linear_solver=:auto, verbose=true,
+              crit=1e-6, Delta=nothing, linear_solver=:auto, verbose=true,
               flat_transfer=0.0)
 
 Solve using a workspace allocated once per call. An explicit `init_value`
@@ -160,11 +167,16 @@ reset and the input is never mutated.
 `:auto` uses a tridiagonal solve for deterministic models and independent sparse
 blocks for fixed abilities. `:sparse` uses one full sparse system, useful for
 cross-checks. Numeric sparse factors are refreshed each iteration while the
-fixed symbolic pattern is reused. The converged update is returned directly.
+fixed symbolic pattern is reused. Convergence requires both a small update and
+an absolute nonlinear HJB residual below `crit`, with admissible policies.
+The default `Delta` is 1 for γ<1 and 1000 otherwise; an explicit value overrides
+it. γ=1 (log utility) is currently unsupported and is rejected explicitly.
 """
 function solve_HJB(m::Model, hp::StateSpaceHyperParams, state::StateSpace;
-                   init_value = nothing, maxit = 1000, crit = 1e-6, Delta = 1000,
+                   init_value = nothing, maxit = 1000, crit = 1e-6, Delta = nothing,
                    verbose = true, flat_transfer = 0.0, linear_solver = :auto)
+    validate_utility(m)
+    Delta = Delta === nothing ? (m.γ < 1 ? 1.0 : 1000.0) : Delta
     maxit isa Integer && maxit >= 0 || throw(ArgumentError("maxit must be a nonnegative integer"))
     crit > 0 && isfinite(crit) || throw(ArgumentError("crit must be finite and positive"))
     Delta > 0 && isfinite(Delta) && m.ρ > 0 || throw(ArgumentError("Delta and the discount rate must be positive"))
@@ -191,9 +203,21 @@ function solve_HJB(m::Model, hp::StateSpaceHyperParams, state::StateSpace;
         distance = hjb_distance(ws, v)
         push!(dist, distance)
         if distance < crit
+            # Evaluate the nonlinear equation with the policy selected from the
+            # candidate value, not just the previous iteration's frozen policy.
+            prepare_hjb_step!(ws, m, ws.next_v, Delta)
+            residual = ws.A * vec(ws.next_v)
+            for i in eachindex(residual)
+                residual[i] += utility(ws.c[i], m.γ) - m.ρ * ws.next_v[i]
+            end
+            residual_norm = maximum(convergence_norm, residual)
+            if !isfinite(residual_norm) || residual_norm >= crit || !admissible_hjb_policy(ws)
+                copyto!(v, ws.next_v)
+                continue
+            end
             verbose && println("Value Function Converged, Iteration = ", n)
             return (value = hjb_value(ws, ws.next_v, dist, true, n),
-                variables = hjb_variables(ws), iter = n)
+                variables = hjb_variables(ws, flat_transfer), iter = n)
         end
         copyto!(v, ws.next_v)
     end
@@ -210,6 +234,8 @@ function update_v(m::Model, value::Value, state::StateSpace, hp::StateSpaceHyper
                   diffusion_matrix = nothing; iter = 0, crit = 1e-6, Delta = 1000,
                   verbose = true, flat_transfer = 0.0, linear_solver = :auto)
     Delta > 0 && isfinite(Delta) && m.ρ > 0 || throw(ArgumentError("Delta and the discount rate must be positive"))
+    validate_utility(m)
+    crit > 0 && isfinite(crit) || throw(ArgumentError("crit must be finite and positive"))
     size(value.v) == size(state) || throw(DimensionMismatch("Value must match the state grid"))
     ws = HJBWorkspace(m, state, hp; flat_transfer = flat_transfer,
         diffusion_matrix = diffusion_matrix, value_type = concrete_eltype(value.v))
@@ -219,11 +245,17 @@ function update_v(m::Model, value::Value, state::StateSpace, hp::StateSpaceHyper
     distance = hjb_distance(ws, value.v)
     dist = copy(value.dist)
     push!(dist, distance)
-    converged = distance < crit
+    converged = false
+    if distance < crit
+        prepare_hjb_step!(ws, m, ws.next_v, Delta)
+        residual = utility.(vec(ws.c), m.γ) .+ ws.A * vec(ws.next_v) .- m.ρ .* vec(ws.next_v)
+        residual_norm = maximum(convergence_norm, residual)
+        converged = isfinite(residual_norm) && residual_norm < crit && admissible_hjb_policy(ws)
+    end
     result = hjb_value(ws, ws.next_v, dist, converged, iter)
     if converged
         verbose && println("Value Function Converged, Iteration = ", iter)
-        return result, iter, hjb_variables(ws)
+        return result, iter, hjb_variables(ws, flat_transfer)
     elseif m isa DeterministicModel
         return result, iter
     else
