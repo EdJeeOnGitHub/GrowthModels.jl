@@ -1,21 +1,20 @@
-
 struct StateEvolution{T <: Real}
-    S::Array{T}
-    times::Vector{Int}
+    S::Matrix{T}
+    times::Vector{Float64}
     g::Vector{T}
-    A::SparseMatrixCSC{T, Int}
-    dx_stacked::Vector{T} # grid spacing for mass conservation
+    A::SparseMatrixCSC{T,Int}
+    dx_stacked::Vector{T}
     cell_masses::Array{T}
-    stationary_dist::Array{T}
+    stationary_dist::Union{Nothing,Vector{T}}
+    final_density::Vector{T}
+    final_time::Float64
 end
 
-# Method to extract a column based on a time index using binary search
-function Base.getindex(s::StateEvolution, t)
-    time_index = Base.searchsortedfirst.(Ref(s.times), t)
-    if time_index > length(s.times) || s.times[time_index] != t
-        error("Time $t not found in times vector")
-    end
-    return s.E_S[:, time_index]
+function Base.getindex(s::StateEvolution, t::Real)
+    index = searchsortedfirst(s.times, t)
+    index <= length(s.times) && s.times[index] == t ||
+        throw(ArgumentError("Time $t was not saved"))
+    return s.S[:, index]
 end
 
 # Implicit Euler method
@@ -37,20 +36,23 @@ cell masses `dx_stacked .* g`, then convert back to a density. This preserves
 weighted mass without renormalization, including on nonuniform grids.
 The two-argument overload instead advances cell masses directly.
 """
-function iterate_g(g, A_t, dx_stacked; time_step = 1)
+function iterate_g(g, A_t, dx_stacked; time_step = 1, workspace = nothing)
+    if workspace !== nothing
+        update_evolution!(workspace, A_t; time_step = time_step, dx_stacked = dx_stacked)
+        return iterate_g(g, workspace)
+    end
     evolution = I - time_step * A_t
     return (evolution \ (dx_stacked .* g)) ./ dx_stacked
 end
 
-function iterate_g!(g, A_t, dx_stacked; time_step = 1)
+function iterate_g!(g, A_t, dx_stacked; time_step = 1, workspace = nothing)
+    if workspace !== nothing
+        update_evolution!(workspace, A_t; time_step = time_step, dx_stacked = dx_stacked)
+        return iterate_g!(g, workspace)
+    end
     g .= iterate_g(g, A_t, dx_stacked; time_step = time_step)
     return g
 end
-
-function StateEvolution(S::Array{T}, times::Vector{T}, g::Vector{T}, A::SparseMatrixCSC) where T <: Real
-    return StateEvolution{T}(S, times, g, A)
-end
-
 
 function create_dx_stacked(x, N_second_dim)
     dxf, dxb = generate_dx(x)
@@ -215,76 +217,107 @@ function StationaryDistribution(A_t::SparseMatrixCSC, dx_stacked;
     return mass ./ dx_stacked
 end
 
-# Given a stopping time T, iterate the state evolution T times with a timestep of 1/implicit_steps
-function StateEvolution(g::Vector{R}, A_t::SparseMatrixCSC, T::Int, v_dim, dx_stacked; implicit_steps = 1) where {R <: Real}
-    T_total = T*implicit_steps
-    S = zeros((size(g, 1), T_total))
-    # this will do nothing if g is already normalized - but best to makes sure
-    g_norm = normalize_by_weighted_mass(g, dx_stacked)
-    S[:, 1] .= g_norm
-    for t in 2:T_total
-        S[:, t] .= iterate_g(S[:, t-1], A_t, dx_stacked; time_step = 1.0/implicit_steps)
-    end
-    
-    S_thinned = S[:, 1:implicit_steps:end]
-    T_thinned = size(S_thinned, 2)
-    T_thinned_vec = collect(0:(T_thinned - 1)) 
+"""
+    StateEvolution(g, sm, times; dt=nothing, save=:all, callback=nothing,
+                   stationary=false, workspace=nothing, normalize=true)
 
-    cell_mass_all =  S_thinned .* dx_stacked
-    full_shape = (v_dim..., T_thinned)
-    cell_mass_array = reshape(cell_mass_all, full_shape)
+Evolve an initial density to strictly increasing real observation `times`.
+The first time labels the initial state. `dt` limits the internal step size;
+without it, take one implicit-Euler step per observation interval.
 
-    # Select the stationary mixture implied by the initial distribution.
-    stationary_dist = StationaryDistribution(A_t, dx_stacked; initial_density = g_norm)
-    return StateEvolution(S_thinned, T_thinned_vec, g, A_t, dx_stacked, cell_mass_array, stationary_dist)
-end
+`save=:all` stores only observation-time densities, `:final` stores only the
+last, and `:none` stores no trajectory. `final_density` is always available.
+`callback(t, cell_masses)` runs at every observation time, including the first,
+independently of `save`. Its mass buffer is borrowed: do not mutate or retain it.
+This permits streaming moments without storing a distribution history.
 
-# Given a vector of times, iterate the state evolution to each time step
-# using the implicit formula to jump straight to that time step
-function StateEvolution(g::Vector{T}, A_t::SparseMatrixCSC, times::Vector, v_dim, dx_stacked) where T <: Real
-    S = zeros((size(g, 1), length(times)))
-    # this will do nothing if g is already normalized - but best to makes sure
-    g_norm = normalize_by_weighted_mass(g, dx_stacked)
-    S[:, 1] .= g_norm
-    i = 1
-    for t in times[2:end]
-        i += 1
-        S[:, i] .= iterate_g(S[:, i-1], A_t, dx_stacked, time_step = t)
-    end
-    cell_mass_all = S .* dx_stacked 
-    full_shape = (v_dim..., length(times))
-    cell_mass_array = reshape(cell_mass_all, full_shape)
+Stationary computation is opt-in via `stationary=true`, or can be requested
+later with `StationaryDistribution(result)`. No input array is mutated.
 
-    # Select the stationary mixture implied by the initial distribution.
-    stationary_dist = StationaryDistribution(A_t, dx_stacked; initial_density = g_norm)
-
-    return StateEvolution(S, times, g, A_t, dx_stacked, cell_mass_array, stationary_dist)
-end
-
-
-function StateEvolution(g, sm::SolvedModel{S}, T::Int; implicit_steps = 1) where {S <: Model}
-    # get all ks along k - using first dim of other states
-    slice_tuple = CartesianIndices((1:size(sm.variables.k, 1), fill(1, ndims(sm.variables.k) - 1)...))
-    if S <: StochasticModel
-        Nstate = prod(size(sm.variables.z)[2:end])
+The legacy integer argument `T` means T observations at `0:T-1`;
+`implicit_steps` specifies the number of steps per unit interval.
+"""
+function StateEvolution(g::AbstractVector, A_t::SparseMatrixCSC, times::AbstractVector,
+                        v_dim, dx_stacked; dt = nothing, save = :all,
+                        callback = nothing, stationary = false, workspace = nothing,
+                        normalize = true)
+    observations = Float64.(times)
+    !isempty(observations) && all(isfinite, observations) && all(diff(observations) .> 0) ||
+        throw(ArgumentError("Observation times must be finite, nonempty, and strictly increasing"))
+    save in (:all, :final, :none) || throw(ArgumentError("save must be :all, :final, or :none"))
+    dt === nothing || (isfinite(dt) && dt > 0) || throw(ArgumentError("dt must be finite and positive"))
+    length(g) == prod(v_dim) == size(A_t, 1) || throw(DimensionMismatch("Density, grid shape, and generator must agree"))
+    all(x -> isfinite(x) && x >= 0, g) && weighted_mass(g, dx_stacked) > 0 ||
+        throw(ArgumentError("Initial density must be finite, nonnegative, and have positive mass"))
+    first_step = length(observations) > 1 ? observations[2] - observations[1] : 1.0
+    first_step = dt === nothing ? first_step : min(dt, first_step)
+    blocksize = length(v_dim) > 2 ? prod(v_dim[1:2]) : length(g)
+    ws = if workspace === nothing
+        EvolutionWorkspace(A_t, dx_stacked; time_step = first_step, blocksize = blocksize)
     else
-        Nstate = 1
+        update_evolution!(workspace, A_t; time_step = first_step, dx_stacked = dx_stacked)
     end
-    k = sm.variables.k[slice_tuple][:]
-    dx_stacked = create_dx_stacked(k, Nstate)
-    A_t = sparse(sm.value.A')
-    return StateEvolution(g, A_t, T, size(sm.value.v), dx_stacked, implicit_steps = implicit_steps)
+    T = eltype(ws.mass)
+    initial = Vector{T}(g)
+    normalize && normalize_by_weighted_mass!(initial, ws.dx_stacked)
+    ws.mass .= ws.dx_stacked .* initial
+    saved_times = save == :all ? observations : save == :final ? observations[end:end] : Float64[]
+    saved = Matrix{T}(undef, length(g), length(saved_times))
+    saved_index = 0
+    for i in eachindex(observations)
+        if i > 1
+            interval = observations[i] - observations[i-1]
+            # Equal substeps land exactly on the requested time without a
+            # floating-point remainder creating a spurious extra tiny step.
+            ratio = dt === nothing ? 1.0 : interval / dt
+            steps = max(1, ceil(Int, ratio - 8eps(ratio)))
+            step = interval / steps
+            step == ws.time_step || update_evolution!(ws; time_step = step)
+            for _ in 1:steps
+                step_mass!(ws)
+            end
+        end
+        if save == :all || (save == :final && i == length(observations))
+            saved_index += 1
+            @views saved[:, saved_index] .= ws.mass ./ ws.dx_stacked
+        end
+        callback === nothing || callback(observations[i], ws.mass)
+    end
+    final = ws.mass ./ ws.dx_stacked
+    masses = reshape(saved .* ws.dx_stacked, (v_dim..., length(saved_times)))
+    stationary_density = stationary ? StationaryDistribution(ws.A_t, ws.dx_stacked;
+        initial_density = initial) : nothing
+    return StateEvolution(saved, saved_times, initial, copy(ws.A_t), copy(ws.dx_stacked),
+        masses, stationary_density, final, observations[end])
 end
 
-function StateEvolution(g, sm::SolvedModel{S}, times::Vector) where {S <: Model}
-    slice_tuple = CartesianIndices((1:size(sm.variables.k, 1), fill(1, ndims(sm.variables.k) - 1)...))
-    k = sm.variables.k[slice_tuple][:]
-    Nstate = prod(size(sm.value.v)) ÷ length(k)
-    dx_stacked = create_dx_stacked(k, Nstate)
-    A_t = sparse(sm.value.A')
-    return StateEvolution(g, A_t, times, size(sm.value.v), dx_stacked)
+function StateEvolution(g::AbstractVector, A_t::SparseMatrixCSC, T::Int, v_dim, dx_stacked;
+                        implicit_steps = 1, kwargs...)
+    T >= 1 && implicit_steps isa Integer && implicit_steps >= 1 ||
+        throw(ArgumentError("T and implicit_steps must be positive integers"))
+    return StateEvolution(g, A_t, collect(0:T-1), v_dim, dx_stacked;
+        dt = 1 / implicit_steps, kwargs...)
 end
 
+function evolution_grid(sm::SolvedModel)
+    dims = size(sm.value.v)
+    k = collect(view(reshape(sm.variables.k, dims[1], :), :, 1))
+    return dims, create_dx_stacked(k, prod(dims) ÷ length(k))
+end
+
+function StateEvolution(g, sm::SolvedModel, times; kwargs...)
+    dims, weights = evolution_grid(sm)
+    return StateEvolution(g, sparse(sm.value.A'), times, dims, weights; kwargs...)
+end
+
+function StationaryDistribution(evolution::StateEvolution)
+    return StationaryDistribution(evolution.A, evolution.dx_stacked; initial_density = evolution.g)
+end
+
+function StationaryDistribution(sm::SolvedModel; initial_density = nothing)
+    _, weights = evolution_grid(sm)
+    return StationaryDistribution(sparse(sm.value.A'), weights; initial_density = initial_density)
+end
 
 # helper to find group ids for plotting when the value function has been stacked
 function create_group_ids(sm::SolvedModel)

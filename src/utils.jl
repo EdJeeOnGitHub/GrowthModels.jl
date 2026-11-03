@@ -11,25 +11,69 @@ function \(A::SparseMatrixCSC{ForwardDiff.Dual{T, V, N}, P}, b::AbstractVector{G
     return __FDbackslash(A, b, T, V, N)
 end
 
-function __FDbackslash(A, b, T, V, N)
+# Recursive factorization keeps one primal LU even for nested dual numbers.
+# Each tangent solves A*ẋ = ḃ - Ȧ*x with that same factorization.
+struct DifferentiableSparseFactor{A,P,F}
+    matrix::A
+    primal_matrix::P
+    primal_factor::F
+end
 
-    Areal = ForwardDiff.value.(A)
-    breal = ForwardDiff.value.(b)
-    outreal = Areal\breal
+factor_sparse(A::SparseMatrixCSC) = lu(A)
+function factor_sparse(A::SparseMatrixCSC{<:ForwardDiff.Dual})
+    primal = SparseMatrixCSC(size(A, 1), size(A, 2), copy(A.colptr), copy(rowvals(A)),
+        ForwardDiff.value.(nonzeros(A)))
+    return DifferentiableSparseFactor(A, primal, factor_sparse(primal))
+end
+
+refactor_sparse!(factor, A) = lu!(factor, A; reuse_symbolic = true)
+function refactor_sparse!(factor::DifferentiableSparseFactor, A)
+    A.colptr == factor.primal_matrix.colptr && rowvals(A) == rowvals(factor.primal_matrix) ||
+        throw(ArgumentError("Differentiable factorization requires a fixed sparsity pattern"))
+    copyto!(nonzeros(factor.matrix), nonzeros(A))
+    nonzeros(factor.primal_matrix) .= ForwardDiff.value.(nonzeros(A))
+    refactor_sparse!(factor.primal_factor, factor.primal_matrix)
+    return factor
+end
+
+solve_sparse_factor(factor, b) = factor \ b
+solve_sparse_factor!(out, factor, b) = ldiv!(out, factor, b)
+function solve_sparse_factor!(out, factor::DifferentiableSparseFactor, b)
+    return copyto!(out, solve_sparse_factor(factor, b))
+end
+
+function solve_sparse_factor(factor::DifferentiableSparseFactor{<:SparseMatrixCSC{ForwardDiff.Dual{Tag,V,N}}}, b) where {Tag,V,N}
+    A = factor.matrix
+    outreal = solve_sparse_factor(factor.primal_factor, ForwardDiff.value.(b))
     M = length(outreal)
     deriv = zeros(V, M, N)
+    # Assemble tangents directly from CSC entries, without N derivative matrices.
+    for i in 1:N, j in 1:M
+        deriv[j, i] = ForwardDiff.partials(b[j], i)
+    end
+    for col in axes(A, 2), ptr in nzrange(A, col)
+        row = rowvals(A)[ptr]
+        a = nonzeros(A)[ptr]
+        for i in 1:N
+            deriv[row, i] -= ForwardDiff.partials(a, i) * outreal[col]
+        end
+    end
+    scratch = similar(outreal)
     for i in 1:N
-        pAi = ForwardDiff.partials.(A, i)
-        pbi = ForwardDiff.partials.(b, i)
-        deriv[:, i] = -Areal\(pAi * outreal - pbi)
+        column = view(deriv, :, i)
+        solve_sparse_factor!(scratch, factor.primal_factor, column)
+        copyto!(column, scratch)
     end
     out = Vector{eltype(A)}(undef, M)
     for j in eachindex(out)
-        out[j] = ForwardDiff.Dual{T}(outreal[j], ForwardDiff.Partials(tuple(deriv[j,:]...)))
+        out[j] = ForwardDiff.Dual{Tag}(outreal[j], ForwardDiff.Partials(ntuple(i -> deriv[j, i], N)))
     end
     return out
 end
 
+function __FDbackslash(A, b, T, V, N)
+    return solve_sparse_factor(factor_sparse(A), b)
+end
 
 
 # modified StateSpace construct inspired by Mathieu Gomez
@@ -88,12 +132,20 @@ Base.size(h::HyperParams) = (h.N,)
 
 
 function generate_grid(N, xmin, xmax, coef, power)
+    N >= 2 || throw(ArgumentError("At least two grid points are required"))
     x = range(0, 1, length = N)
-    uneven_x = x .+ coef * x.^power
-    uneven_xmax = maximum(uneven_x)
-    uneven_xmin = minimum(uneven_x)
-    x_grid = xmin .+ ((xmax - xmin) ./ (uneven_xmax - uneven_xmin)) .* uneven_x
-    return x_grid
+    # Avoid evaluating 0^Dual(power): its generic derivative contains log(0),
+    # even when the exponent has zero tangents. At positive powers the endpoint
+    # is identically zero; a constant zero power is identically one.
+    uneven_x = if iszero(coef)
+        x
+    else
+        powers = [iszero(t) && power > 0 ? zero(power) :
+                  iszero(power) ? one(power) : t^power for t in x]
+        x .+ coef .* powers
+    end
+    lo, hi = extrema(uneven_x)
+    return collect(xmin .+ (xmax - xmin) .* ((uneven_x .- lo) ./ (hi - lo)))
 end
 
 

@@ -1,39 +1,35 @@
 
-function generate_dx(x::VecOrMat)
-    dxf = ones(size(x))
-    dxb = ones(size(x))
-    dxf[1:end-1] = x[2:end] .- x[1:end-1]
-    dxb[2:end] = x[2:end] .- x[1:end-1]
-    dxf[end] = dxf[end-1]
-    dxb[1] = dxb[2]
-    return dxf, dxb
+function generate_dx(x::AbstractVector)
+    length(x) >= 2 || throw(ArgumentError("At least two grid points are required"))
+    spacing = diff(x)
+    return [spacing; spacing[end]], [spacing[1]; spacing]
 end
-
-function generate_dx(x::VecOrMat{T}) where {T <: ForwardDiff.Dual}
-    dxf = [diff(x); x[end] - x[end-1]]
-    dxb = [x[2] - x[1]; diff(x)]
-    return dxf, dxb
-end
-
 
 # Choose exactly one admissible drift. At nonconcave points both directions
 # can be feasible; the larger Hamiltonian wins (forward on an exact tie).
 # The first array dimension is capital, with state constraints at its endpoints.
+@inline function upwind_choice(vf, vb, c0, γ, k, Nk)
+    cf = max(vf, eps())^(-1 / γ)
+    cb = max(vb, eps())^(-1 / γ)
+    sf, sb = c0 - cf, c0 - cb
+    forward, backward = k < Nk && sf > 0, k > 1 && sb < 0
+    Hf = cf^(1 - γ) / (1 - γ) + vf * sf
+    Hb = cb^(1 - γ) / (1 - γ) + vb * sb
+    If = forward && (!backward || Hf >= Hb)
+    Ib = backward && (!forward || Hb > Hf)
+    I0 = !(If || Ib)
+    return If ? cf : Ib ? cb : c0, If, Ib, I0, sf, sb
+end
+
 function select_upwind_policy(dVf, dVb, c0, γ)
-    cf = max.(dVf, eps()).^(-1 / γ)
-    cb = max.(dVb, eps()).^(-1 / γ)
-    sf = c0 .- cf
-    sb = c0 .- cb
-    Hf = cf.^(1 - γ) ./ (1 - γ) .+ dVf .* sf
-    Hb = cb.^(1 - γ) ./ (1 - γ) .+ dVb .* sb
-    forward = sf .> 0
-    backward = sb .< 0
-    selectdim(forward, 1, size(forward, 1)) .= false
-    selectdim(backward, 1, 1) .= false
-    If = forward .& (.!backward .| (Hf .>= Hb))
-    Ib = backward .& (.!forward .| (Hb .> Hf))
-    I0 = .!(If .| Ib)
-    c = ifelse.(If, cf, ifelse.(Ib, cb, c0))
+    T = promote_type(eltype(dVf), eltype(dVb), eltype(c0), typeof(γ))
+    c, sf, sb = similar(c0, T), similar(c0, T), similar(c0, T)
+    If, Ib, I0 = falses(size(c0)), falses(size(c0)), falses(size(c0))
+    Nk = size(c0, 1)
+    for i in eachindex(c0)
+        c[i], If[i], Ib[i], I0[i], sf[i], sb[i] =
+            upwind_choice(dVf[i], dVb[i], c0[i], γ, mod1(i, Nk), Nk)
+    end
     return (; c, If, Ib, I0, sf, sb)
 end
 
@@ -51,94 +47,6 @@ function check_generator(A::SparseMatrixCSC; atol = 1e-6)
     maximum(abs, sum(A, dims = 2)) <= atol ||
         throw(ValueFunctionError("Generator rows do not sum to zero"))
     return nothing
-end
-
-
-function update_v(m::DeterministicModel, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true, flat_transfer = 0.0) where {T, N_v}
-    γ, ρ, δ = m.γ, m.ρ, m.δ
-    (; v, dVf, dVb, dV0, dist) = value
-    k, y_orig = state[:k], state.aux_state[:y] # y isn't really a state but avoid computing it each iteration this way
-    y = y_orig .+ flat_transfer
-
-    (; N, xmax, xmin) = hyperparams[:k]
-    kmax, kmin =  xmax, xmin
-
-    dkf, dkb = generate_dx(k)
-
-
-    V = v
-    # forward difference
-    dVf[1:(N-1), 1] = (V[2:N, 1] .- V[1:(N-1), 1]) ./ dkf[1:(N-1)]
-    dVf[N, 1] = (y[N] - δ*kmax)^(-γ) # state constraint, for stability
-    # backward difference
-    dVb[2:N, 1] = (V[2:N, 1] .- V[1:(N-1), 1]) ./ dkb[2:N]
-    dVb[1, 1] = (y[1] - δ*kmin)^(-γ) # state constraint, for stability
-
-    c0 = y - δ .* k
-    dV0[:, 1] .= max.(c0, eps()).^(-γ)
-    c, If, Ib, I0, muf, mub = select_upwind_policy(dVf[:, 1], dVb[:, 1], c0, γ)
-    u = c.^(1 - γ) / (1 - γ)
-
-    # CONSTRUCT MATRIX
-    X = -Ib .* mub ./ dkb
-    Y = -If .* muf ./ dkf + Ib .* mub ./ dkb
-    Z = If .* muf ./ dkf
-
-
-    A = spdiagm(
-        0 => Y,
-        -1 => X[2:N],
-        1 => Z[1:(N-1)]
-    );
-    check_generator(A)
-
-
-    B = (ρ + 1/Delta) * sparse(I, N, N) .- A
-    b = u + V/Delta
-    V = B\b # SOLVE SYSTEM OF EQUATIONS
-    Vchange = V - v
-    # If using forward diff, want this just to be value part
-    distance = ForwardDiff.value(maximum(abs.(Vchange)))
-    push!(dist, distance)
-
-    if distance < crit
-        if verbose
-            println("Value Function Converged, Iteration = ", iter)
-        end
-        push!(dist, distance)
-        value = Value{T, N_v}(
-            v = V, 
-            dVf = dVf, 
-            dVb = dVb, 
-            dV0 = dV0, 
-            A = A,
-            dist = dist,
-            convergence_status = true,
-            iter = iter
-            )
-        variables = (
-            y = y, 
-            k = k, 
-            c = c, 
-            If = If, 
-            Ib = Ib, 
-            I0 = I0
-            )
-        return value, iter, variables
-    end
-
-    value = Value{T,N_v}(
-        v = V, 
-        dVf = dVf, 
-        dVb = dVb, 
-        dV0 = dV0, 
-        A = A,
-        dist = dist,
-        convergence_status = false,
-        iter = iter
-        )
-
-    return value, iter
 end
 
 
@@ -270,178 +178,7 @@ function construct_diffusion_matrix(stochasticprocess::PoissonProcess, state::St
     return B_switch
 end
 
-function update_v(m::StochasticModel{T, S}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams, diffusion_matrix; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true, flat_transfer = 0.0) where {T, N_v, S <: StochasticProcess}
-    (; γ, α, ρ, δ) = m
-    (; v, dVf, dVb, dV0, dist) = value
-    k, z = state[:k], state[:z]' # y isn't really a state but avoid computing it each iteration this way
-    y_orig = state.aux_state[:y]
-    y = y_orig .+ flat_transfer
-    k_hps = hyperparams[:k]
-    z_hps = hyperparams[:z]
-
-
-    
-    Nk, kmax, kmin = k_hps.N, k_hps.xmax, k_hps.xmin
-    Nz, zmax, zmin = z_hps.N, z_hps.xmax, z_hps.xmin
-
-
-    state_size = size(state)
-    # get size of all other states, but remove z
-    Nstate = prod(state_size) ÷ Nz
-
-    dkf, dkb = generate_dx(k)
-
-
-    kk = repeat(reshape(k, :, 1), 1, Nz);
-    zz = repeat(reshape(z, 1, :), Nk, 1);
-
-    Bswitch = diffusion_matrix    
-
-    V = v
-
-    # Forward difference
-    dVf[1:Nk-1, :] .= (V[2:Nk, :] - V[1:Nk-1, :]) ./ dkf[1:Nk-1]
-    dVf[Nk, :] .= (y[Nk, :] .- δ .* k[Nk, :]) .^ (-γ) # State constraint at kmax
-
-    # Backward difference
-    dVb[2:Nk, :] .= (V[2:Nk, :] - V[1:Nk-1, :]) ./ dkb[2:Nk]
-    dVb[1, :] .= (y[1, :] .- δ .* k[1, :]).^(-γ) # State constraint at kmin
-
-    c0 = y - δ .* kk
-    dV0 .= max.(c0, eps()).^(-γ)
-    c, If, Ib, I0, sf, sb = select_upwind_policy(dVf, dVb, c0, γ)
-    u = c.^(1 - γ) / (1 - γ)
-
-    # Use the same selected policy for consumption and the capital generator.
-    X = -Ib .* sb ./ dkb
-    Z = If .* sf ./ dkf
-    Y = .-(X .+ Z)
-
-
-    # set top and bottom rows of udiag, ldiag to 0
-    Z[end, :] .= 0.0
-    X[1, :] .= 0.0
-
-    cdiag = reshape(Y, :)
-    ldiag = reshape(X, :)[2:end]
-    udiag = reshape(Z, :)[1:end-1]
-
-
-    AA = spdiagm(0 => cdiag, 1 => udiag, -1 => ldiag)
-
-
-    A = AA + Bswitch
-    check_generator(A)
-
-    B = (1 / Delta + ρ) * sparse(I, size(A)) .- A
-
-
-
-    u_stacked = reshape(u, Nk*Nz)
-    V_stacked = reshape(V, Nk*Nz)
-
-    b = u_stacked + V_stacked / Delta
-
-    V_stacked = B \ b
-
-    V = reshape(V_stacked, Nk, Nz)
-
-    Vchange = V - v
-
-    # If using forward diff, want this just to be value part
-    distance = ForwardDiff.value(maximum(abs.(Vchange)))
-    push!(dist, distance)
-
-    if distance < crit
-        if verbose
-            println("Value Function Converged, Iteration = ", iter)
-        end
-        push!(dist, distance)
-        value = Value{T, N_v}(
-            v = V, 
-            dVf = dVf, 
-            dVb = dVb, 
-            dV0 = dV0, 
-            A = A,
-            dist = dist,
-            convergence_status = true,
-            iter = iter
-            )
-        variables = (
-            y = y, 
-            k = kk, 
-            z = zz,
-            c = c, 
-            If = If, 
-            Ib = Ib, 
-            I0 = I0
-            )
-        return value, iter, variables
-    end
-
-    value = Value{T,N_v}(
-        v = V, 
-        dVf = dVf, 
-        dVb = dVb, 
-        dV0 = dV0, 
-        A = A,
-        dist = dist,
-        convergence_status = false,
-        iter = iter
-        )
-
-    return value, iter, AA
-end
-
-
-
 initial_guess(m::GrowthModels.Model{T}, state) where {T <: Real} = state.aux_state[:y] .^ (1 - m.γ) / (1 - m.γ) / m.ρ
-
-function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000, verbose = true, flat_transfer = 0.0)
-    curr_iter = 0
-    val = deepcopy(init_value)
-    val.v[:] = initial_guess(m, state)
-    for n in 1:maxit
-        curr_iter += 1
-        output_value, curr_iter = update_v(m, val, state, hyperparams, iter = n, verbose = verbose, flat_transfer = flat_transfer)
-        if output_value.convergence_status
-            fit_value, _, fit_variables = update_v(m, val, state, hyperparams, iter = curr_iter, verbose = verbose, flat_transfer = flat_transfer)
-            return (value = fit_value, variables = fit_variables, iter = curr_iter)
-            break
-        end
-        val = output_value
-    end
-    return (value = val, variables = nothing, iter = curr_iter)
-end
-
-function solve_HJB(m::Model, hyperparams::StateSpaceHyperParams; init_value = nothing, maxit = 1000, verbose = true, flat_transfer = 0.0)
-    state = StateSpace(m, hyperparams)
-    if isnothing(init_value)
-        init_value = Value(state)
-    end
-    return solve_HJB(m, hyperparams, state; init_value = init_value, maxit = maxit, verbose = verbose, flat_transfer = flat_transfer)
-end
-
-
-function solve_HJB(m::StochasticModel, hyperparams::StateSpaceHyperParams, state::StateSpace; init_value = Value(hyperparams), maxit = 1000, verbose = true, flat_transfer = 0.0)
-    curr_iter = 0
-    val = deepcopy(init_value)
-    val.v[:] = initial_guess(m, state)
-    Bswitch = construct_diffusion_matrix(m.stochasticprocess, state, hyperparams)
-    for n in 1:maxit
-        curr_iter += 1
-        output_value, curr_iter = update_v(m, val, state, hyperparams, Bswitch, iter = n, verbose = verbose, flat_transfer = flat_transfer)
-        if output_value.convergence_status
-            fit_value, _, fit_variables = update_v(m, val, state, hyperparams, Bswitch, iter = curr_iter, verbose = verbose, flat_transfer = flat_transfer)
-            return (value = fit_value, variables = fit_variables, iter = curr_iter)
-            break
-        end
-        val = output_value
-    end
-    return (value = val, variables = nothing, iter = curr_iter)
-end
-
-
 
 dV_Upwind(::Model, value::Value, variables::NamedTuple) = value.dVf .* variables.If .+ value.dVb .* variables.Ib .+ value.dV0 .* variables.I0
 V_err(m::Model) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.γ) / (1-m.γ) .+ dV_Upwind(m, value, variables) .* statespace_k_dot(m)(variables) .- m.ρ .* value.v
@@ -451,126 +188,4 @@ V_err(m::Model) = (value::Value, variables::NamedTuple) -> variables.c .^ (1-m.�
 
 
 
-function update_v(m::Union{StochasticSkibaAbilityModel{T, S},StochasticNPAbilityModel{T,S}}, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams, diffusion_matrix; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true, flat_transfer = 0.0) where {T, N_v, S <: StochasticProcess}
-    (; γ, ρ, δ) = m
-    (; v, dVf, dVb, dV0, dist) = value
-    k, z, η = state[:k], state[:z]', state[:η]' # y isn't really a state but avoid computing it each iteration this way
-    y_orig = state.aux_state[:y]
-    # Adding flat permanent transfer to income -- defaults to 0 but can be used for counterfactuals
-    y = y_orig .+ flat_transfer
-
-    k_hps = hyperparams[:k]
-    z_hps = hyperparams[:z]
-    η_hps = hyperparams[:η]
-
-    Nk, kmax, kmin = k_hps.N, k_hps.xmax, k_hps.xmin
-    Nη, ηmax, ηmin = η_hps.N, η_hps.xmax, η_hps.xmin
-    Nz, zmax, zmin = z_hps.N, z_hps.xmax, z_hps.xmin
-
-    dkf, dkb = GrowthModels.generate_dx(k)
-
-
-    kk = repeat(reshape(k, :, 1), 1, Nz, Nη);
-    zz = repeat(reshape(z, 1, :), Nk, 1, Nη);
-    ηη = repeat(reshape(η, 1, 1, :), Nk, Nz, 1);
-
-    Bswitch = diffusion_matrix    
-
-    V = v
-
-    # Forward difference
-    dVf[1:Nk-1, :, :] .= (V[2:Nk, :, :] - V[1:Nk-1, :, :]) ./ dkf[1:Nk-1]
-    dVf[Nk, :, :] .= (y[Nk, :, :] .- δ .* k[Nk, :]) .^ (-γ) # State constraint at kmax
-
-    # Backward difference
-    dVb[2:Nk, :, :] .= (V[2:Nk, :, :] - V[1:Nk-1, :, :]) ./ dkb[2:Nk]
-    dVb[1, :, :] .= (y[1, :, :] .- δ .* k[1, :, :]).^(-γ) # State constraint at kmin
-
-    c0 = y - δ .* kk
-    dV0 .= max.(c0, eps()).^(-γ)
-    c, If, Ib, I0, sf, sb = select_upwind_policy(dVf, dVb, c0, γ)
-    u = c.^(1 - γ) / (1 - γ)
-
-    # Use the same selected policy for consumption and the capital generator.
-    X = -Ib .* sb ./ dkb
-    Z = If .* sf ./ dkf
-    Y = .-(X .+ Z)
-
-
-    # set top and bottom rows of udiag, ldiag to 0
-    Z[end, :, :] .= 0.0
-    X[1, :, :] .= 0.0
-
-
-    cdiag = reshape(Y, :)
-    ldiag = reshape(X, :)[2:end]
-    udiag = reshape(Z, :)[1:end-1]
-
-
-
-    AA = spdiagm(0 => cdiag, 1 => udiag, -1 => ldiag)
-
-    A = AA + Bswitch
-    check_generator(A)
-
-    B = (1 / Delta + ρ) * sparse(I, size(A)) .- A
-
-
-
-    u_stacked = reshape(u, :)
-    V_stacked = reshape(V, :)
-
-    b = u_stacked + V_stacked / Delta
-
-    V_stacked = B \ b
-
-    V = reshape(V_stacked, size(V))
-
-    Vchange = V - v
-
-    # If using forward diff, want this just to be value part
-    distance = ForwardDiff.value(maximum(abs.(Vchange)))
-    push!(dist, distance)
-
-    if distance < crit
-        if verbose
-            println("Value Function Converged, Iteration = ", iter)
-        end
-        push!(dist, distance)
-        value = Value{T, N_v}(
-            v = V, 
-            dVf = dVf, 
-            dVb = dVb, 
-            dV0 = dV0, 
-            A = A,
-            dist = dist,
-            convergence_status = true,
-            iter = iter
-            )
-        variables = (
-            y = y, 
-            k = kk, 
-            η = ηη,
-            z = zz,
-            c = c, 
-            If = If, 
-            Ib = Ib, 
-            I0 = I0
-            )
-        return value, iter, variables
-    end
-
-    value = Value{T,N_v}(
-        v = V, 
-        dVf = dVf, 
-        dVb = dVb, 
-        dV0 = dV0, 
-        A = A,
-        dist = dist,
-        convergence_status = false,
-        iter = iter
-        )
-
-    return value, iter, AA
-end
-
+include("HJBWorkspace.jl")

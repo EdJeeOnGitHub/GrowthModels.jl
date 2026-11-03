@@ -40,7 +40,7 @@ using LinearAlgebra
             @test sum((weights .* g0)[3:4]) ≈ 0.7 atol = 1e-12
             @test minimum(g0) >= 0
         end
-        evolution = StateEvolution(p0 ./ weights, A_t, 3, (2, 2), weights)
+        evolution = StateEvolution(p0 ./ weights, A_t, 3, (2, 2), weights; stationary = true)
         @test evolution.stationary_dist ≈ stationary
         for t in axes(evolution.S, 2)
             @test vec(sum(evolution.cell_masses[:, :, t], dims = 1)) ≈ [0.3, 0.7]
@@ -161,7 +161,7 @@ using LinearAlgebra
         sm = SolvedModel(m, result)
         weights = create_dx_stacked(sm.variables.k[:, 1, 1], 4)
         p0 = vcat(fill(0.3 / 240, 240), fill(0.7 / 240, 240))
-        evolution = StateEvolution(p0 ./ weights, sm, 5)
+        evolution = StateEvolution(p0 ./ weights, sm, 5; stationary = true)
         for t in 1:5
             @test vec(sum(evolution.cell_masses[:, :, :, t], dims = (1, 2))) ≈ [0.3, 0.7] atol = 1e-10
         end

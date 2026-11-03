@@ -55,7 +55,8 @@ module GrowthModels
            PoissonProcess,
            sample
     # state evolution
-    export StateEvolution,
+    export EvolutionWorkspace, update_evolution!,
+                 StateEvolution,
                  create_dx_stacked,
                  iterate_g, iterate_g!,
                  StationaryDistribution,
@@ -80,6 +81,7 @@ module GrowthModels
     include("StochasticProcesses.jl")
     include("Models.jl")
     include("utils.jl")
+    include("LinearSolvers.jl")
     include("HJB.jl")
     include("Skiba.jl")
     include("SmoothSkiba.jl")
@@ -90,6 +92,7 @@ module GrowthModels
     include("StochasticSkibaAbility.jl")
     include("StochasticNPAbility.jl")
     include("SolvedModel.jl")
+    include("EvolutionWorkspace.jl")
     include("StateEvolution.jl")
 
 

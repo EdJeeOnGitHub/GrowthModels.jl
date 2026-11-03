@@ -510,3 +510,5 @@ include("test-precision.jl")
 include("test-matlab-rbc-diffusion.jl")
 include("test-mass-conservation.jl")
 include("test-p1-regressions.jl")
+
+include("test-performance-contracts.jl")
