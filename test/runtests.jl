@@ -13,3 +13,4 @@ include("test-population-stationary.jl")
 include("test-ownership.jl")
 
 include("test-migrated-invariants.jl")
+include("test-default-bounds.jl")

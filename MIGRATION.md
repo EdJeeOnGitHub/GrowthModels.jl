@@ -89,3 +89,14 @@ replacement rather than composition is intended.
   diffusion assembly paths are removed. Use `StateGrid` and axis `generator`.
 - `Interpolations` is no longer a GrowthModels dependency. Applications that use
   it directly must declare it themselves.
+
+## Separate numerical-default change: capital support
+
+For built-in parametric stochastic models, omitted capital bounds now account
+for the *resolved* productivity coordinates and population ability support.
+Changing `z.width`, supplying productivity coordinates, or changing ability
+support may therefore change the default capital grid. Previously productivity
+width four informed the capital proposal even when another support was selected.
+Explicit capital bounds and fixed grids remain unchanged. Re-run default-grid
+analyses and assess bounds and resolution together; the strict explicit-grid
+refactor comparison does not measure this intentional default change.

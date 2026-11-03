@@ -109,3 +109,13 @@ function capital_reference(m::StochasticModel, z, η = one(z))
         (m.α * m.A_L * shock * η / (m.ρ + m.δ))^(1 / (1 - m.α)))
 end
 
+
+# Economic proposals for capital support, evaluated only when bounds were not
+# supplied. Custom production retains its own declared numerical proposal.
+resolved_capital_bounds(::Model, z, ability) = nothing
+function resolved_capital_bounds(m::Union{StochasticRamseyCassKoopmansModel,StochasticSkibaModel,StochasticSkibaAbilityModel},z,ability)
+    upper_z=maximum(z)
+    upper_type=ability === nothing ? one(upper_z) : maximum(ability)
+    return (0.001*k_steady_state_hi(m),1.3*capital_reference(m,upper_z,upper_type))
+end
+resolved_capital_bounds(m::ResourceModel,z,ability) = resolved_capital_bounds(m.model,z,ability)

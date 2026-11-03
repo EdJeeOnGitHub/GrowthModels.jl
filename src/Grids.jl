@@ -81,6 +81,14 @@ function StateGrid(m::Model; kwargs...)
         axes = merge(axes, (ability=copy(population(m).values),))
         kinds = merge(kinds, (ability=:categorical,))
     end
+    if :z in schema && supplied_k isa NamedTuple && !haskey(supplied_k,:bounds)
+        bounds=resolved_capital_bounds(m,axes.z,get(axes,:ability,nothing))
+        if bounds !== nothing
+            kspec=merge(kspec,(bounds=bounds,))
+            axes=merge(axes,(k=capital_axis(kspec),))
+            specifications=merge(specifications,(k=kspec,))
+        end
+    end
     for (name, axis) in pairs(axes)
         !isempty(axis) && all(isfinite, axis) && all(diff(axis) .> 0) || throw(ArgumentError("Axis $name must be finite and strictly increasing"))
         name == :k && (length(axis) < 2 || first(axis) <= 0) && throw(ArgumentError("Capital requires two or more positive points"))
