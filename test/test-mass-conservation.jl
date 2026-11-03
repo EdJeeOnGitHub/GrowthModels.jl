@@ -40,13 +40,11 @@ function create_test_setup(; uniform_grid = true, N = 100)
     # Create grid spacing
     k = sm.variables.k
     dkf, dkb = GrowthModels.generate_dx(k)
-    dx_tilde = 0.5 * (dkf + dkb)
-    dx_tilde[1] = 0.5 * dkf[1]
-    dx_tilde[end] = 0.5 * dkb[end]
+    dx_stacked = 0.5 * (dkf + dkb)
+    dx_stacked[1] = 0.5 * dkf[1]
+    dx_stacked[end] = 0.5 * dkb[end]
     
-    grid_diag = spdiagm(0 => dx_tilde)
-    
-    return A_t, grid_diag, dx_tilde, sm
+    return A_t, dx_stacked, sm
 end
 
 # Helper function to create initial distribution
@@ -134,43 +132,43 @@ end
 @testset "Mass Conservation Tests" begin
     @testset "Issue #1: Raw g summing vs weighted mass" begin
         @testset "Uniform Grid" begin
-            A_t, dx_stacked, dx_tilde, sm = create_test_setup(uniform_grid = true, N = 100)
+            A_t, dx_stacked, sm = create_test_setup(uniform_grid = true, N = 100)
             g_init = create_initial_distribution(size(A_t, 1), normalized = false)
             
             # Normalize by weighted mass (correct approach)
-            initial_weighted_mass = sum(g_init .* dx_tilde)
+            initial_weighted_mass = sum(g_init .* dx_stacked)
             g_init_normalized = g_init ./ initial_weighted_mass
             
             raw_mass = sum(g_init_normalized)
-            weighted_mass = sum(g_init_normalized .* dx_tilde)
+            weighted_mass = sum(g_init_normalized .* dx_stacked)
             
             @test weighted_mass ≈ 1.0 atol = 1e-10
             # On uniform grid, raw sum and weighted sum should be similar (proportional)
-            @test abs(weighted_mass - raw_mass * dx_tilde[2]) < 1e-10  # Should be proportional
+            @test abs(weighted_mass - raw_mass * dx_stacked[2]) < 1e-10  # Should be proportional
             
             # Test evolution preserves weighted mass
             g_evolved = GrowthModels.iterate_g(g_init_normalized, A_t, dx_stacked, time_step = 0.1)
-            evolved_weighted_mass = sum(g_evolved .* dx_tilde)
+            evolved_weighted_mass = sum(g_evolved .* dx_stacked)
             
             @test evolved_weighted_mass ≈ weighted_mass atol = 1e-10
             
             println("Uniform grid - Initial weighted mass: ", weighted_mass)
             println("Uniform grid - Evolved weighted mass: ", evolved_weighted_mass)
-            println("Uniform grid - dx_tilde[2]: ", dx_tilde[2])
+            println("Uniform grid - dx_stacked[2]: ", dx_stacked[2])
             println("Uniform grid - Raw mass: ", raw_mass)
 
         end
         
         @testset "Non-uniform Grid" begin
-            A_t, dx_stacked, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
+            A_t, dx_stacked, sm = create_test_setup(uniform_grid = false, N = 100)
             g_init = create_initial_distribution(size(A_t, 1), normalized = false)
             
             # Normalize by weighted mass (correct approach)
-            initial_weighted_mass = sum(g_init .* dx_tilde)
+            initial_weighted_mass = sum(g_init .* dx_stacked)
             g_init_normalized = g_init ./ initial_weighted_mass
             
             raw_mass = sum(g_init_normalized)
-            weighted_mass = sum(g_init_normalized .* dx_tilde)
+            weighted_mass = sum(g_init_normalized .* dx_stacked)
             
             @test weighted_mass ≈ 1.0 atol = 1e-10
             # On non-uniform grid, raw sum and weighted sum should differ significantly
@@ -178,7 +176,7 @@ end
             
             # Test evolution preserves weighted mass
             g_evolved = GrowthModels.iterate_g(g_init_normalized, A_t, dx_stacked, time_step = 0.1)
-            evolved_weighted_mass = sum(g_evolved .* dx_tilde)
+            evolved_weighted_mass = sum(g_evolved .* dx_stacked)
             
             @test evolved_weighted_mass ≈ 1.0 atol = 1e-10
             
@@ -188,20 +186,20 @@ end
         end
         
         @testset "Multiple Time Steps" begin
-            A_t, dx_stacked, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
+            A_t, dx_stacked, sm = create_test_setup(uniform_grid = false, N = 100)
             g = create_initial_distribution(size(A_t, 1), normalized = false)
             
             # Normalize by weighted mass
-            initial_weighted_mass = sum(g .* dx_tilde)
+            initial_weighted_mass = sum(g .* dx_stacked)
             g = g ./ initial_weighted_mass
             
             # Test that weighted mass is preserved over multiple time steps
             weighted_masses = Float64[]
-            push!(weighted_masses, sum(g .* dx_tilde))
+            push!(weighted_masses, sum(g .* dx_stacked))
             
             for i in 1:10
                 g = GrowthModels.iterate_g(g, A_t, dx_stacked, time_step = 0.1)
-                push!(weighted_masses, sum(g .* dx_tilde))
+                push!(weighted_masses, sum(g .* dx_stacked))
             end
             
             # All weighted masses should be approximately 1.0
@@ -215,7 +213,7 @@ end
     
     @testset "Demonstration of Issue" begin
         # This test demonstrates why raw summing fails on non-uniform grids
-        A_t, dx_stacked, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
+        A_t, dx_stacked, sm = create_test_setup(uniform_grid = false, N = 100)
         g = create_initial_distribution(size(A_t, 1), normalized = false)
         
         # Normalize by RAW sum (incorrect approach)
@@ -244,12 +242,12 @@ end
     end
     
     @testset "New Utility Functions" begin
-        A_t, dx_stacked, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
+        A_t, dx_stacked, sm = create_test_setup(uniform_grid = false, N = 100)
         g = create_initial_distribution(size(A_t, 1), normalized = false)
         
         @testset "weighted_mass function" begin
             # Test weighted_mass function
-            manual_weighted_mass = sum(g .* dx_tilde)
+            manual_weighted_mass = sum(g .* dx_stacked)
             utility_weighted_mass = weighted_mass(g, dx_stacked)
 
             
@@ -282,7 +280,7 @@ end
     
     @testset "StateEvolution with SolvedModel" begin
         # Test that the high-level StateEvolution interface works correctly
-        A_t, dx_stacked, dx_tilde, sm = create_test_setup(uniform_grid = false, N = 100)
+        A_t, dx_stacked, sm = create_test_setup(uniform_grid = false, N = 100)
         g = create_initial_distribution(size(A_t, 1), normalized = false)
         
         # Normalize properly

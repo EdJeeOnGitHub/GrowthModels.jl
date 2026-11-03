@@ -346,20 +346,11 @@ end
     g_init = abs.(sin.(range(0, stop = 2π, length = size(r.value.A', 1))))
     g_init = g_init ./ sum(g_init)
     init_ability, ability_by_t, evolution, dx_stacked = setup_ability_check(sm, g_init)
-    # This isn't particularly precise - ability seems to be drifting
-    # This happens because as K grid gets more uneven, finite difference 
-    # approximation struggles. Fix by making k more even or (maybe) 
-    # rewriting generator to stack A differently, instead of
-    # [k z] repeated for each eta, A = kron(k, I_\eta) + kron(eta, I_k),
-    # For multiple dims:
-    # A = I_Z kron I_eta kron A_k + I_z kron A_eta kron I_k + A_z kron I_eta kron I_k
-    # (i, j, l) indexes k, eta, z respectively, within each j, l block, k is contiguous
-    # and uneven k grids don't bleed over to other dimensions
-    # Long, long term TODO to test this
+    # Fixed ability is invariant under capital and productivity transitions.
     for t in 1:size(ability_by_t, 2)
         comp_ab = hcat(ability_by_t[:, t], init_ability)
         println("Ability at time $t vs init ability: ", comp_ab)
-        @test isapprox(ability_by_t[:, t], init_ability; rtol = 1e-1)
+        @test isapprox(ability_by_t[:, t], init_ability; rtol = 1e-10, atol = 1e-12)
     end
 end
 
@@ -404,11 +395,11 @@ end
 
     g_init = g
     init_ability, ability_by_t, distribution_time_series, dx_stacked = setup_ability_check(np_sm, g_init)
-    # This isn't particularly precise - ability seems to be drifting
+    # Fixed ability shares must be preserved to numerical precision.
     for t in 1:size(ability_by_t, 2)
         comp_ab = hcat(ability_by_t[:, t], init_ability)
         println("Ability at time $t vs init ability: ", comp_ab)        
-        @test isapprox(ability_by_t[:, t], init_ability; rtol = 1e-1)   
+        @test isapprox(ability_by_t[:, t], init_ability; rtol = 1e-10, atol = 1e-12)
     end
 end
 
@@ -457,11 +448,11 @@ end
 
     g_init = g
     init_ability, ability_by_t, distribution_time_series, dx_stacked = setup_ability_check(np_sm, g_init)
-    # This isn't particularly precise - ability seems to be drifting
+    # Fixed ability shares must be preserved to numerical precision.
     for t in 1:size(ability_by_t, 2)
         comp_ab = hcat(ability_by_t[:, t], init_ability)
         println("Ability at time $t vs init ability: ", comp_ab)    
-        @test isapprox(ability_by_t[:, t], init_ability; rtol = 1e-1)       
+        @test isapprox(ability_by_t[:, t], init_ability; rtol = 1e-10, atol = 1e-12)
     end
 end
 
@@ -518,3 +509,4 @@ include("test-differentiable.jl")
 include("test-precision.jl")
 include("test-matlab-rbc-diffusion.jl")
 include("test-mass-conservation.jl")
+include("test-p1-regressions.jl")

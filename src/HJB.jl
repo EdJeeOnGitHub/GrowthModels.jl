@@ -16,6 +16,44 @@ function generate_dx(x::VecOrMat{T}) where {T <: ForwardDiff.Dual}
 end
 
 
+# Choose exactly one admissible drift. At nonconcave points both directions
+# can be feasible; the larger Hamiltonian wins (forward on an exact tie).
+# The first array dimension is capital, with state constraints at its endpoints.
+function select_upwind_policy(dVf, dVb, c0, γ)
+    cf = max.(dVf, eps()).^(-1 / γ)
+    cb = max.(dVb, eps()).^(-1 / γ)
+    sf = c0 .- cf
+    sb = c0 .- cb
+    Hf = cf.^(1 - γ) ./ (1 - γ) .+ dVf .* sf
+    Hb = cb.^(1 - γ) ./ (1 - γ) .+ dVb .* sb
+    forward = sf .> 0
+    backward = sb .< 0
+    selectdim(forward, 1, size(forward, 1)) .= false
+    selectdim(backward, 1, 1) .= false
+    If = forward .& (.!backward .| (Hf .>= Hb))
+    Ib = backward .& (.!forward .| (Hb .> Hf))
+    I0 = .!(If .| Ib)
+    c = ifelse.(If, cf, ifelse.(Ib, cb, c0))
+    return (; c, If, Ib, I0, sf, sb)
+end
+
+# A backward generator must conserve constants and have nonnegative jump rates.
+function check_generator(A::SparseMatrixCSC; atol = 1e-6)
+    size(A, 1) == size(A, 2) || throw(ValueFunctionError("Generator must be square"))
+    rows = rowvals(A)
+    vals = nonzeros(A)
+    for j in axes(A, 2), ptr in nzrange(A, j)
+        a = vals[ptr]
+        if !isfinite(a) || (rows[ptr] != j && a < 0)
+            throw(ValueFunctionError("Generator has a nonfinite entry or negative off-diagonal rate"))
+        end
+    end
+    maximum(abs, sum(A, dims = 2)) <= atol ||
+        throw(ValueFunctionError("Generator rows do not sum to zero"))
+    return nothing
+end
+
+
 function update_v(m::DeterministicModel, value::Value{T, N_v}, state::StateSpace, hyperparams::StateSpaceHyperParams; iter = 0, crit = 10^(-6), Delta = 1000, verbose = true, flat_transfer = 0.0) where {T, N_v}
     γ, ρ, δ = m.γ, m.ρ, m.δ
     (; v, dVf, dVb, dV0, dist) = value
@@ -36,33 +74,10 @@ function update_v(m::DeterministicModel, value::Value{T, N_v}, state::StateSpace
     dVb[2:N, 1] = (V[2:N, 1] .- V[1:(N-1), 1]) ./ dkb[2:N]
     dVb[1, 1] = (y[1] - δ*kmin)^(-γ) # state constraint, for stability
 
-    # consumption and savings with forward difference
-    cf = max.(dVf[:, 1],eps()).^(-1/γ)
-    muf = y - δ.*k - cf
-    Hf = (cf.^(1-γ))/(1-γ) + dVf[:, 1].*muf
-
-    # consumption and savings with backward difference
-    cb = max.(dVb[:, 1],eps()).^(-1/γ)
-    mub = y - δ.*k - cb
-    Hb = (cb.^(1-γ))/(1-γ) + dVb[:, 1].*mub
-
-    # consumption and derivative of value function at steady state
-    c0 = y - δ.*k
-    dV0[1:N, 1] = max.(c0, eps()).^(-γ)
-    H0 = (c0.^(1-γ))/(1-γ)
-
-    # dV_upwind makes a choice of forward or backward differences based on
-    # the sign of the drift    
-    Ineither = (1 .- (muf .> 0)) .* (1 .- (mub .< 0))
-    Iunique = (mub .< 0) .* (1 .- (muf .> 0)) + (1 .- (mub .< 0)) .* (muf .> 0)
-    Iboth = (mub .< 0) .* (muf .> 0)
-    Ib = Iunique .* (mub .< 0) + Iboth .* (Hb .>= Hf)
-    If = Iunique .* (muf .> 0) + Iboth .* (Hf .>= Hb)
-    I0 = Ineither
-
-    # consumption
-    c  = cf .* If + cb .* Ib + c0 .* I0
-    u = (c.^(1-γ))/(1-γ)
+    c0 = y - δ .* k
+    dV0[:, 1] .= max.(c0, eps()).^(-γ)
+    c, If, Ib, I0, muf, mub = select_upwind_policy(dVf[:, 1], dVb[:, 1], c0, γ)
+    u = c.^(1 - γ) / (1 - γ)
 
     # CONSTRUCT MATRIX
     X = -Ib .* mub ./ dkb
@@ -75,10 +90,7 @@ function update_v(m::DeterministicModel, value::Value{T, N_v}, state::StateSpace
         -1 => X[2:N],
         1 => Z[1:(N-1)]
     );
-    A_err = abs.(sum(A, dims = 2))        
-    if maximum(A_err) > 10^(-6)
-        throw(ValueFunctionError("Improper Transition Matrix: $(maximum(A_err)) > 10^(-6)"))
-    end    
+    check_generator(A)
 
 
     B = (ρ + 1/Delta) * sparse(I, N, N) .- A
@@ -175,6 +187,8 @@ function construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess,
     if (maximum(dz_emp) - minimum(dz_emp)) > 10^(-6)
         throw("Non-uniform grid spacing for z")
     end
+    all(isfinite, z) && all(z .> 0) && all(dz_emp .> 0) ||
+        throw(ArgumentError("OU productivity grid must be positive and strictly increasing"))
     # for now, assume dz constant (no non-uniform grid for z)
     dz = (zmax - zmin) / (Nz - 1)
 
@@ -187,9 +201,10 @@ function construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess,
     # variance - Ito's
     s2 = σ_sq.*z.^2;
 
-    yy = -s2/dz2 - mu/dz
-    chi = s2/(2*dz2)
-    zeta = mu/dz + s2/(2*dz2)
+    # Upwind the drift in its own direction so all jump rates are nonnegative.
+    chi = s2 / (2 * dz2) .+ max.(-mu, 0) ./ dz
+    zeta = s2 / (2 * dz2) .+ max.(mu, 0) ./ dz
+    yy = .-(chi .+ zeta)
     
     off_diag_length = (Nz-1)*Nk
 
@@ -210,6 +225,7 @@ function construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess,
     cdiag[end-Nk+1:end] .= zeta[end] + yy[end]
 
     Bswitch_2dim = spdiagm(-Nk => ldiag, 0 => cdiag, Nk => udiag)
+    check_generator(Bswitch_2dim)
     # if only two dimensions (i.e. k and z), then Bswitch is a tridiagonal matrix
     if length(state_size) == 2
         return Bswitch_2dim
@@ -291,33 +307,15 @@ function update_v(m::StochasticModel{T, S}, value::Value{T, N_v}, state::StateSp
     dVb[2:Nk, :] .= (V[2:Nk, :] - V[1:Nk-1, :]) ./ dkb[2:Nk]
     dVb[1, :] .= (y[1, :] .- δ .* k[1, :]).^(-γ) # State constraint at kmin
 
-    # Indicator whether value function is concave
-    I_concave = dVb .> dVf
-
-    # Consumption and savings with forward difference
-    cf = max.(dVf, eps()).^(-1 / γ)
-    sf = y - δ .* kk - cf
-    # Consumption and savings with backward difference
-    cb = max.(dVb, eps()).^(-1 / γ)
-    sb = y - δ .* kk - cb
-    # Consumption and derivative of value function at steady state
     c0 = y - δ .* kk
     dV0 .= max.(c0, eps()).^(-γ)
-
-    # Decision on forward or backward differences based on the sign of the drift
-    If = sf .> 0 # positive drift -> forward difference
-    Ib = sb .< 0 # negative drift -> backward difference
-    I0 = 1 .- If .- Ib # at steady state
-
-    V_Upwind = dVf .* If + dVb .* Ib + dV0 .* I0
-
-    c = max.(V_Upwind, eps()).^(-1 / γ)
+    c, If, Ib, I0, sf, sb = select_upwind_policy(dVf, dVb, c0, γ)
     u = c.^(1 - γ) / (1 - γ)
 
-    # Construct matrix A
-    X = -min.(sb, 0) ./ dkb
-    Y = -max.(sf, 0) ./ dkf + min.(sb, 0) ./ dkb
-    Z = max.(sf, 0) ./ dkf
+    # Use the same selected policy for consumption and the capital generator.
+    X = -Ib .* sb ./ dkb
+    Z = If .* sf ./ dkf
+    Y = .-(X .+ Z)
 
 
     # set top and bottom rows of udiag, ldiag to 0
@@ -333,10 +331,7 @@ function update_v(m::StochasticModel{T, S}, value::Value{T, N_v}, state::StateSp
 
 
     A = AA + Bswitch
-    A_err = abs.(sum(A, dims = 2))        
-    if maximum(A_err) > 10^(-6)
-        throw(ValueFunctionError("Improper Transition Matrix: $(maximum(A_err)) > 10^(-6)"))
-    end    
+    check_generator(A)
 
     B = (1 / Delta + ρ) * sparse(I, size(A)) .- A
 
@@ -491,33 +486,15 @@ function update_v(m::Union{StochasticSkibaAbilityModel{T, S},StochasticNPAbility
     dVb[2:Nk, :, :] .= (V[2:Nk, :, :] - V[1:Nk-1, :, :]) ./ dkb[2:Nk]
     dVb[1, :, :] .= (y[1, :, :] .- δ .* k[1, :, :]).^(-γ) # State constraint at kmin
 
-    # Indicator whether value function is concave
-    I_concave = dVb .> dVf
-
-    # Consumption and savings with forward difference
-    cf = max.(dVf, eps()).^(-1 / γ)
-    sf = y - δ .* kk - cf
-    # Consumption and savings with backward difference
-    cb = max.(dVb, eps()).^(-1 / γ)
-    sb = y - δ .* kk - cb
-    # Consumption and derivative of value function at steady state
     c0 = y - δ .* kk
     dV0 .= max.(c0, eps()).^(-γ)
-
-    # Decision on forward or backward differences based on the sign of the drift
-    If = sf .> 0 # positive drift -> forward difference
-    Ib = sb .< 0 # negative drift -> backward difference
-    I0 = 1 .- If .- Ib # at steady state
-
-    V_Upwind = dVf .* If + dVb .* Ib + dV0 .* I0
-
-    c = max.(V_Upwind, eps()).^(-1 / γ)
+    c, If, Ib, I0, sf, sb = select_upwind_policy(dVf, dVb, c0, γ)
     u = c.^(1 - γ) / (1 - γ)
 
-    # Construct matrix A
-    X = -min.(sb, 0) ./ dkb
-    Y = -max.(sf, 0) ./ dkf + min.(sb, 0) ./ dkb
-    Z = max.(sf, 0) ./ dkf
+    # Use the same selected policy for consumption and the capital generator.
+    X = -Ib .* sb ./ dkb
+    Z = If .* sf ./ dkf
+    Y = .-(X .+ Z)
 
 
     # set top and bottom rows of udiag, ldiag to 0
@@ -534,10 +511,7 @@ function update_v(m::Union{StochasticSkibaAbilityModel{T, S},StochasticNPAbility
     AA = spdiagm(0 => cdiag, 1 => udiag, -1 => ldiag)
 
     A = AA + Bswitch
-    A_err = abs.(sum(A, dims = 2))        
-    if maximum(A_err) > 10^(-4)
-        throw(ValueFunctionError("Improper Transition Matrix: $(maximum(A_err)) > 10^(-6)"))
-    end    
+    check_generator(A)
 
     B = (1 / Delta + ρ) * sparse(I, size(A)) .- A
 

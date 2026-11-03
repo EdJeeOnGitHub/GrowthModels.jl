@@ -29,19 +29,22 @@ function iterate_g(g, A_t; time_step = 1)
     return evolution \ g
 end
 
+"""
+    iterate_g(g, A_t, dx_stacked; time_step = 1)
+
+Advance a density using the transpose of the HJB generator. Internally evolve
+cell masses `dx_stacked .* g`, then convert back to a density. This preserves
+weighted mass without renormalization, including on nonuniform grids.
+The two-argument overload instead advances cell masses directly.
+"""
 function iterate_g(g, A_t, dx_stacked; time_step = 1)
     evolution = I - time_step * A_t
-    new_g = evolution \ g
-    # normalize with grid spacing
-    normalized_g = normalize_by_weighted_mass(new_g, dx_stacked)
-    return normalized_g
+    return (evolution \ (dx_stacked .* g)) ./ dx_stacked
 end
 
 function iterate_g!(g, A_t, dx_stacked; time_step = 1)
-    evolution = I - time_step * A_t
-    g .= evolution \ g
-    # normalize with grid spacing
-    normalize_by_weighted_mass!(g, dx_stacked)
+    g .= iterate_g(g, A_t, dx_stacked; time_step = time_step)
+    return g
 end
 
 function StateEvolution(S::Array{T}, times::Vector{T}, g::Vector{T}, A::SparseMatrixCSC) where T <: Real
@@ -92,27 +95,124 @@ function normalize_by_weighted_mass(g, dx_stacked)
     return g ./ mass
 end
 
-function StationaryDistribution(A_t::SparseMatrixCSC, dx_stacked) 
-   dx_stacked_mat = spdiagm(0 => dx_stacked)
-   # A matrix from VFI
-   AT = copy(A_t)
-   dim_b = size(A_t, 1)
-   # We invert this with "infinite" time step to get stationary distribution
-   # However, need to do two things:
-   # 1. Add a row to AT to ensure it is invertible
-   # 2. Rescale the problem since grid may be uneven - this is where dx_stacked 
-   #   comes in
-   b = zeros(dim_b) 
-   i_fix = dim_b ÷ 2
-   b[i_fix] = 0.1
-   row = zeros(dim_b)
-   row[i_fix] = 1.0
-   AT[i_fix, :] = row
-   gg_tilde = AT \ b
-   g_sum = sum(gg_tilde)
-   gg_tilde = gg_tilde ./ g_sum
-   gg = dx_stacked_mat \ gg_tilde
-   return gg
+# Strongly connected components of the transition graph (Kosaraju).
+# Columns of A_t are source states. Iterative DFS avoids recursion limits on
+# large grids; only strictly positive off-diagonal entries are graph edges.
+function closed_communicating_classes(A_t::SparseMatrixCSC)
+    n = size(A_t, 1)
+    seen = falses(n)
+    order = Int[]
+    rows, vals = rowvals(A_t), nonzeros(A_t)
+    stack = Tuple{Int, Bool}[]
+    for root in 1:n
+        seen[root] && continue
+        push!(stack, (root, false))
+        while !isempty(stack)
+            v, finished = pop!(stack)
+            if finished
+                push!(order, v)
+            elseif !seen[v]
+                seen[v] = true
+                push!(stack, (v, true))
+                for ptr in nzrange(A_t, v)
+                    w = rows[ptr]
+                    if w != v && vals[ptr] > 0 && !seen[w]
+                        push!(stack, (w, false))
+                    end
+                end
+            end
+        end
+    end
+
+    reverse_graph = sparse(transpose(A_t))
+    reverse_rows, reverse_vals = rowvals(reverse_graph), nonzeros(reverse_graph)
+    labels = zeros(Int, n)
+    components = Vector{Int}[]
+    pending = Int[]
+    for root in Iterators.reverse(order)
+        labels[root] != 0 && continue
+        push!(components, Int[])
+        label = length(components)
+        labels[root] = label
+        push!(pending, root)
+        while !isempty(pending)
+            v = pop!(pending)
+            push!(components[label], v)
+            for ptr in nzrange(reverse_graph, v)
+                w = reverse_rows[ptr]
+                if w != v && reverse_vals[ptr] > 0 && labels[w] == 0
+                    labels[w] = label
+                    push!(pending, w)
+                end
+            end
+        end
+    end
+
+    closed = trues(length(components))
+    for v in 1:n, ptr in nzrange(A_t, v)
+        if vals[ptr] > 0 && labels[rows[ptr]] != labels[v]
+            closed[labels[v]] = false
+        end
+    end
+    return components[closed], findall(v -> !closed[labels[v]], 1:n)
+end
+
+"""
+    StationaryDistribution(A_t, dx_stacked; initial_density = nothing)
+
+Return a stationary density for the transpose of an HJB generator. If there
+are multiple closed communicating classes, supply `initial_density` to select
+its long-run mixture. Initial mass in transient states is allocated using
+absorption probabilities; disconnected ability groups retain their mass.
+Without an initial density, a unique closed class is required.
+"""
+function StationaryDistribution(A_t::SparseMatrixCSC, dx_stacked;
+                                initial_density = nothing)
+    check_generator(sparse(transpose(A_t)))
+    n = size(A_t, 1)
+    length(dx_stacked) == n || throw(DimensionMismatch("One cell weight is required per state"))
+    all(w -> isfinite(w) && w > 0, dx_stacked) ||
+        throw(ArgumentError("Cell weights must be finite and positive"))
+    classes, transient = closed_communicating_classes(A_t)
+    if isnothing(initial_density)
+        length(classes) == 1 || throw(ArgumentError(
+            "Multiple stationary classes: supply initial_density to determine their masses"))
+        initial_mass = nothing
+    else
+        length(initial_density) == n || throw(DimensionMismatch("Initial density must match the generator"))
+        all(g -> isfinite(g) && g >= 0, initial_density) ||
+            throw(ArgumentError("Initial density must be finite and nonnegative"))
+        initial_mass = float.(dx_stacked .* initial_density)
+        sum(initial_mass) > 0 || throw(ArgumentError("Initial density must have positive mass"))
+        initial_mass ./= sum(initial_mass)
+    end
+
+    # Integrated transient occupancy solves -A_TT * occupation = initial_mass_T.
+    # Its outflow into each closed class is that class's eventual absorbed mass.
+    occupation = if initial_mass !== nothing && !isempty(transient)
+        (-A_t[transient, transient]) \ initial_mass[transient]
+    else
+        nothing
+    end
+    mass = zeros(promote_type(Float64, eltype(A_t), eltype(dx_stacked)), n)
+    for states in classes
+        weight = if initial_mass === nothing
+            one(eltype(mass))
+        else
+            sum(initial_mass[states]) + (occupation === nothing ? zero(eltype(mass)) :
+                sum(A_t[states, transient] * occupation))
+        end
+        # An irreducible closed block has a one-dimensional nullspace. Pin one
+        # component, then normalize within the class before applying its weight.
+        block = copy(A_t[states, states])
+        block[1, :] .= 0
+        block[1, 1] = 1
+        rhs = zeros(eltype(mass), length(states))
+        rhs[1] = 1
+        stationary_mass = block \ rhs
+        mass[states] .= weight .* stationary_mass ./ sum(stationary_mass)
+    end
+    return mass ./ dx_stacked
 end
 
 # Given a stopping time T, iterate the state evolution T times with a timestep of 1/implicit_steps
@@ -134,8 +234,8 @@ function StateEvolution(g::Vector{R}, A_t::SparseMatrixCSC, T::Int, v_dim, dx_st
     full_shape = (v_dim..., T_thinned)
     cell_mass_array = reshape(cell_mass_all, full_shape)
 
-    # if no shock dimension, return S
-    stationary_dist = v_dim[1] == size(g, 1) ? S[:, end] : StationaryDistribution(A_t, dx_stacked)
+    # Select the stationary mixture implied by the initial distribution.
+    stationary_dist = StationaryDistribution(A_t, dx_stacked; initial_density = g_norm)
     return StateEvolution(S_thinned, T_thinned_vec, g, A_t, dx_stacked, cell_mass_array, stationary_dist)
 end
 
@@ -155,8 +255,8 @@ function StateEvolution(g::Vector{T}, A_t::SparseMatrixCSC, times::Vector, v_dim
     full_shape = (v_dim..., length(times))
     cell_mass_array = reshape(cell_mass_all, full_shape)
 
-    # if no shock dimension, return S
-    stationary_dist = v_dim[1] == size(g, 1) ? S[:, end] : StationaryDistribution(A_t, dx_stacked)
+    # Select the stationary mixture implied by the initial distribution.
+    stationary_dist = StationaryDistribution(A_t, dx_stacked; initial_density = g_norm)
 
     return StateEvolution(S, times, g, A_t, dx_stacked, cell_mass_array, stationary_dist)
 end
@@ -177,14 +277,10 @@ function StateEvolution(g, sm::SolvedModel{S}, T::Int; implicit_steps = 1) where
 end
 
 function StateEvolution(g, sm::SolvedModel{S}, times::Vector) where {S <: Model}
-    if S <: StochasticModel 
-        dz = size(sm.variables.z, 2)
-        k = sm.variables.k[:, 1]
-    else
-        dz = 1
-        k = sm.variables.k
-    end
-    dx_stacked = create_dx_stacked(k, dz)
+    slice_tuple = CartesianIndices((1:size(sm.variables.k, 1), fill(1, ndims(sm.variables.k) - 1)...))
+    k = sm.variables.k[slice_tuple][:]
+    Nstate = prod(size(sm.value.v)) ÷ length(k)
+    dx_stacked = create_dx_stacked(k, Nstate)
     A_t = sparse(sm.value.A')
     return StateEvolution(g, A_t, times, size(sm.value.v), dx_stacked)
 end
