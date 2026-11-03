@@ -55,3 +55,16 @@ if modern
         @printf("ou %s median_seconds=%.6f allocated_bytes=%d\n",name,seconds,bytes)
     end
 end
+
+if modern
+    fit=GM.solve(RamseyCassKoopmansModel(),StateGrid(RamseyCassKoopmansModel();k=(n=1000,)))
+    function inspect_values(fit)
+        total=0.0
+        for i in 1:1000
+            total+=fit.value[i]
+        end
+        total
+    end
+    seconds,bytes=measure(()->inspect_values(fit))
+    @printf("inspection 1000_scalar_reads median_seconds=%.9f allocated_bytes=%d\n",seconds,bytes)
+end

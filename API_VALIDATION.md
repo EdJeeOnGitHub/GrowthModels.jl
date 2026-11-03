@@ -14,7 +14,7 @@ class-absorption invariants, boundary constraints, finite failed-solve snapshots
 initial-value ownership, serialization, fixed/moving-grid AD, regridded warm
 starts, sparse Hessians, and policy/transition/stationary derivatives against
 finite differences. The coverage migration is mapped in
-`test/legacy/COVERAGE.md`.
+`test/COVERAGE.md`.
 
 Six explicit-grid cases compare the new implementation against commit f711991:
 RCK, Skiba, SmoothSkiba, OU RCK, Poisson Skiba, and ability Skiba. Value and

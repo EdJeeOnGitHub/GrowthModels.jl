@@ -1,46 +1,3 @@
-function create_dx_stacked(x, N_second_dim)
-    dxf, dxb = generate_dx(x)
-    dx_tilde = 0.5 * (dxf + dxb)
-    dx_tilde[1] = 0.5*dxf[1]
-    dx_tilde[end] = 0.5*dxb[end]
-    dx_tilde_stacked = repeat(dx_tilde, N_second_dim)
-    return dx_tilde_stacked
-end
-
-# Utility functions for mass conservation
-"""
-    weighted_mass(g, dx_stacked)
-
-Compute the weighted mass of distribution g using grid spacing from dx_stacked.
-This is the correct way to measure total probability on non-uniform grids.
-"""
-function weighted_mass(g, dx_stacked)
-    return sum(dx_stacked .* g)
-end
-
-"""
-    normalize_by_weighted_mass!(g, dx_stacked)
-
-Normalize distribution g by its weighted mass to ensure proper mass conservation.
-This modifies g in place.
-"""
-function normalize_by_weighted_mass!(g, dx_stacked)
-    mass = weighted_mass(g, dx_stacked)
-    g ./= mass
-    return g
-end
-
-"""
-    normalize_by_weighted_mass(g, dx_stacked)
-
-Normalize distribution g by its weighted mass to ensure proper mass conservation.
-This returns a new normalized distribution.
-"""
-function normalize_by_weighted_mass(g, dx_stacked)
-    mass = weighted_mass(g, dx_stacked)
-    return g ./ mass
-end
-
 # Strongly connected components of the transition graph (Kosaraju).
 # Columns of A_t are source states. Iterative DFS avoids recursion limits on
 # large grids; only strictly positive off-diagonal entries are graph edges.
@@ -104,33 +61,22 @@ function closed_communicating_classes(A_t::SparseMatrixCSC)
 end
 
 """
-    StationaryDistribution(A_t, dx_stacked; initial_density = nothing)
+    stationary_mass(A_t; initial_mass=nothing)
 
-Return a stationary density for the transpose of an HJB generator. If there
-are multiple closed communicating classes, supply `initial_density` to select
-its long-run mixture. Initial mass in transient states is allocated using
-absorption probabilities; disconnected ability groups retain their mass.
-Without an initial density, a unique closed class is required.
+Limiting cell probabilities for a forward generator. Explicit initial mass
+selects class weights, including absorption from transient states. Without it,
+a unique closed communicating class is required. Density conversion belongs to
+the distribution boundary.
 """
-function StationaryDistribution(A_t::SparseMatrixCSC, dx_stacked;
-                                initial_density = nothing)
+function stationary_mass(A_t::SparseMatrixCSC; initial_mass=nothing)
     check_generator(sparse(transpose(A_t)))
-    n = size(A_t, 1)
-    length(dx_stacked) == n || throw(DimensionMismatch("One cell weight is required per state"))
-    all(w -> isfinite(w) && w > 0, dx_stacked) ||
-        throw(ArgumentError("Cell weights must be finite and positive"))
-    classes, transient = closed_communicating_classes(A_t)
-    if isnothing(initial_density)
-        length(classes) == 1 || throw(ArgumentError(
-            "Multiple stationary classes: supply initial_density to determine their masses"))
-        initial_mass = nothing
+    n=size(A_t,1)
+    classes,transient=closed_communicating_classes(A_t)
+    if initial_mass === nothing
+        length(classes) == 1 || throw(ArgumentError("Multiple stationary classes: supply an initial distribution to determine their masses"))
     else
-        length(initial_density) == n || throw(DimensionMismatch("Initial density must match the generator"))
-        all(g -> isfinite(g) && g >= 0, initial_density) ||
-            throw(ArgumentError("Initial density must be finite and nonnegative"))
-        initial_mass = float.(dx_stacked .* initial_density)
-        sum(initial_mass) > 0 || throw(ArgumentError("Initial density must have positive mass"))
-        initial_mass ./= sum(initial_mass)
+        length(initial_mass) == n || throw(DimensionMismatch("Initial mass must match the generator"))
+        validate_probability(initial_mass)
     end
 
     # Integrated transient occupancy solves -A_TT * occupation = initial_mass_T.
@@ -140,7 +86,7 @@ function StationaryDistribution(A_t::SparseMatrixCSC, dx_stacked;
     else
         nothing
     end
-    mass = zeros(promote_type(Float64, eltype(A_t), eltype(dx_stacked), initial_mass === nothing ? Float64 : eltype(initial_mass)), n)
+    mass = zeros(promote_type(Float64, eltype(A_t), initial_mass === nothing ? Float64 : eltype(initial_mass)), n)
     for states in classes
         weight = if initial_mass === nothing
             one(eltype(mass))
@@ -158,5 +104,27 @@ function StationaryDistribution(A_t::SparseMatrixCSC, dx_stacked;
         stationary_mass = solve_sparse_factor(factor_sparse(block), rhs)
         mass[states] .= weight .* stationary_mass ./ sum(stationary_mass)
     end
-    return mass ./ dx_stacked
+    return mass
+end
+
+# Ability is fixed: population defaults select block masses, not arbitrary
+# mixtures among closed classes inside a type. Explicit initial mass bypasses
+# this default entirely.
+function population_stationary_mass(A_t::SparseMatrixCSC,g::StateGrid,pop::Population)
+    blocksize=preferred_blocksize(g)
+    independent_blocksize(A_t,blocksize) == blocksize || throw(ArgumentError("Population types must be independent blocks"))
+    T=promote_type(eltype(A_t),eltype(pop.shares))
+    result=zeros(T,length(g))
+    for (j,share) in enumerate(pop.shares)
+        iszero(primal(share)) && continue
+        indices=(j-1)*blocksize+1:j*blocksize
+        result[indices] .= share .* stationary_mass(A_t[indices,indices])
+    end
+    return result
+end
+
+function forward_generator(fit::GrowthSolution)
+    A=sparse(transpose(getfield(fit,:generator)))
+    check_generator(sparse(transpose(A)))
+    return A
 end

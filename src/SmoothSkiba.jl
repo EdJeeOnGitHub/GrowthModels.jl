@@ -11,26 +11,6 @@
 # Matlab code originally written by Greg Kaplan and Benjamin Moll - thanks fellas
 
 
-#### Util Functions ####
-# Util functions to dispatch on for Skiba models
-# Create a HyperParams object from a SkibaModel
-# use high steady state to guide grid formation
-function StateSpaceHyperParams(m::SmoothSkibaModel; Nk = 1000, kmax_f = 1.3, kmin_f = 0.001)
-    kssH = k_steady_state_hi(m)
-    kmin, kmax = kmin_f*kssH, kmax_f*kssH
-    k_hps = HyperParams(N = Nk, xmax = kmax, xmin = kmin)
-    return StateSpaceHyperParams((k = k_hps,))
-end
-
-function StateSpace(m::SmoothSkibaModel, statespacehyperparams::StateSpaceHyperParams)
-    k_hps = statespacehyperparams[:k]
-    k = collect(range(k_hps.xmin, k_hps.xmax, length = k_hps.N))
-    y = production_function(m, k)
-    StateSpace((k = k,), (y = y,))
-end
-
-
-
 function SmoothSkibaModel(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0, β = 10.0)
     SmoothSkibaModel(promote(γ, α, ρ, δ, A_H, A_L, κ, β)...)
 end

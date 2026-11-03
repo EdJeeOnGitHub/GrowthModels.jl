@@ -13,7 +13,7 @@ const GM = GrowthModels
     @test_throws ArgumentError StateGrid(m; ability=[.7,1.])
     @test_throws ArgumentError Population([1.,2.],[.3,.3])
     original = g.k
-    g.k[1] = 9
+    @test_throws ArgumentError g.k[1] = 9
     @test g.k == original
     @test size(cell_weights(g)) == size(g)
     @test sum(cell_weights(g)[:,1,1]) ≈ last(g.k)-first(g.k)
@@ -124,7 +124,7 @@ end
     @test fit.converged
     p = zeros(size(g)); p[:,:,1] .= .3/(50*10); p[:,:,2] .= .7/(50*10)
     d = distribution(g;masses=p)
-    @test_throws ArgumentError stationary(fit)
+    @test vec(sum(mass(stationary(fit));dims=(1,2))) ≈ [.3,.7]
     for result in (stationary(fit,d),advance(Evolution(fit;dt=.1),d,3.))
         @test vec(sum(mass(result);dims=(1,2))) ≈ [.3,.7] atol=1e-11
     end
@@ -151,8 +151,8 @@ end
     end
     @test errors[2] < errors[1] < 1e-3
     m=StochasticRamseyCassKoopmansModel(); g=StateGrid(m;k=(n=2,),z=(n=400,))
-    _,_,D=GM.numerical_state(m,g); Q=D[1:2:end,1:2:end]
-    p=GM.StationaryDistribution(sparse(Q'),ones(400))
+    D=GM.exogenous_generator(m,g); Q=D[1:2:end,1:2:end]
+    p=GM.stationary_mass(sparse(Q'))
     sigma=m.stochasticprocess.σ/sqrt(2m.stochasticprocess.θ)
     @test dot(g.z,p) ≈ exp(sigma^2/2) atol=.002
     @test sqrt(dot(log.(g.z).^2,p)-dot(log.(g.z),p)^2) ≈ sigma atol=.005

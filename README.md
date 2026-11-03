@@ -44,7 +44,7 @@ concurrent simulations. Construct a new evolution for a changed fit.
 Production, resource rules, processes, and population support belong to the
 model. Grid resolution belongs to `StateGrid`. Canonical axes are capital,
 productivity, and ability, where present; keyword order never changes layout.
-`grid.k`, `grid.z`, and `grid.ability` return coordinate copies.
+`grid.k`, `grid.z`, and `grid.ability` return read-only coordinate views.
 `coordinates(grid)` returns shaped named coordinate arrays.
 
 ```julia
@@ -57,7 +57,7 @@ fit = solve(model, grid)
 
 `resources(model, state)` is income before depreciation and consumption:
 `capital_drift = resources - δ*k - consumption`. `ResourceModel` applies
-`max(production + transfer, income_floor)`. The solver, residual diagnostics,
+`max(resources(base, state) + transfer, income_floor)`. The solver, residual diagnostics,
 and policy evaluation use the same rule. `FunctionalModel` supports concrete
 callable production objects with arguments `(k, z, ability)`; economic
 customizations should not override solver internals.
@@ -88,7 +88,10 @@ OU states. Arrays have grid shape, e.g. `Nk × Nz × Nability`. `mass` and
 `density` return copies. Distributions have no time; trajectories own times.
 Evolution checks conservation without renormalization. `stationary(fit,
 initial)` preserves limiting class shares, including transient absorption.
-The initial distribution is required if there are multiple closed classes.
+Without an initial distribution, population shares select the ability-block
+weights if each positive-share type has a unique closed class. Otherwise an
+initial distribution is required. Zero-share types contribute no mass. Explicit
+initial distributions always override these population defaults.
 Stationary calculation has no timestep.
 
 ## Failure, warm starts, and differentiation
@@ -155,13 +158,30 @@ A custom one-capital model supplies `production(model, state)`,
 `default_grid_spec(model)`. Override `resources` for disposable-income rules;
 the default is production. Override `population` for ability support/shares.
 Supported canonical schemas are `(:k,)`, `(:k,:z)`, and
-`(:k,:z,:ability)`; other schemas raise an error. Stochastic models expose their
-process as `stochasticprocess`. `marginal_product` defaults to differentiating
+`(:k,:z,:ability)`; other schemas raise an error. Stochastic models implement `process(model)`; deterministic models return
+`nothing`. Wrappers delegate this interface rather than forwarding arbitrary
+fields. `marginal_product` defaults to differentiating
 production with respect to capital.
 
-A custom process implements `generator(process, coordinates)`, returning the
+A custom process implements `process_axis(process, specification)`, returning
+`(coordinates=..., kind=:interpolable)` or `kind=:categorical`, and
+`generator(process, coordinates)`, returning the
 axis generator acting on values. Rows sum to zero and off-diagonal rates must
 be nonnegative. The operator layer validates and embeds that generator in the
 joint grid; it owns stacking and independent ability blocks. Supply explicit
 productivity coordinates or bounds for a custom process. This interface covers
 one exogenous productivity process with fixed ability classes.
+
+## Snapshot ownership
+
+Solution values, policies, generators, diagnostic arrays, grid axes, population
+arrays, and trajectory storage are read-only inspection views. Indexing does not
+copy an entire array. Writes (including through views or broadcasting) throw;
+use `copy(fit.value)` for editable data. `mass` and `density` still return shaped
+copies. `fit.model` returns a detached model snapshot. Evolution factors and
+workspace buffers are private. Deliberate access to internal fields is outside
+the supported interface.
+
+Grid option typos raise errors; for example `k=(n=50, bound=(0.1,5.0))` must use
+`bounds`. Explicit coordinates bypass unused model defaults. Categorical support
+cannot be changed by regridding or queried between represented types.

@@ -27,34 +27,38 @@ end
 model_eltype(::Model{T}) where T = T
 concrete_eltype(a) = isconcretetype(eltype(a)) ? eltype(a) : mapreduce(typeof, promote_type, a)
 
-function HJBWorkspace(m::Model, state::StateSpace, hp::StateSpaceHyperParams;
-                      flat_transfer = 0.0, diffusion_matrix = nothing, value_type = Float64)
-    dims = size(state)
-    dims == size(hp) || throw(DimensionMismatch("State grid and hyperparameters must agree"))
-    first(keys(state.state)) == :k || throw(ArgumentError("The first state must be capital k"))
-    Nk = dims[1]
-    Nk >= 2 || throw(ArgumentError("At least two capital grid points are required"))
-    diffusion_type = diffusion_matrix === nothing ? Float64 : eltype(diffusion_matrix)
-    T = promote_type(Float64, model_eltype(m), concrete_eltype(state.aux_state.y), typeof(flat_transfer), value_type, diffusion_type, map(typeof, Base.values(preferences(m)))...)
-    D = length(dims)
-    coordinates = NamedTuple{keys(state.state)}(ntuple(j -> repeat(
-        reshape(T.(state.state[j]), ntuple(d -> d == j ? dims[j] : 1, D)),
-        ntuple(d -> d == j ? 1 : dims[d], D)...), D))
-    y = T.(state.aux_state.y .+ flat_transfer)
-    size(y) == dims || throw(DimensionMismatch("Production must match the state grid"))
-    c0 = y .- preferences(m).δ .* coordinates.k
-    all(x -> isfinite(x) && x > 0, selectdim(c0, 1, 1)) ||
-        throw(DomainError(c0, "Positive net output is required at every lower-capital boundary state"))
-    dkf, dkb = generate_dx(T.(state[:k]))
-    all(x -> isfinite(x) && x > 0, dkf) || throw(ArgumentError("Capital grid must be strictly increasing"))
-    n = prod(dims)
-    diffusion = if diffusion_matrix !== nothing
-        SparseMatrixCSC{T,Int}(diffusion_matrix)
-    elseif m isa StochasticModel
-        SparseMatrixCSC{T,Int}(construct_diffusion_matrix(m.stochasticprocess, state, hp))
-    else
-        spzeros(T, n, n)
-    end
+# This layer owns joint generator stacking; grids and processes do not know
+# workspace storage or factorization details.
+function exogenous_generator(m::Model,g::StateGrid)
+    ax=getfield(g,:axes)
+    process(m) === nothing && return spzeros(model_eltype(m),length(g),length(g))
+    Q=sparse(generator(process(m),ax.z))
+    size(Q) == (length(ax.z),length(ax.z)) || throw(DimensionMismatch("Process generator must match its axis"))
+    check_generator(Q)
+    joint=kron(Q,sparse(I,length(ax.k),length(ax.k)))
+    return haskey(ax,:ability) ? kron(sparse(I,length(ax.ability),length(ax.ability)),joint) : joint
+end
+
+function HJBWorkspace(m::Model, grid::StateGrid; value_type=Float64)
+    dims=size(grid)
+    ax=getfield(grid,:axes)
+    Nk=dims[1]
+    raw_resources=map(i -> resources(m,grid_state(grid,i)),CartesianIndices(dims))
+    diffusion_matrix=exogenous_generator(m,grid)
+    T=promote_type(Float64,model_eltype(m),concrete_eltype(raw_resources),
+        value_type,eltype(diffusion_matrix),map(typeof,Base.values(preferences(m)))...)
+    D=length(dims)
+    coordinates=NamedTuple{keys(ax)}(ntuple(j -> repeat(
+        reshape(T.(ax[j]),ntuple(d -> d == j ? dims[j] : 1,D)),
+        ntuple(d -> d == j ? 1 : dims[d],D)...),D))
+    y=T.(raw_resources)
+    c0=y .- preferences(m).δ .* coordinates.k
+    all(x -> isfinite(x) && x > 0,selectdim(c0,1,1)) ||
+        throw(DomainError(c0,"Positive net output is required at every lower-capital boundary state"))
+    dkf,dkb=generate_dx(T.(ax.k))
+    all(x -> isfinite(x) && x > 0,dkf) || throw(ArgumentError("Capital grid must be strictly increasing"))
+    n=length(grid)
+    diffusion=SparseMatrixCSC{T,Int}(diffusion_matrix)
     size(diffusion) == (n, n) || throw(DimensionMismatch("Diffusion matrix must match the state grid"))
     check_generator(diffusion)
     rows, cols, values = findnz(diffusion)
@@ -81,7 +85,7 @@ function HJBWorkspace(m::Model, state::StateSpace, hp::StateSpaceHyperParams;
             forward[row] = ptr
         end
     end
-    blocksize = D > 2 ? prod(dims[1:2]) : n
+    blocksize = preferred_blocksize(grid)
     return HJBWorkspace(coordinates, y, c0, dkf, dkb,
         zeros(T, dims), zeros(T, dims), max.(c0, eps()).^(-preferences(m).γ),
         zeros(T, dims), falses(dims), falses(dims), falses(dims),
@@ -116,14 +120,6 @@ function prepare_hjb_step!(ws::HJBWorkspace, m, v, Delta)
         nonzeros(ws.B)[ws.diagonal[i]] += preferences(m).ρ + 1 / Delta
     end
     return ws
-end
-
-function hjb_linear_solver(ws, m, method)
-    method in (:auto, :sparse) || throw(ArgumentError("linear_solver must be :auto or :sparse"))
-    if method == :auto && m isa DeterministicModel
-        return TridiagonalHJBSolver(ws.B)
-    end
-    return SparseBlockSolver(ws.B; blocksize = method == :auto ? independent_blocksize(ws.B, ws.blocksize) : size(ws.B, 1))
 end
 
 convergence_norm(x::Real) = abs(x)

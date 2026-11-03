@@ -7,17 +7,24 @@ struct Evolution{G,A,S,T}
     generator::A
     solver::S
     dt::T
+    function Evolution(::OwnedSnapshot,g,a,s,dt)
+        new{typeof(g),typeof(a),typeof(s),typeof(dt)}(g,a,s,dt)
+    end
+end
+Base.propertynames(::Evolution) = (:grid,:dt)
+function Base.getproperty(e::Evolution,key::Symbol)
+    key in (:grid,:dt) || throw(ArgumentError("Evolution exposes only grid and dt; numerical storage is private"))
+    return getfield(e,key)
 end
 function Evolution(fit::GrowthSolution; dt)
     require_converged(fit)
     dt isa AbstractFloat || dt isa Integer || throw(ArgumentError("dt must be a real numerical integration setting"))
     isfinite(dt) && dt > 0 || throw(ArgumentError("dt must be finite and positive"))
-    A = sparse(transpose(fit.generator))
-    check_generator(sparse(transpose(A)))
+    A = forward_generator(fit)
     system = sparse(I - dt*A)
-    preferred = length(size(fit.grid)) > 2 ? prod(size(fit.grid)[1:2]) : length(fit.grid)
+    preferred = preferred_blocksize(fit.grid)
     solver = SparseBlockSolver(system; blocksize=independent_blocksize(system,preferred))
-    return Evolution(deepcopy(fit.grid), copy(A), solver, float(dt))
+    return Evolution(OWNED, deepcopy(fit.grid), copy(A), solver, float(dt))
 end
 
 struct Trajectory{G,T,M,S,D}
@@ -26,13 +33,20 @@ struct Trajectory{G,T,M,S,D}
     probabilities::M
     settings::S
     diagnostics::D
+    function Trajectory(::OwnedSnapshot,g,t,p,s,d)
+        new{typeof(g),typeof(t),typeof(p),typeof(s),typeof(d)}(g,t,p,s,d)
+    end
 end
 struct Observations{T,V,S,D}
     times::T
     values::V
     settings::S
     diagnostics::D
+    function Observations(::OwnedSnapshot,t,v,s,d)
+        new{typeof(t),typeof(v),typeof(s),typeof(d)}(t,v,s,d)
+    end
 end
+Base.getproperty(path::Union{Trajectory,Observations},key::Symbol) = _readonly(getfield(path,key))
 function observation_index(path, t)
     i = searchsortedfirst(path.times,t)
     i <= length(path.times) && path.times[i] == t || throw(ArgumentError("Time $t was not requested"))
@@ -62,7 +76,7 @@ end
 function walk_observations(emit, e::Evolution, initial::StateDistribution, times, t0)
     compatible_grid(e.grid, initial.grid) || throw(ArgumentError("Initial distribution grid differs from evolution grid"))
     validate_probability(getfield(initial,:probabilities))
-    T = promote_type(eltype(e.generator),eltype(getfield(initial,:probabilities)))
+    T = promote_type(eltype(getfield(e,:generator)),eltype(getfield(initial,:probabilities)))
     lower = Vector{T}(vec(getfield(initial,:probabilities)))
     upper = similar(lower)
     observed = similar(lower)
@@ -79,7 +93,7 @@ function walk_observations(emit, e::Evolution, initial::StateDistribution, times
         target = floor(Int,q)
         while lattice_index < target
             if !upper_ready
-                solve_linear!(upper,e.solver,lower)
+                solve_linear!(upper,getfield(e,:solver),lower)
                 steps += 1
                 validate_probability(upper)
                 max_mass_error = max(max_mass_error,abs(primal(sum(upper))-1))
@@ -93,7 +107,7 @@ function walk_observations(emit, e::Evolution, initial::StateDistribution, times
             copyto!(observed,lower)
         else
             if !upper_ready
-                solve_linear!(upper,e.solver,lower)
+                solve_linear!(upper,getfield(e,:solver),lower)
                 steps += 1
                 validate_probability(upper)
                 max_mass_error = max(max_mass_error,abs(primal(sum(upper))-1))
@@ -110,12 +124,12 @@ integration_settings(e,t0) = (dt=e.dt,t0=float(t0),algorithm=:implicit_euler,int
 """Store distributions at all requested times. Lookup is only at saved times."""
 function trajectory(e::Evolution, initial::StateDistribution, times; t0=0.0)
     t = observation_times(times,t0)
-    T = promote_type(eltype(e.generator),eltype(getfield(initial,:probabilities)))
+    T = promote_type(eltype(getfield(e,:generator)),eltype(getfield(initial,:probabilities)))
     saved = Matrix{T}(undef,length(e.grid),length(t))
     diagnostic = walk_observations(e,initial,t,t0) do j,p
         copyto!(view(saved,:,j),p)
     end
-    return Trajectory(deepcopy(e.grid),t,saved,integration_settings(e,t0),diagnostic)
+    return Trajectory(OWNED, deepcopy(e.grid),t,saved,integration_settings(e,t0),diagnostic)
 end
 
 """Return only the final distribution after a duration, without retaining history.
@@ -124,7 +138,7 @@ This is a fresh one-shot integration, not incremental numerical continuation.
 function advance(e::Evolution, initial::StateDistribution, duration; t0=0.0)
     isfinite(duration) && duration >= 0 || throw(ArgumentError("Duration must be finite and nonnegative"))
     times = observation_times([t0+duration],t0)
-    T = promote_type(eltype(e.generator),eltype(getfield(initial,:probabilities)))
+    T = promote_type(eltype(getfield(e,:generator)),eltype(getfield(initial,:probabilities)))
     saved = Vector{T}(undef,length(e.grid))
     walk_observations(e,initial,times,t0) do _,p
         copyto!(saved,p)
@@ -137,26 +151,34 @@ function observe(e::Evolution, initial::StateDistribution, times, observables::N
     isempty(observables) && throw(ArgumentError("Supply at least one named observable"))
     t = observation_times(times,t0)
     weights = map(f -> vec([f(grid_state(e.grid,i)) for i in CartesianIndices(size(e.grid))]),observables)
-    scalar = promote_type(eltype(e.generator),eltype(getfield(initial,:probabilities)),map(eltype,values(weights))...)
+    scalar = promote_type(eltype(getfield(e,:generator)),eltype(getfield(initial,:probabilities)),map(eltype,values(weights))...)
     result = map(_ -> Vector{scalar}(undef,length(t)),weights)
     diagnostic = walk_observations(e,initial,t,t0) do j,p
         for key in keys(weights)
             result[key][j] = sum(weights[key] .* p)
         end
     end
-    return Observations(t,result,integration_settings(e,t0),diagnostic)
+    return Observations(OWNED, t,result,integration_settings(e,t0),diagnostic)
 end
 
-"""Limiting probability distribution, preserving initial class shares. No dt is used."""
+"""Limiting probabilities, preserving explicit initial class shares. Without an
+initial distribution, population shares are used when each positive-share type
+has a unique closed class; otherwise an initial distribution is required. No dt.
+"""
 function stationary(fit::GrowthSolution, initial::Union{Nothing,StateDistribution}=nothing)
     require_converged(fit)
     if initial !== nothing
         compatible_grid(fit.grid,initial.grid) || throw(ArgumentError("Stationary initial grid differs from fit grid"))
         validate_probability(getfield(initial,:probabilities))
     end
-    A = sparse(transpose(fit.generator))
+    A = forward_generator(fit)
     T = initial === nothing ? eltype(A) : promote_type(eltype(A),eltype(getfield(initial,:probabilities)))
-    p = StationaryDistribution(SparseMatrixCSC{T,Int}(A),ones(T,length(fit.grid));
-        initial_density=initial === nothing ? nothing : vec(getfield(initial,:probabilities)))
+    p = if initial !== nothing
+        stationary_mass(SparseMatrixCSC{T,Int}(A);initial_mass=vec(getfield(initial,:probabilities)))
+    elseif population(getfield(fit,:model)) !== nothing
+        population_stationary_mass(A,fit.grid,population(getfield(fit,:model)))
+    else
+        stationary_mass(A)
+    end
     return distribution(fit.grid;masses=reshape(p,size(fit.grid)))
 end

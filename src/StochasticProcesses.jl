@@ -248,3 +248,53 @@ function generator(p::OrnsteinUhlenbeckProcess, z::AbstractVector)
     check_generator(Q)
     return Q
 end
+
+"""
+    process_axis(process, specification)
+
+Resolve an axis specification (coordinates or a NamedTuple of numerical options)
+to `(coordinates=..., kind=:interpolable)` or `kind=:categorical`. Custom processes
+implement this together with `generator`. The process owns support restrictions
+and option validation; the grid owns axis order and joint layout.
+"""
+function process_axis end
+
+function validate_options(spec::NamedTuple, allowed, context)
+    unknown = setdiff(keys(spec), allowed)
+    isempty(unknown) || throw(ArgumentError("Unknown $context options $(Tuple(unknown)); supported options: $allowed"))
+    return spec
+end
+function process_axis(p::PoissonProcess, spec)
+    if spec isa NamedTuple
+        validate_options(spec, (:n,), "Poisson axis")
+        get(spec,:n,length(p.z)) == length(p.z) || throw(DimensionMismatch("Poisson grid size must match the process"))
+    else
+        primal.(collect(spec)) == primal.(p.z) || throw(ArgumentError("Poisson support belongs to the process"))
+    end
+    return (coordinates=copy(p.z),kind=:categorical)
+end
+function process_axis(p::OrnsteinUhlenbeckProcess, spec)
+    z = if spec isa NamedTuple
+        validate_options(spec, (:n,:bounds,:width), "OU axis")
+        n = get(spec,:n,40)
+        n isa Integer && n >= 2 || throw(ArgumentError("OU grid needs at least two points"))
+        bounds = haskey(spec,:bounds) ? spec.bounds : productivity_bounds(p,get(spec,:width,4))
+        collect(range(bounds[1],bounds[2];length=n))
+    else
+        collect(spec)
+    end
+    length(z) >= 2 && all(isfinite,z) && first(z) > 0 && all(diff(z) .> 0) ||
+        throw(ArgumentError("OU coordinates must be positive and increasing"))
+    dz=(last(z)-first(z))/(length(z)-1)
+    maximum(abs.(diff(z).-dz)) <= 1e-6 || throw(ArgumentError("OU coordinates must be uniformly spaced"))
+    return (coordinates=z,kind=:interpolable)
+end
+
+# Bounds for log productivity use the stationary log standard deviation.
+function productivity_bounds(p::OrnsteinUhlenbeckProcess, standard_deviations = 4)
+    p.θ > 0 && p.σ >= 0 || throw(ArgumentError("OU grid requires positive mean reversion and nonnegative volatility"))
+    standard_deviations > 0 || throw(ArgumentError("z_width must be positive"))
+    width = standard_deviations * p.σ / sqrt(2p.θ)
+    return exp(-width), exp(width)
+end
+

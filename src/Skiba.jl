@@ -9,7 +9,6 @@
 
 #### Util Functions ####
 # Util functions to dispatch on for Skiba models
-# Create a HyperParams object from a SkibaModel
 # use high steady state to guide grid formation
 
 

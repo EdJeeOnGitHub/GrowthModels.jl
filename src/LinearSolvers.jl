@@ -1,3 +1,79 @@
+# Recursive factorization keeps one primal LU even for nested dual numbers.
+# Each tangent solves A*ẋ = ḃ - Ȧ*x with that same factorization.
+struct DifferentiableSparseFactor{A,P,F}
+    matrix::A
+    primal_matrix::P
+    primal_factor::F
+end
+
+factor_sparse(A::SparseMatrixCSC) = lu(A)
+function factor_sparse(A::SparseMatrixCSC{<:ForwardDiff.Dual})
+    primal = SparseMatrixCSC(size(A, 1), size(A, 2), copy(A.colptr), copy(rowvals(A)),
+        ForwardDiff.value.(nonzeros(A)))
+    return DifferentiableSparseFactor(A, primal, factor_sparse(primal))
+end
+
+refactor_sparse!(factor, A) = lu!(factor, A; reuse_symbolic = true)
+function refactor_sparse!(factor::DifferentiableSparseFactor, A)
+    A.colptr == factor.primal_matrix.colptr && rowvals(A) == rowvals(factor.primal_matrix) ||
+        throw(ArgumentError("Differentiable factorization requires a fixed sparsity pattern"))
+    copyto!(nonzeros(factor.matrix), nonzeros(A))
+    nonzeros(factor.primal_matrix) .= ForwardDiff.value.(nonzeros(A))
+    refactor_sparse!(factor.primal_factor, factor.primal_matrix)
+    return factor
+end
+
+function solve_sparse_factor(factor, b)
+    if eltype(b) <: ForwardDiff.Dual
+        return solve_dual_rhs(factor, b)
+    end
+    return factor \ b
+end
+function solve_dual_rhs(factor, b::AbstractVector{ForwardDiff.Dual{Tag,V,N}}) where {Tag,V,N}
+    real = solve_sparse_factor(factor, ForwardDiff.value.(b))
+    partials = ntuple(i -> solve_sparse_factor(factor, [ForwardDiff.partials(x,i) for x in b]), N)
+    return [ForwardDiff.Dual{Tag}(real[j], ForwardDiff.Partials(ntuple(i -> partials[i][j],N))) for j in eachindex(b)]
+end
+function solve_sparse_factor!(out, factor, b)
+    if eltype(b) <: ForwardDiff.Dual
+        return copyto!(out,solve_sparse_factor(factor,b))
+    end
+    return ldiv!(out,factor,b)
+end
+function solve_sparse_factor!(out, factor::DifferentiableSparseFactor, b)
+    return copyto!(out, solve_sparse_factor(factor, b))
+end
+
+function solve_sparse_factor(factor::DifferentiableSparseFactor{<:SparseMatrixCSC{ForwardDiff.Dual{Tag,V,N}}}, b) where {Tag,V,N}
+    A = factor.matrix
+    outreal = solve_sparse_factor(factor.primal_factor, ForwardDiff.value.(b))
+    M = length(outreal)
+    deriv = zeros(V, M, N)
+    # Assemble tangents directly from CSC entries, without N derivative matrices.
+    for i in 1:N, j in 1:M
+        deriv[j, i] = ForwardDiff.partials(b[j], i)
+    end
+    for col in axes(A, 2), ptr in nzrange(A, col)
+        row = rowvals(A)[ptr]
+        a = nonzeros(A)[ptr]
+        for i in 1:N
+            deriv[row, i] -= ForwardDiff.partials(a, i) * outreal[col]
+        end
+    end
+    scratch = similar(outreal)
+    for i in 1:N
+        column = view(deriv, :, i)
+        solve_sparse_factor!(scratch, factor.primal_factor, column)
+        copyto!(column, scratch)
+    end
+    out = Vector{eltype(A)}(undef, M)
+    for j in eachindex(out)
+        out[j] = ForwardDiff.Dual{Tag}(outreal[j], ForwardDiff.Partials(ntuple(i -> deriv[j, i], N)))
+    end
+    return out
+end
+
+
 # A fixed-pattern block solve. The maps refer to stored entries, including zeros,
 # so changes in the selected drift do not invalidate the symbolic factorization.
 struct SparseBlockSolver{T,F}

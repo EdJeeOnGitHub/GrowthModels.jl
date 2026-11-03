@@ -25,3 +25,21 @@ The historical test count included large per-cell loops. Counts are not a
 coverage-equivalence metric. Current tests exercise supported invariants and
 public workflows; historical wrappers and intentionally removed behaviors are
 not compatibility requirements.
+
+## Archive removal in the deep-module refactor
+
+The former `test/legacy/` directory was removed after checking supported
+invariants against the active suite. Its source remains available at commit
+`067806e`. `test-migrated-invariants.jl` explicitly covers nonuniform OU and
+Poisson density conservation, repeated-solve equality, class permutation,
+singletons, and disconnected classes. `test-population-stationary.jl` covers
+population defaults, explicit overrides, transient absorption, ambiguous types,
+zero-share types, and derivatives of population weights. `test-ownership.jl`
+covers read-only result storage, views, detached model snapshots, serialization,
+and scalar-read allocation limits.
+
+Tests for arbitrary nonunit measures, public workspace mutation/invalidation,
+legacy return arities, and the unfinished two-asset model were intentionally not
+ported because those interfaces are unsupported. Historical MATLAB stencil
+agreement remains replaced by independent generator/scientific invariants and
+the saved explicit-grid fixture, whose historical generator script is retained.

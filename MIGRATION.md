@@ -67,3 +67,25 @@ from `production(base, state)`, discarding custom resource rules and inner
 wrappers. Built-in models with unadjusted resources behave as before. Nested
 wrappers now apply in order; use the unwrapped production model explicitly when
 replacement rather than composition is intended.
+
+## Deep-module refactor
+
+- Model extensions use `process(model)` rather than a required process field.
+  `ResourceModel` no longer forwards arbitrary fields. Use `preferences`,
+  `production`, `resources`, `process`, and `population` on wrapped models.
+- Process extensions implement `process_axis(process, specification)` as well as
+  `generator`. Axis resolution returns coordinates and either `:interpolable`
+  or `:categorical`; the process validates its own support and option keys.
+- Unknown grid options throw. Custom OU defaults with explicit bounds no longer
+  require a `width` field.
+- Array inspection is read-only. Replace mutations of result/grid properties
+  with explicit `copy` calls; pass editable values as a new solve's `initial`.
+  Evolution factorization storage is not a public property.
+- `stationary(fit)` uses population shares if each positive-share ability block
+  has one closed class. An explicit initial distribution always takes precedence.
+  Multiple classes within a positive-share block still require explicit input;
+  zero-share ambiguous blocks have zero mass.
+- The internal `StateSpace`, `HyperParams`, `StateSpaceHyperParams`, and duplicate
+  diffusion assembly paths are removed. Use `StateGrid` and axis `generator`.
+- `Interpolations` is no longer a GrowthModels dependency. Applications that use
+  it directly must declare it themselves.

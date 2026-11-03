@@ -11,8 +11,13 @@ struct Population{V,P}
     end
 end
 
+Base.getproperty(p::Population,key::Symbol) = key in (:values,:shares) ? _readonly(getfield(p,key)) : getfield(p,key)
+
 base_model(m::Model) = m
-is_deterministic(m::Model) = m isa DeterministicModel
+"""Return the exogenous productivity process, or `nothing` for a deterministic model."""
+process(::Model) = nothing
+process(m::StochasticModel) = m.stochasticprocess
+is_deterministic(m::Model) = process(m) === nothing
 population(::Model) = nothing
 population(m::Union{StochasticSkibaAbilityModel,StochasticNPAbilityModel}) =
     Population(m.η_mean .* [0.8, 0.9, 1.0, 1.1, 1.2], fill(0.2, 5))
@@ -37,19 +42,16 @@ struct ResourceModel{T,M,P} <: Model{T}
     transfer::T
     income_floor::T
     population::P
+    ResourceModel{T,M,P}(::OwnedSnapshot,m,t,f,p) where {T,M,P} = new{T,M,P}(m,t,f,p)
 end
 function ResourceModel(m::Model; transfer=0.0, income_floor=-Inf, population=population(m))
     T = promote_type(model_eltype(m), typeof(transfer), typeof(income_floor))
     isfinite(transfer) && !isnan(income_floor) && income_floor < Inf || throw(ArgumentError("Transfer must be finite and income floor finite or -Inf"))
     (population === nothing) == (GrowthModels.population(m) === nothing) || throw(ArgumentError("ResourceModel cannot change the model's state schema"))
-    return ResourceModel{T,typeof(m),typeof(population)}(deepcopy(m), T(transfer), T(income_floor), deepcopy(population))
-end
-function Base.getproperty(m::ResourceModel, name::Symbol)
-    name in fieldnames(typeof(m)) && return getfield(m, name)
-    return getproperty(getfield(m, :model), name)
+    return ResourceModel{T,typeof(m),typeof(population)}(OWNED, deepcopy(m), T(transfer), T(income_floor), deepcopy(population))
 end
 base_model(m::ResourceModel) = base_model(m.model)
-is_deterministic(m::ResourceModel) = is_deterministic(m.model)
+process(m::ResourceModel) = process(m.model)
 population(m::ResourceModel) = m.population
 preferences(m::ResourceModel) = preferences(m.model)
 production(m::ResourceModel, state::NamedTuple) = production(m.model, state)
@@ -63,14 +65,17 @@ struct FunctionalModel{T,F,S,P} <: Model{T}
     f::F
     stochasticprocess::S
     population::P
+    function FunctionalModel(::OwnedSnapshot,γ::T,ρ::T,δ::T,f::F,process::S,population::P) where {T,F,S,P}
+        new{T,F,S,P}(γ,ρ,δ,f,process,population)
+    end
 end
 function FunctionalModel(f, process::StochasticProcess, types::Population; γ=2.0, ρ=0.05, δ=0.05)
     γ, ρ, δ = promote(γ, ρ, δ)
-    return FunctionalModel(γ, ρ, δ, deepcopy(f), deepcopy(process), deepcopy(types))
+    return FunctionalModel(OWNED, γ, ρ, δ, deepcopy(f), deepcopy(process), deepcopy(types))
 end
 population(m::FunctionalModel) = m.population
 production(m::FunctionalModel, state::NamedTuple) = m.f(state.k, state.z, state.ability)
-is_deterministic(::FunctionalModel) = false
+process(m::FunctionalModel) = m.stochasticprocess
 
 # Defaults are proposals for numerical resolution, never population definitions.
 default_grid_spec(m::Model) = default_numerical_grid_spec(m)
@@ -83,10 +88,24 @@ function default_numerical_grid_spec(m::Model)
     elseif is_deterministic(m)
         capital = (n=1000, bounds=(0.001*k_steady_state_hi(b), 1.3*k_steady_state_hi(b)), spacing=:linear)
     else
-        p = m.stochasticprocess
+        p = process(m)
         upper_z = p isa OrnsteinUhlenbeckProcess ? last(productivity_bounds(p)) : maximum(p.z)
         upper_type = population(m) === nothing ? one(upper_z) : maximum(population(m).values)
         capital = (n=1000, bounds=(0.001*k_steady_state_hi(b), 1.3*capital_reference(b, upper_z, upper_type)), spacing=:linear)
     end
-    return is_deterministic(m) ? (k=capital,) : (k=capital, z=(n=40, width=4))
+    return is_deterministic(m) ? (k=capital,) : (k=capital, z=default_grid_spec(process(m)))
 end
+
+default_grid_spec(::StochasticProcess) = NamedTuple()
+default_grid_spec(::OrnsteinUhlenbeckProcess) = (n=40, width=4)
+default_grid_spec(::PoissonProcess) = NamedTuple()
+
+function capital_reference(m::StochasticModel, z, η = one(z))
+    shock = process(m) isa OrnsteinUhlenbeckProcess ? z : one(z)
+    if m isa StochasticRamseyCassKoopmansModel
+        return (m.α * m.A * shock / (m.ρ + m.δ))^(1 / (1 - m.α))
+    end
+    return max((m.α * m.A_H * shock * η / (m.ρ + m.δ))^(1 / (1 - m.α)) + m.κ,
+        (m.α * m.A_L * shock * η / (m.ρ + m.δ))^(1 / (1 - m.α)))
+end
+

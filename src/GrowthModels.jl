@@ -1,5 +1,5 @@
 module GrowthModels
-using SparseArrays, LinearAlgebra, Interpolations, ForwardDiff, Random
+using SparseArrays, LinearAlgebra, ForwardDiff, Random
 using NaNMath: pow
 import StatsBase: sample
 import Base: show
@@ -15,19 +15,18 @@ export Model, DeterministicModel, StochasticModel, StochasticProcess,
     StochasticSkibaAbilityModel, StochasticNPAbilityModel,
     OrnsteinUhlenbeckProcess, PoissonProcess, from_stationary_OrnsteinUhlenbeckProcess, sample,
     Population, ResourceModel, FunctionalModel, population, production, resources,
-    marginal_product, preferences, state_schema, default_grid_spec, generator,
+    marginal_product, preferences, state_schema, default_grid_spec, generator, process, process_axis,
     StateGrid, cell_weights, coordinates, GrowthSolution, solve, regrid,
     require_converged, consumption, capital_drift, technology_crossing,
     StateDistribution, distribution, mass, density, expectation, boundary_mass,
     Evolution, trajectory, advance, observe, stationary, Trajectory, Observations,
     at, final, plot_model, plot_diagnostics
 
+include("ReadOnly.jl")
 include("StochasticProcesses.jl")
 include("Models.jl")
-include("utils.jl")
 include("LinearSolvers.jl")
 include("HJB.jl")
-include("HJBWorkspace.jl")
 include("Skiba.jl")
 include("SmoothSkiba.jl")
 include("RamseyCassKoopmans.jl")
@@ -35,11 +34,12 @@ include("StochasticRamseyCassKoopmans.jl")
 include("StochasticSkiba.jl")
 include("StochasticSkibaAbility.jl")
 include("StochasticNPAbility.jl")
-include("StateEvolution.jl")
 include("Economics.jl")
 include("Grids.jl")
+include("HJBWorkspace.jl")
 include("Solutions.jl")
 include("Distributions.jl")
+include("StateEvolution.jl")
 include("Evolution.jl")
 
 """Plot a solution. Load Plots to activate the plotting extension."""

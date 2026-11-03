@@ -1,18 +1,31 @@
+function create_dx_stacked(x, N_second_dim)
+    dxf, dxb = generate_dx(x)
+    dx_tilde = 0.5 * (dxf + dxb)
+    dx_tilde[1] = 0.5*dxf[1]
+    dx_tilde[end] = 0.5*dxb[end]
+    dx_tilde_stacked = repeat(dx_tilde, N_second_dim)
+    return dx_tilde_stacked
+end
+
+
 """Realized grid with canonical model-defined axes and capital quadrature weights.
-Axis properties return copies; use `coordinates(grid)` for shaped arrays.
+Axis properties return read-only views; use `coordinates(grid)` for shaped arrays.
 """
 struct StateGrid{A,K,S,W}
     axes::A
     kinds::K
     specification::S
     weights::W
+    function StateGrid(::OwnedSnapshot,axes,kinds,specification,weights)
+        new{typeof(axes),typeof(kinds),typeof(specification),typeof(weights)}(axes,kinds,specification,weights)
+    end
 end
 Base.size(g::StateGrid) = map(length, values(getfield(g, :axes)))
 Base.length(g::StateGrid) = prod(size(g))
 Base.propertynames(g::StateGrid) = (keys(getfield(g, :axes))..., :kinds, :specification)
 function Base.getproperty(g::StateGrid, key::Symbol)
     ax = getfield(g, :axes)
-    haskey(ax, key) && return copy(getproperty(ax, key))
+    haskey(ax, key) && return _readonly(getproperty(ax, key))
     key in (:kinds, :specification) && return deepcopy(getfield(g, key))
     throw(ArgumentError("Grid has no public property $key; use coordinates or cell_weights"))
 end
@@ -20,6 +33,7 @@ primal(x::Real) = x
 primal(x::ForwardDiff.Dual) = primal(ForwardDiff.value(x))
 
 function capital_axis(spec::NamedTuple)
+    validate_options(spec, (:n,:bounds,:spacing,:power), "capital axis")
     n = spec.n
     n isa Integer && n >= 2 || throw(ArgumentError("Capital grid needs at least two points"))
     lo, hi = spec.bounds
@@ -34,53 +48,46 @@ function StateGrid(m::Model; kwargs...)
     schema = state_schema(m)
     schema in ((:k,), (:k,:z), (:k,:z,:ability)) || throw(ArgumentError("Supported schemas are (k,), (k,z), and (k,z,ability)"))
     all(k -> k in (:k, :z) && k in schema, keys(kwargs)) || throw(ArgumentError("Only model-defined k/z discretizations may be supplied; ability support belongs to the model"))
-    defaults = default_grid_spec(m)
-    specifications = NamedTuple{keys(defaults)}(map(keys(defaults)) do key
-        supplied = get(kwargs, key, NamedTuple())
-        supplied isa NamedTuple ? merge(defaults[key], supplied) : copy(supplied)
-    end)
-    kspec = specifications.k
+    # Fully explicit coordinates/bounds bypass model defaults entirely.
+    supplied_k = get(kwargs,:k,NamedTuple())
+    supplied_k isa NamedTuple && validate_options(supplied_k,(:n,:bounds,:spacing,:power),"capital axis")
+    needs_defaults = supplied_k isa NamedTuple && !(haskey(supplied_k,:n) && haskey(supplied_k,:bounds))
+    defaults = needs_defaults ? default_grid_spec(m) : nothing
+    kspec = needs_defaults ? merge(defaults.k,supplied_k) : supplied_k
     k = kspec isa NamedTuple ? capital_axis(kspec) : collect(kspec)
     axes = (k=k,)
-    kinds = (k=:continuous,)
+    kinds = (k=:interpolable,)
+    specifications = (k=kspec,)
     if :z in schema
-        p = m.stochasticprocess
-        zspec = specifications.z
-        z = if p isa PoissonProcess
-            zspec isa AbstractVector && collect(zspec) != p.z && throw(ArgumentError("Poisson support belongs to the process"))
-            if haskey(kwargs, :z) && kwargs[:z] isa NamedTuple && haskey(kwargs[:z], :n)
-                kwargs[:z].n == length(p.z) || throw(DimensionMismatch("Poisson grid size must match the process"))
-            end
-            collect(p.z)
-        elseif p isa OrnsteinUhlenbeckProcess
-            if zspec isa AbstractVector
-                collect(zspec)
-            else
-                bounds = get(zspec, :bounds, productivity_bounds(p, zspec.width))
-                collect(range(bounds[1], bounds[2]; length=zspec.n))
-            end
+        p = process(m)
+        supplied_z = get(kwargs,:z,nothing)
+        # A complete explicit z specification must not evaluate unused defaults.
+        complete_z = supplied_z !== nothing && (!(supplied_z isa NamedTuple) ||
+            (haskey(supplied_z,:bounds) && haskey(supplied_z,:n)))
+        zspec = if complete_z
+            supplied_z
         else
-            zspec isa AbstractVector ? collect(zspec) :
-                haskey(zspec, :bounds) ? collect(range(zspec.bounds...; length=zspec.n)) :
-                throw(ArgumentError("Custom processes require explicit z coordinates or bounds"))
+            proposals = defaults === nothing ? default_grid_spec(m) : defaults
+            base = get(proposals,:z,default_grid_spec(p))
+            supplied_z === nothing ? base : merge(base,supplied_z)
         end
-        axes = merge(axes, (z=z,))
-        kinds = merge(kinds, (z=:markov,))
+        resolved = process_axis(p,zspec)
+        resolved.kind in (:interpolable,:categorical) || throw(ArgumentError("Unknown process axis kind $(resolved.kind)"))
+        axes = merge(axes,(z=collect(resolved.coordinates),))
+        kinds = merge(kinds,(z=resolved.kind,))
+        specifications = merge(specifications,(z=zspec,))
     end
     if :ability in schema
         axes = merge(axes, (ability=copy(population(m).values),))
-        kinds = merge(kinds, (ability=:markov,))
+        kinds = merge(kinds, (ability=:categorical,))
     end
     for (name, axis) in pairs(axes)
         !isempty(axis) && all(isfinite, axis) && all(diff(axis) .> 0) || throw(ArgumentError("Axis $name must be finite and strictly increasing"))
         name == :k && (length(axis) < 2 || first(axis) <= 0) && throw(ArgumentError("Capital requires two or more positive points"))
     end
-    if :z in schema && m.stochasticprocess isa OrnsteinUhlenbeckProcess
-        length(axes.z) >= 2 && first(axes.z) > 0 || throw(ArgumentError("OU productivity requires at least two positive points"))
-    end
     dims = map(length, values(axes))
     weights = reshape(create_dx_stacked(axes.k, prod(dims) ÷ length(axes.k)), dims)
-    return StateGrid(deepcopy(axes), kinds, deepcopy(specifications), weights)
+    return StateGrid(OWNED, deepcopy(axes), kinds, deepcopy(specifications), weights)
 end
 cell_weights(g::StateGrid) = copy(getfield(g, :weights))
 function coordinates(g::StateGrid)
@@ -105,26 +112,53 @@ function validate_model_grid(m, g)
     if population(m) !== nothing
         primal.(population(m).values) == primal.(g.ability) || throw(ArgumentError("Grid ability support differs from model population"))
     end
-    if !is_deterministic(m) && m.stochasticprocess isa PoissonProcess
-        primal.(m.stochasticprocess.z) == primal.(g.z) || throw(ArgumentError("Grid productivity support differs from Poisson process"))
+    if process(m) !== nothing
+        resolved = process_axis(process(m),getfield(g,:axes).z)
+        resolved.kind == getfield(g,:kinds).z || throw(ArgumentError("Grid productivity semantics differ from process"))
     end
 end
 
-# Private bridge to the tested finite-difference assembly. No public legacy types.
-function numerical_state(m, g)
+# Multilinear interpolation on named axes. The scalar arithmetic (including
+# moving knots) retains Dual information. Bracket selection is piecewise smooth.
+function interpolate_grid(values, g::StateGrid, state::NamedTuple; extrapolate=false)
     ax = getfield(g, :axes)
-    legacy = haskey(ax, :ability) ? (k=ax.k, z=ax.z, η=ax.ability) : ax
-    y = map(i -> resources(m, grid_state(g, i)), CartesianIndices(size(g)))
-    st = StateSpace(legacy, (y=y,))
-    hp = StateSpaceHyperParams(map(a -> HyperParams(N=length(a), xmin=first(a), xmax=last(a)), st.state))
-    diffusion = if is_deterministic(m)
-        spzeros(eltype(y), length(g), length(g))
-    else
-        Q = sparse(generator(m.stochasticprocess, ax.z))
-        size(Q) == (length(ax.z),length(ax.z)) || throw(DimensionMismatch("Process generator must match its axis"))
-        check_generator(Q)
-        joint = kron(Q, sparse(I,length(ax.k),length(ax.k)))
-        haskey(ax,:ability) ? kron(sparse(I,length(ax.ability),length(ax.ability)),joint) : joint
+    Set(keys(state)) == Set(keys(ax)) || throw(ArgumentError("State keys must match $(keys(ax))"))
+    brackets = map(keys(ax)) do key
+        a, x = ax[key], state[key]
+        if getfield(g,:kinds)[key] == :categorical
+            j = findfirst(y -> primal(y) == primal(x),a)
+            j === nothing && throw(ArgumentError("$key must be a represented categorical state"))
+            return (j,j,zero(x-a[j]))
+        end
+        if length(a) == 1
+            primal(x) == primal(a[1]) || throw(ArgumentError("Singleton axis $key only supports its one state"))
+            return (1, 1, zero(x-a[1]))
+        end
+        !extrapolate && !(primal(first(a)) <= primal(x) <= primal(last(a))) &&
+            throw(ArgumentError("State outside $key support; extrapolation requires explicit opt-in"))
+        j = clamp(searchsortedlast(primal.(a), primal(x)), 1, length(a)-1)
+        return (j, j+1, (x-a[j])/(a[j+1]-a[j]))
     end
-    return st, hp, diffusion
+    result = zero(values[firstindex(values)] * (1 + last(first(brackets))))
+    for corner in CartesianIndices(ntuple(_ -> 2, length(brackets)))
+        index = ntuple(d -> brackets[d][corner[d]], length(brackets))
+        weight = prod(d -> corner[d] == 1 ? 1-brackets[d][3] : brackets[d][3], 1:length(brackets))
+        result += weight * values[index...]
+    end
+    return result
 end
+
+function validate_regrid(oldgrid::StateGrid,newgrid::StateGrid)
+    old,new=getfield(oldgrid,:axes),getfield(newgrid,:axes)
+    keys(old) == keys(new) || throw(ArgumentError("Regridding cannot change the state schema"))
+    getfield(oldgrid,:kinds) == getfield(newgrid,:kinds) || throw(ArgumentError("Regridding cannot change axis semantics"))
+    for key in keys(old)
+        if getfield(oldgrid,:kinds)[key] == :categorical
+            primal.(old[key]) == primal.(new[key]) || throw(ArgumentError("Regridding cannot change categorical support"))
+        end
+    end
+end
+
+# Canonical independent ability blocks; actual operator coupling is checked by
+# independent_blocksize before using a block solver.
+preferred_blocksize(g::StateGrid) = length(size(g)) > 2 ? prod(size(g)[1:2]) : length(g)

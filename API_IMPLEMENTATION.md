@@ -21,7 +21,7 @@ Unrelated downstream changes and the root analysis environment are preserved.
 | Plotting extension | Five extension assertions; no Plots in numerical module | Verified |
 | Breaking migration documentation and runnable examples | README, MIGRATION, check-readme.jl | README snippets passed |
 | Numerical comparison to corrected pre-redesign implementation | Six explicit-grid cases vs f711991 fixture | 24 assertions passed |
-| Retain scientific coverage with new interfaces | test/legacy/COVERAGE.md; kernel/scientific/refinement tests | Audited |
+| Retain scientific coverage with new interfaces | test/COVERAGE.md; kernel/scientific/refinement tests | Audited |
 | Downstream overrides removed; economic floor and interpolant use standard solve | Two package source files; 20 integration assertions | Verified in durable environment |
 | Downstream resolved dependency and actual dispatch | test/integration/Project.toml sibling sources; runtime path/method assertions | Verified |
 | Separate numerical-default changes from interface changes | MIGRATION downstream grid section; capital-grid formula preserved | Documented |

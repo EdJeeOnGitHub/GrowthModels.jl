@@ -13,6 +13,7 @@ struct StateDistribution{G,M}
         new{typeof(grid),typeof(owned)}(deepcopy(grid), owned)
     end
 end
+Base.getproperty(d::StateDistribution,key::Symbol) = _readonly(getfield(d,key))
 function validate_probability(p)
     total = sum(p)
     all(x -> isfinite(x) && primal(x) >= 0, p) || throw(ArgumentError("Probabilities must be finite and nonnegative; total mass=$total, tolerance=$PROBABILITY_TOLERANCE"))

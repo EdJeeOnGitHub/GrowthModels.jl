@@ -2,15 +2,15 @@ using Test, GrowthModels, SparseArrays, LinearAlgebra
 @testset "Generator and limiting-class invariants" begin
     # Two absorbing classes, one transient source with a known 1:2 split.
     A=sparse([0. 0. 1.;0. 0. 2.;0. 0. -3.])
-    p=GrowthModels.StationaryDistribution(A,ones(3);initial_density=[0.,0.,1.])
+    p=GrowthModels.stationary_mass(A;initial_mass=[0.,0.,1.])
     @test p ≈ [1/3,2/3,0.]
-    @test_throws ArgumentError GrowthModels.StationaryDistribution(A,ones(3))
+    @test_throws ArgumentError GrowthModels.stationary_mass(A)
     @test_throws GrowthModels.ValueFunctionError GrowthModels.check_generator(sparse([-1. 1.;-1. 1.]))
     for sigma in (0.,.01,.1), n in (5,21)
         m=StochasticRamseyCassKoopmansModel(OrnsteinUhlenbeckProcess(θ=.1,σ=sigma))
         # Explicit bounds also support the deterministic zero-volatility limit.
         g=StateGrid(m;k=[.1,.5,1.],z=collect(range(.8,1.2;length=n)))
-        _,_,Q=GrowthModels.numerical_state(m,g)
+        Q=GrowthModels.exogenous_generator(m,g)
         @test maximum(abs.(sum(Q;dims=2))) < 1e-10
         rows,cols,values=findnz(Q)
         @test all(values[rows .!= cols] .>= 0)

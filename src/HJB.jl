@@ -1,4 +1,11 @@
 
+struct ValueFunctionError <: Exception
+    var::String
+end
+Base.showerror(io::IO, e::ValueFunctionError) = print(io, "ValueFunctionError: Error whilst iterating value function - $(e.var)")
+
+
+
 function generate_dx(x::AbstractVector)
     length(x) >= 2 || throw(ArgumentError("At least two grid points are required"))
     spacing = diff(x)
@@ -50,119 +57,9 @@ function check_generator(A::SparseMatrixCSC; atol = 1e-6)
 end
 
 
-"""
-construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess, state::StateSpace, hyperparams::StateSpaceHyperParams)
-
-Constructs the diffusion matrix for the HJB equation.
-
-# Arguments
-- `stochasticprocess::OrnsteinUhlenbeckProcess`: The Ornstein-Uhlenbeck process.
-- `state::StateSpace`: The state space.
-- `hyperparams::StateSpaceHyperParams`: The hyperparameters of the state space.
-
-# Returns
-- `Bswitch`: The diffusion matrix.
-"""
-function construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess, state::StateSpace, hyperparams::StateSpaceHyperParams)
-    (; θ, σ) = stochasticprocess
-    z = state[:z]
-    k_hps, z_hps = hyperparams[:k], hyperparams[:z]
-
-    state_size = size(state)
-    # get size of all other states, but remove z
-    Nk, kmax, kmin = k_hps.N, k_hps.xmax, k_hps.xmin
-    Nz, zmax, zmin = z_hps.N, z_hps.xmax, z_hps.xmin
-
-    dz_emp = diff(z)
-    if (maximum(dz_emp) - minimum(dz_emp)) > 10^(-6)
-        throw("Non-uniform grid spacing for z")
-    end
-    all(isfinite, z) && all(z .> 0) && all(dz_emp .> 0) ||
-        throw(ArgumentError("OU productivity grid must be positive and strictly increasing"))
-    # for now, assume dz constant (no non-uniform grid for z)
-    dz = (zmax - zmin) / (Nz - 1)
-
-    dz2 = dz^2
-
-
-    σ_sq = σ^2
-    # drift
-    mu = (-θ*log.(z) .+ σ_sq/2).*z
-    # variance - Ito's
-    s2 = σ_sq.*z.^2;
-
-    # Upwind the drift in its own direction so all jump rates are nonnegative.
-    chi = s2 / (2 * dz2) .+ max.(-mu, 0) ./ dz
-    zeta = s2 / (2 * dz2) .+ max.(mu, 0) ./ dz
-    yy = .-(chi .+ zeta)
-    
-    off_diag_length = (Nz-1)*Nk
-
-    ldiag = Vector{typeof(chi[2])}(undef, off_diag_length)
-    cdiag = Vector{typeof(yy[1] + chi[1])}(undef, Nz*Nk)
-    udiag = Vector{eltype(zeta[1])}(undef, off_diag_length)
-
-    for j in 2:Nz
-        ldiag[(j-2)*Nk+1:(j-1)*Nk] .= chi[j]
-    end
-    for j in 1:(Nz-1)
-        udiag[(j-1)*Nk+1:(j)*Nk] .= zeta[j]
-    end
-    cdiag[1:Nk] .= chi[1] + yy[1]
-    for j in 2:(Nz -1)
-        cdiag[(j-1)*Nk+1:(j)*Nk] .= yy[j]
-    end
-    cdiag[end-Nk+1:end] .= zeta[end] + yy[end]
-
-    Bswitch_2dim = spdiagm(-Nk => ldiag, 0 => cdiag, Nk => udiag)
-    check_generator(Bswitch_2dim)
-    # if only two dimensions (i.e. k and z), then Bswitch is a tridiagonal matrix
-    if length(state_size) == 2
-        return Bswitch_2dim
-    else
-        # if more than two dimensions, then Bswitch is a block tridiagonal matrix
-        # where there are gaps between the blocks of size Nk
-        N_other_states = prod(state_size[3:end])
-        Bswitch = kron(sparse(I, N_other_states, N_other_states), Bswitch_2dim)
-
-        return Bswitch
-    end
-end
-
-
-
-
-"""
-    construct_diffusion_matrix(stochasticprocess::PoissonProcess, state::StateSpace, hyperparams::StateSpaceHyperParams)
-
-Constructs the diffusion matrix for the HJB equation.
-
-# Arguments
-- `stochasticprocess::PoissonProcess`: The Poisson process representing the stochastic component of the model.
-- `state::StateSpace`: The state space of the model.
-- `hyperparams::StateSpaceHyperParams`: The hyperparameters of the state space.
-
-# Returns
-- `B_switch`: The diffusion matrix.
-"""
-function construct_diffusion_matrix(stochasticprocess::PoissonProcess, state::StateSpace, hyperparams::StateSpaceHyperParams) 
-    (; Q) = stochasticprocess
-    state_size = size(state)
-    D = size(hyperparams)
-    N_k = D[1]
-    I_A = sparse(I, N_k, N_k)
-    B_switch = kron(Q, I_A)
-
-    if length(state_size) > 2
-        N_other_states = prod(state_size[3:end])
-        B_switch = kron(sparse(I, N_other_states, N_other_states), B_switch)
-    end
-    return B_switch
-end
-
 utility(c, γ) = c^(1 - γ) / (1 - γ)
 function validate_utility(m)
     isfinite(preferences(m).γ) && preferences(m).γ > 0 || throw(ArgumentError("Risk aversion γ must be finite and positive"))
     preferences(m).γ != 1 || throw(ArgumentError("γ=1 (log utility) is not supported; the CRRA value normalization is singular there"))
 end
-initial_guess(m::GrowthModels.Model, state) = utility.(state.aux_state.y, preferences(m).γ) ./ preferences(m).ρ
+initial_guess(m::Model, resources::AbstractArray) = utility.(resources, preferences(m).γ) ./ preferences(m).ρ
