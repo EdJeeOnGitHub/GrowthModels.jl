@@ -1,5 +1,9 @@
 # Code review: scientific accuracy, performance, and software design
 
+> Historical pre-redesign record. For the implemented API and current validation,
+> see [README.md](README.md), [MIGRATION.md](MIGRATION.md), and
+> [API_VALIDATION.md](API_VALIDATION.md).
+
 Review date: 2026-11-03.
 
 Several scientific correctness bugs should be fixed before relying on the package across its advertised models and grids. The sparse HJB approach is reasonable, but distribution evolution, nonconcavity handling, and several model helpers have substantive problems.

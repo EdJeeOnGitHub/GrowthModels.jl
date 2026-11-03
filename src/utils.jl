@@ -5,12 +5,6 @@ end
 Base.showerror(io::IO, e::ValueFunctionError) = print(io, "ValueFunctionError: Error whilst iterating value function - $(e.var)")
 
 
-# ForwardDiff of a Dual vector by a sparse matrix
-# See: https://github.com/magerton/ForwardDiffSparseSolve.jl
-function \(A::SparseMatrixCSC{ForwardDiff.Dual{T, V, N}, P}, b::AbstractVector{G}) where {T, V, N, P<:Integer, G}
-    return __FDbackslash(A, b, T, V, N)
-end
-
 # Recursive factorization keeps one primal LU even for nested dual numbers.
 # Each tangent solves A*ẋ = ḃ - Ȧ*x with that same factorization.
 struct DifferentiableSparseFactor{A,P,F}
@@ -36,8 +30,23 @@ function refactor_sparse!(factor::DifferentiableSparseFactor, A)
     return factor
 end
 
-solve_sparse_factor(factor, b) = factor \ b
-solve_sparse_factor!(out, factor, b) = ldiv!(out, factor, b)
+function solve_sparse_factor(factor, b)
+    if eltype(b) <: ForwardDiff.Dual
+        return solve_dual_rhs(factor, b)
+    end
+    return factor \ b
+end
+function solve_dual_rhs(factor, b::AbstractVector{ForwardDiff.Dual{Tag,V,N}}) where {Tag,V,N}
+    real = solve_sparse_factor(factor, ForwardDiff.value.(b))
+    partials = ntuple(i -> solve_sparse_factor(factor, [ForwardDiff.partials(x,i) for x in b]), N)
+    return [ForwardDiff.Dual{Tag}(real[j], ForwardDiff.Partials(ntuple(i -> partials[i][j],N))) for j in eachindex(b)]
+end
+function solve_sparse_factor!(out, factor, b)
+    if eltype(b) <: ForwardDiff.Dual
+        return copyto!(out,solve_sparse_factor(factor,b))
+    end
+    return ldiv!(out,factor,b)
+end
 function solve_sparse_factor!(out, factor::DifferentiableSparseFactor, b)
     return copyto!(out, solve_sparse_factor(factor, b))
 end
@@ -164,7 +173,7 @@ end
 
 # Bounds for log productivity use the stationary log standard deviation.
 function productivity_bounds(p::OrnsteinUhlenbeckProcess, standard_deviations = 4)
-    p.θ > 0 && p.σ > 0 || throw(ArgumentError("OU grid requires positive mean reversion and volatility"))
+    p.θ > 0 && p.σ >= 0 || throw(ArgumentError("OU grid requires positive mean reversion and nonnegative volatility"))
     standard_deviations > 0 || throw(ArgumentError("z_width must be positive"))
     width = standard_deviations * p.σ / sqrt(2p.θ)
     return exp(-width), exp(width)
@@ -317,175 +326,3 @@ end
 
 
 # Struct to hold value function, its derivatives, and convergence diagnostics
-struct Value{T, D} 
-    v::Array{T, D}
-    dVf::Array{T, D}
-    dVb::Array{T, D}
-    dV0::Array{T, D}
-    A::SparseArrays.SparseMatrixCSC
-    dist::Vector{Float64}
-    convergence_status::Bool
-    iter::Int64
-end
-
-function Value(::StateSpace{T, N, D, C }) where {T, N, D, C <: NamedTuple}
-    v = zeros(T, D)
-    dVf = zeros(T, D)
-    dVb = zeros(T, D)
-    dV0 = zeros(T, D)
-    A_dim = prod(D)
-    A = SparseArrays.spzeros(T, (A_dim, A_dim))
-    dist = [Inf]
-    convergence_status = false
-    iter = 0
-    Value(v, dVf, dVb, dV0, A, dist, convergence_status, iter)
-end
-
-function Value(T, h::Union{HyperParams,StateSpaceHyperParams{N,D}}) where {N, D}
-    D_v = isa(h, HyperParams) ? h.N : D
-    Value(T, D_v)
-end
-
-function Value(T, D)
-    v = zeros(T, D)
-    dVf = zeros(T, D)
-    dVb = zeros(T, D)
-    dV0 = zeros(T, D)
-    A_dim = prod(D)
-    A = SparseArrays.spzeros(T, (A_dim, A_dim))
-    dist = [Inf]
-    convergence_status = false
-    iter = 0
-    Value(v, dVf, dVb, dV0, A, dist, convergence_status, iter)
-end
-
-function Value(; v, dVf, dVb, dV0, A, dist, convergence_status, iter) 
-    Value(v, dVf, dVb, dV0, A, dist, convergence_status, iter)
-end
-
-function Value{T,D}(; v, dVf, dVb, dV0, A, dist, convergence_status, iter) where {T,D}
-    Value{T,D}(v, dVf, dVb, dV0, A, dist, convergence_status, iter)
-end
-
-
-#### Diagnostic Plotting ####
-
-function plot_diagnostics(m::Model, value::Value, variables::NamedTuple, hyperparams::StateSpaceHyperParams)
-    Verr = V_err(m)(value, variables);
-    convergence_status, curr_iter = value.convergence_status, value.iter
-    subplot = plot(
-        layout = (1, 2),
-        size = (800, 600)
-    ) 
-    plot!(
-        subplot[1],
-        log.(value.dist[1:curr_iter]), 
-        label = "\$||V^{n+1} - V^n||\$", 
-        xlabel = "Iteration", 
-        ylabel = "log(Distance)"
-    )
-    plot!(
-        subplot[2],
-        variables.k, 
-        Verr, 
-        linewidth=2, 
-        label="", 
-        xlabel="k", 
-        ylabel="Error in HJB Equation",
-        xlims=(hyperparams[:k].xmin, hyperparams[:k].xmax)
-    )
-    title!(
-        subplot, 
-        "Convergence Diagnostics - Status: $(convergence_status)"
-        ) 
-
-    return subplot
-end
-
-"""
-    check_statespace_constraints(statespace::GrowthModels.StateSpace, p)
-
-Check if statespace (non-negativity of capital) is satisfied even with 0 consumption. Throw a 
-    domain error if not.
-"""
-function check_statespace_constraints(statespace::StateSpace, p)
-    net = statespace.aux_state.y .- p.δ .* statespace[:k]
-    all(x -> isfinite(x) && x > 0, selectdim(net, 1, 1)) ||
-        throw(DomainError(net, "Positive net output is required at every lower-capital boundary state"))
-    return nothing
-end
-
-"""
-    solve_growth_model(model::GrowthModels.Model, init_value::GrowthModels.Value)
-
-Solves the growth model using the specified model and initial value.
-
-# Arguments
-- `model::GrowthModels.Model`: The growth model to solve.
-- `init_value::GrowthModels.Value`: The initial value for the model.
-
-# Returns
-- `sm::SolvedModel`: The solved growth model.
-
-# Example
-"""
-function solve_growth_model(model::Model, init_value::Value; update = false, verbose = true) 
-    m = model
-    hyper_params = StateSpaceHyperParams(m)
-    check_statespace_constraints(StateSpace(m, hyper_params), m)
-    res = solve_HJB(m, hyper_params, init_value = init_value, verbose = verbose)
-    if update
-        update_value_function!(init_value, res)
-    end
-    sm = SolvedModel(m, res)
-    return sm, res
-end
-
-
-"""
-    solve_growth_model(model::Model, init_value::Value, hyper_params::HyperParams; update = false)
-
-Solves the growth model using the specified model, initial value, and hyperparameters.
-
-# Arguments
-- `model::Model`: The growth model to solve.
-- `init_value::Value`: The initial value for the value function.
-- `hyper_params::HyperParams`: The hyperparameters for the growth model.
-- `update::Bool`: (optional) Whether to update the initial value function with the result. Default is `false`.
-
-# Returns
-- `sm::SolvedModel`: The solved growth model.
-- `res::Result`: The result of solving the growth model.
-
-"""
-function solve_growth_model(model::Model, init_value::Value, hyper_params::StateSpaceHyperParams; update = false, verbose = true)
-    m = model
-    check_statespace_constraints(StateSpace(m, hyper_params), m)
-    res = solve_HJB(m, hyper_params, init_value = init_value, verbose = verbose)
-    if update
-        update_value_function!(init_value, res)
-    end
-    sm = SolvedModel(m, res)
-    return sm, res
-end
-function solve_growth_model(m::Model)
-    hyperparams = StateSpaceHyperParams(m)
-    state = StateSpace(m, hyperparams)
-    res = solve_HJB(m, hyperparams, maxit = 1000, verbose = false)
-    sm = SolvedModel(m, res)
-    return sm, res
-end
-
-function solve_growth_model(m::Model, hp_args)
-    hyperparams = StateSpaceHyperParams(m; hp_args...)
-    state = StateSpace(m, hyperparams)
-    res = solve_HJB(m, hyperparams, maxit = 1000, verbose = false)
-    sm = SolvedModel(m, res)
-    return sm, res
-end
-
-
-
-
-
-statespace_k_dot(m::Model) =  (variables::NamedTuple) -> variables.y .- m.δ .* variables.k .- variables.c

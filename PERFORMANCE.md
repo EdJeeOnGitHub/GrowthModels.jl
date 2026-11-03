@@ -1,5 +1,9 @@
 # Performance and interface changes
 
+> Historical pre-redesign record. For the implemented API and current validation,
+> see [README.md](README.md), [MIGRATION.md](MIGRATION.md), and
+> [API_VALIDATION.md](API_VALIDATION.md).
+
 These are historical measurements of the performance implementation committed as
 `614172c`. Subsequent correctness changes alter numerical defaults; see
 [CORRECTNESS_REVIEW.md](CORRECTNESS_REVIEW.md) before comparing new results.

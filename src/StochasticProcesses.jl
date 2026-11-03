@@ -4,8 +4,9 @@ struct PoissonProcess{T <: Real} <: StochasticProcess
     z::AbstractVector{T}
     Q::AbstractMatrix{T}
 end
-function PoissonProcess(; z::AbstractVector{T}, Q::AbstractMatrix{T}) where T <: Real
-    PoissonProcess(z, Q)
+function PoissonProcess(; z::AbstractVector{<:Real}, Q::AbstractMatrix{<:Real})
+    T = promote_type(eltype(z), eltype(Q))
+    PoissonProcess(T.(z), T.(Q))
 end
 
 function process_mean(p::PoissonProcess)
@@ -32,7 +33,8 @@ struct OrnsteinUhlenbeckProcess{T <: Real} <: StochasticProcess
     ln_stationary_μ::T  # Mean of lognormal 
 end
 
-function OrnsteinUhlenbeckProcess(;θ::T, σ::T) where T <: Real
+function OrnsteinUhlenbeckProcess(;θ::Real, σ::Real)
+    θ, σ = promote(θ, σ)
     ln_stationary_μ = exp((σ^2)/(2*θ)/2)
     ρ = exp(-θ)
     OrnsteinUhlenbeckProcess(θ, σ, ρ, ln_stationary_μ)
@@ -214,3 +216,35 @@ end
 
 
 
+
+"""
+    generator(process, coordinates)
+
+Return a sparse continuous-time generator on the process axis, acting on value
+functions (rows sum to zero, off-diagonal entries are nonnegative). The solver
+embeds it in the joint state layout. Custom processes implement this method and
+use explicit grid coordinates or model-provided bounds.
+"""
+function generator(p::PoissonProcess, z::AbstractVector)
+    z == p.z || throw(ArgumentError("Poisson coordinates must equal process support"))
+    Q = sparse(p.Q)
+    size(Q) == (length(z),length(z)) || throw(DimensionMismatch("Poisson generator size differs from support"))
+    check_generator(Q)
+    return copy(Q)
+end
+function generator(p::OrnsteinUhlenbeckProcess, z::AbstractVector)
+    length(z) >= 2 && all(isfinite,z) && first(z) > 0 && all(diff(z) .> 0) ||
+        throw(ArgumentError("OU coordinates must be positive and increasing"))
+    dz = (last(z)-first(z))/(length(z)-1)
+    maximum(abs.(diff(z) .- dz)) <= 1e-6 || throw(ArgumentError("OU coordinates must be uniformly spaced"))
+    mu = (-p.θ .* log.(z) .+ p.σ^2/2) .* z
+    variance = p.σ^2 .* z.^2
+    backward = variance ./ (2dz^2) .+ max.(-mu,0) ./ dz
+    forward = variance ./ (2dz^2) .+ max.(mu,0) ./ dz
+    diagonal = .-(backward .+ forward)
+    diagonal[1] += backward[1]
+    diagonal[end] += forward[end]
+    Q = spdiagm(-1=>backward[2:end],0=>diagonal,1=>forward[1:end-1])
+    check_generator(Q)
+    return Q
+end

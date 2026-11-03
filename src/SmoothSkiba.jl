@@ -32,7 +32,7 @@ end
 
 
 function SmoothSkibaModel(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0, β = 10.0)
-    SmoothSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, β)
+    SmoothSkibaModel(promote(γ, α, ρ, δ, A_H, A_L, κ, β)...)
 end
 
 
@@ -75,19 +75,3 @@ end
 @inline production_function_prime(::SmoothSkibaModel, k::Union{Real,Vector{<:Real}}, α::Real, A_H::Real, A_L::Real, κ::Real, β::Real) = smooth_skiba_production_function_prime.(k, α, A_H, A_L, κ, β)
 @inline production_function_prime(::SmoothSkibaModel, k::Union{Real,Vector{<:Real}}, params::Vector) = smooth_skiba_production_function_prime.(k, params[1], params[2], params[3], params[4], params[5])
 @inline production_function_prime(m::SmoothSkibaModel, k::Union{Real,Vector{<:Real}}) = smooth_skiba_production_function_prime.(k, m.α, m.A_H, m.A_L, m.κ, m.β)
-
-
-
-#### Plotting ####
-k_dot(m::SmoothSkibaModel) = (variables::NamedTuple) -> variables.y .- m.δ .* variables.k .- variables.c
-function plot_production_function(m::SmoothSkibaModel, k)
-    y = production_function(m, collect(k))
-    yH = y_H(m).(k)
-    yL = y_L(m).(k)
-    plot(k, y, label="y")
-    plot!(k, yH, linestyle=:dash, label="yH")
-    plot!(k, yL, linestyle=:dash, label="yL")
-    xlabel!("\$k\$")
-    ylabel!("\$f(k)\$")
-end
-

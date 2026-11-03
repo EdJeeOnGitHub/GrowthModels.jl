@@ -6,15 +6,18 @@ function StochasticNPAbilityModel(
     if isnothing(stochasticprocess)
         stochasticprocess = OrnsteinUhlenbeckProcess(θ = -log(0.9), σ =  0.1)
     end
+    γ, ρ, δ, η_mean = promote(γ, ρ, δ, η_mean)
     StochasticNPAbilityModel(γ, ρ, δ, f, η_mean, stochasticprocess)
 end
 
 function StochasticNPAbilityModel(;γ = 2.0, ρ = 0.05, δ = 0.05, f = (x, z, η) -> (x .^ 0.1) .* z .* η , η_mean = 1.0, θ = -log(0.9), σ = 0.1)
+    γ, ρ, δ, η_mean = promote(γ, ρ, δ, η_mean)
     StochasticNPAbilityModel(γ, ρ, δ, f, η_mean, OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
 end
 
 # let us pass param vecs
 function StochasticNPAbilityModel(γ, ρ, δ, f, η_mean, θ, σ)
+    γ, ρ, δ, η_mean = promote(γ, ρ, δ, η_mean)
     StochasticNPAbilityModel(γ, ρ, δ, f, η_mean, OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
 end
 

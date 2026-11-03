@@ -51,24 +51,6 @@ end
 
 
 """
-    update_value_function!(init_value, res)
-
-If the HJB solver has converged, update the value function inplace. Uses ForwardDiff.value 
-to ensure only the value and not dual components are passed. 
-
-update_v is internal function used for value function iteration. update_value_function! is exported to the user so we can hotstart the VFI across optimization draws.
-"""
-function update_value_function!(init_value, res)
-    if res.value.convergence_status == true
-            init_value.v[:] = ForwardDiff.value.(res.value.v)
-            init_value.dVf[:] = ForwardDiff.value.(res.value.dVf)
-            init_value.dVb[:] = ForwardDiff.value.(res.value.dVb)
-            init_value.dV0[:] = ForwardDiff.value.(res.value.dV0)
-    end
-end
-
-
-"""
 construct_diffusion_matrix(stochasticprocess::OrnsteinUhlenbeckProcess, state::StateSpace, hyperparams::StateSpaceHyperParams)
 
 Constructs the diffusion matrix for the HJB equation.
@@ -180,18 +162,7 @@ end
 
 utility(c, γ) = c^(1 - γ) / (1 - γ)
 function validate_utility(m)
-    isfinite(m.γ) && m.γ > 0 || throw(ArgumentError("Risk aversion γ must be finite and positive"))
-    m.γ != 1 || throw(ArgumentError("γ=1 (log utility) is not supported; the CRRA value normalization is singular there"))
+    isfinite(preferences(m).γ) && preferences(m).γ > 0 || throw(ArgumentError("Risk aversion γ must be finite and positive"))
+    preferences(m).γ != 1 || throw(ArgumentError("γ=1 (log utility) is not supported; the CRRA value normalization is singular there"))
 end
-initial_guess(m::GrowthModels.Model, state) = utility.(state.aux_state.y, m.γ) ./ m.ρ
-
-dV_Upwind(::Model, value::Value, variables::NamedTuple) = value.dVf .* variables.If .+ value.dVb .* variables.Ib .+ value.dV0 .* variables.I0
-V_err(m::Model) = (value::Value, variables::NamedTuple) -> reshape(
-    utility.(vec(variables.c), m.γ) .+ value.A * vec(value.v) .- m.ρ .* vec(value.v), size(value.v))
-
-
-
-
-
-
-include("HJBWorkspace.jl")
+initial_guess(m::GrowthModels.Model, state) = utility.(state.aux_state.y, preferences(m).γ) ./ preferences(m).ρ

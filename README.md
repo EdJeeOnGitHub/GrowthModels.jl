@@ -1,188 +1,167 @@
 # GrowthModels
 
-[![Build Status](https://github.com/EdJeeOnGitHub/GrowthModels.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/EdJeeOnGitHub/GrowthModels.jl/actions/workflows/CI.yml?query=branch%3Amain)
+Continuous-time, one-capital growth models solved with a finite-difference HJB
+and probability evolution. This is a breaking API revision; see
+[MIGRATION.md](MIGRATION.md) for the old-to-new mapping.
 
-
-## Numerical conventions
-
-The HJB generator `A` acts on value functions. Its transpose `A'` advances
-**cell probabilities**, not densities. `iterate_g(g, A_t, dx_stacked)` accepts a
-density and cell weights, evolves `dx_stacked .* g`, and converts back. It
-preserves the input weighted mass without renormalizing. The two-argument
-`iterate_g(p, A_t)` instead accepts cell probabilities. `StateEvolution`
-normalizes the initial density once.
-
-`StationaryDistribution(A_t, dx_stacked; initial_density = g)` computes the
-limiting density associated with `g`, including absorption from transient states.
-For disconnected ability groups, their initial probability shares are preserved.
-If several closed communicating classes exist, `initial_density` is required;
-`StateEvolution(...; stationary=true)` supplies it automatically. With a unique closed class, the
-keyword can be omitted.
-
-HJB policy selection compares Hamiltonians when both drift directions are
-admissible, choosing one policy for both consumption and the generator. The OU
-generator upwinds its drift according to its sign, keeping off-diagonal rates
-nonnegative. This changes coarse-grid results relative to the historical MATLAB
-RBC fixture, which uses a forward-only drift stencil. That fixture remains a
-legacy comparison in the tests; the corrected solver is checked separately.
-
-## Repeated solves and warm starts
+## Solve and simulate
 
 ```julia
-m = RamseyCassKoopmansModel()
-hp = StateSpaceHyperParams(m; Nk = 200)
-first_fit = solve_HJB(m, hp; verbose = false)
-next_model = RamseyCassKoopmansModel(A = m.A * 1.01)
-next_fit = solve_HJB(next_model, hp;
-    init_value = first_fit.value, crit = 1e-8, verbose = false)
+using GrowthModels
+
+model = RamseyCassKoopmansModel()
+grid = StateGrid(model; k=(n=300,))
+fit = solve(model, grid)
+require_converged(fit)
+c = consumption(fit, (k=grid.k[100],))
+
+p = fill(1 / length(grid), size(grid))
+initial = distribution(grid; masses=p)
+evolution = Evolution(fit; dt=0.1)
+path = trajectory(evolution, initial, [0.0, 0.25, 1.0, 5.0])
+mean_k = expectation(path, state -> state.k)
+last_distribution = advance(evolution, initial, 5.0)
+moments = observe(evolution, initial, [0.0, 1.0, 5.0],
+    (mean_k=state -> state.k, second_k=state -> state.k^2))
+long_run = stationary(fit, initial)
 ```
 
-`init_value` accepts a `Value` or an array of the grid's shape. It is copied and
-honored, including an all-zero guess. Omit it (or pass `nothing`) to use the
-model's default guess. Earlier results and their diagnostics are never mutated.
-`maxit=0` returns the supplied/default guess without iteration. Convergence
-requires both a small value update and a nonlinear HJB residual below `crit`;
-policies using a floored marginal value cannot certify convergence. The default
-pseudo-time step is `Delta=1` for γ<1 and `Delta=1000` otherwise. An explicit
-`Delta` overrides this choice. γ=1 (log utility) is currently unsupported and
-raises an explicit error. Constructing `SolvedModel` from a failed solve also
-raises an explanatory error. Convergence
-history contains one initial `Inf` and one distance per update. With dual
-numbers, convergence also requires their tangents to converge.
+`trajectory` stores cell probabilities once. `mass(path, 0.25)` and
+`density(path, 0.25)` return shaped copies. `at(path, t)` looks up a requested
+time; unrequested times raise an error. Integer indexing is positional.
+`final(path)` returns a distribution, with time retained in `path.times[end]`.
 
-Each solve allocates its geometry, policy arrays, and sparse structure once.
-The default `linear_solver=:auto` uses tridiagonal elimination for deterministic
-models and separate sparse blocks for fixed-ability groups. Sparse numerical
-factors are updated each iteration with a fixed symbolic pattern. A generator
-that couples ability groups automatically uses a full sparse solve. Use
-`linear_solver=:sparse` to cross-check against one full sparse system.
-Differentiated sparse solves share a primal factorization across all tangent
-right-hand sides, including nested dual numbers.
+Observation times may be arbitrary. Integration uses implicit Euler on a fixed
+lattice anchored at `t0` (default zero), with linear interpolation of bracketing
+probabilities. Adding observations does not change results at shared times.
+Refine `dt` to assess accuracy. `advance` is a one-shot duration request, not
+an incremental integrator with an arbitrary-time composition guarantee.
+Reuse `Evolution` for another initial distribution; use separate objects for
+concurrent simulations. Construct a new evolution for a changed fit.
 
-## Cached forward evolution and output control
+## Economics and grids
+
+Production, resource rules, processes, and population support belong to the
+model. Grid resolution belongs to `StateGrid`. Canonical axes are capital,
+productivity, and ability, where present; keyword order never changes layout.
+`grid.k`, `grid.z`, and `grid.ability` return coordinate copies.
+`coordinates(grid)` returns shaped named coordinate arrays.
 
 ```julia
-sm = SolvedModel(next_model, next_fit)
-g0 = ones(length(next_fit.value.v))
-times = collect(0.0:1.0:20.0)
-
-# Four internal steps per unit of time, but save only the requested times.
-path = StateEvolution(g0, sm, times; dt = 0.25)
-final = StateEvolution(g0, sm, times; dt = 0.25, save = :final)
-
-# Stream moments without retaining distribution snapshots. The callback receives
-# cell probabilities, so no extra cell-width weighting is needed.
-mean_capital = Float64[]
-streamed = StateEvolution(g0, sm, times; dt = 0.25, save = :none,
-    callback = (t, mass) -> push!(mean_capital, dot(vec(sm.variables.k), mass)))
-
-stationary = StationaryDistribution(path) # separate, explicit computation
+base = StochasticSkibaAbilityModel()
+model = ResourceModel(base; transfer=0.1, income_floor=0.3,
+    population=Population([0.8, 1.2], [0.3, 0.7]))
+grid = StateGrid(model; k=(n=300,), z=(n=40, width=4))
+fit = solve(model, grid)
 ```
 
-The `dot` example requires `using LinearAlgebra`. `save=:all` (the default)
-stores every requested observation, `:final` stores only the last, and `:none`
-stores no trajectory. Every result has `final_density` and `final_time`.
-Callbacks run at observation times, including the initial time, independently of
-storage mode. The callback's mass buffer is borrowed: do not mutate it or retain
-it without copying. `dt` is a maximum internal step; each observation interval
-is divided into equal substeps that land exactly on its endpoint. The default
-for real observation times is `dt=0.1`, independent of observation spacing.
-Explicit `dt=nothing` restores one step per observation interval. Adding times
-that do not align with the internal grid can still change the subdivision;
-check time-step refinement for the accuracy your application needs.
+`resources(model, state)` is income before depreciation and consumption:
+`capital_drift = resources - δ*k - consumption`. `ResourceModel` applies
+`max(production + transfer, income_floor)`. The solver, residual diagnostics,
+and policy evaluation use the same rule. `FunctionalModel` supports concrete
+callable production objects with arguments `(k, z, ability)`; economic
+customizations should not override solver internals.
 
-Stationary computation is **no longer automatic**: `stationary_dist` is
-`nothing` unless `stationary=true` is requested. You can instead call
-`StationaryDistribution(path)` or
-`StationaryDistribution(sm; initial_density=g0)` afterward. The integer overload
-`StateEvolution(g0, sm, T; implicit_steps=4)` retains its existing convention of
-T observations at `0:T-1`. Real-valued observation times are supported, and
-`path[t]` retrieves a saved density.
+Explicitly supplied coordinates stay fixed when model parameters change.
+Reconstruct a grid to change its coordinates. Default OU bounds are
+`exp(±width*σ/sqrt(2θ))`, with `width=4`; ability support and population shares
+belong to the model. Default parametric capital bounds account for highest
+productivity and ability. Custom production requires explicit assessment of
+capital bounds. Wider bounds at unchanged resolution can increase grid error.
+Inspect boundary drift and `boundary_mass(distribution)` and refine bounds and
+resolution together.
 
-For repeated simulations with the same grid, a workspace can be reused:
+## Probability contract
+
+Inputs must be nonnegative, finite, and have total probability one within
+`1e-10`. There is no automatic normalization. For density input, validation
+uses the weighted integral:
 
 ```julia
-using SparseArrays
-weights = create_dx_stacked(sm.variables.k[:, 1], 1) # deterministic example
-A_t = sparse(sm.value.A')
-workspace = EvolutionWorkspace(A_t, weights; time_step = 0.25)
-path = StateEvolution(g0, sm, times; dt = 0.25, workspace = workspace)
-
-# Low-level single step; no automatic normalization.
-g1 = iterate_g(g0, A_t, weights; time_step = 0.25, workspace = workspace)
+raw_density = ones(size(grid))
+pdf = raw_density ./ sum(raw_density .* cell_weights(grid))
+initial = distribution(grid; density=pdf)
 ```
 
-The workspace owns snapshots of its generator and weights, plus reusable solve
-buffers. Passing `workspace` to `StateEvolution` or the matrix-taking
-`iterate_g` methods refreshes it when the generator or timestep changes.
-Alternatively call `update_evolution!(workspace, new_A_t; time_step=0.5)` and
-then `iterate_g!(g, workspace)`. Changes to values reuse symbolic analysis;
-changes to sparsity rebuild it. Cell-weight changes alone need no factorization.
-Changing the number of states requires a new workspace. Workspace fields are
-implementation details and must not be mutated directly. Each concurrent
-simulation needs its own workspace.
+Density is per unit capital and mass over Markov states, including discretized
+OU states. Arrays have grid shape, e.g. `Nk × Nz × Nability`. `mass` and
+`density` return copies. Distributions have no time; trajectories own times.
+Evolution checks conservation without renormalization. `stationary(fit,
+initial)` preserves limiting class shares, including transient absorption.
+The initial distribution is required if there are multiple closed classes.
+Stationary calculation has no timestep.
 
-For fixed-ability models, `StateEvolution` automatically factors independent
-capital/productivity blocks. A manually constructed workspace can request this
-with `blocksize=Nk*Nz`; cross-block transitions are rejected. The initial density
-is normalized once by default; pass `normalize=false` to preserve a nonunit input
-mass. No renormalization is applied during time stepping. When requested, the
-stationary density in an evolution result (including `StationaryDistribution(path)`)
-has the same total mass as that result. The matrix-taking stationary function
-continues to return a unit-mass probability density.
+## Failure, warm starts, and differentiation
 
-## Validation and benchmarks
+`solve` always returns the same result structure. Check `fit.converged`,
+`fit.diagnostics`, `fit.settings`, and the copied `fit.initial_value`.
+Iteration-limit or numerical-breakdown failures retain the last finite value
+and its policy. Invalid input, or an initial guess with no finite policy, throws.
+Policy evaluation, evolution, and stationary calculation reject failed fits;
+raw arrays remain inspectable. `require_converged(fit)` provides an explicit
+check for batch jobs.
 
-Run the full suite with:
+```julia
+model = RamseyCassKoopmansModel()
+grid = StateGrid(model; k=(n=300,))
+fit = solve(model, grid)
+next_model = RamseyCassKoopmansModel(A=model.A * 1.01)
+next_fit = solve(next_model, grid; initial=fit)
+# When coordinates change:
+# guess = regrid(fit, next_grid)
+# next_fit = solve(next_model, next_grid; initial=guess)
+```
+
+Initial guesses are copied. `regrid` rejects
+extrapolation by default; use `extrapolate=true` explicitly if appropriate.
+Discrete population support cannot be changed by continuous interpolation.
+
+Convergence checks both value updates and the nonlinear HJB residual, including
+Dual tangents. Default `Delta` is 1 for γ<1 and 1000 otherwise; resolved settings
+are recorded. γ=1 (log utility) is currently unsupported.
+
+ForwardDiff differentiates fixed-grid models while holding coordinates fixed.
+Constructing a grid inside the differentiated function also differentiates its
+coordinates and weights. Warm starts and regridded guesses are initialization:
+old tangents are discarded. Floors, interpolation knots, policy switches, and
+changes in communicating-class topology can make derivatives nonsmooth.
+Sparse differentiation uses internal factorization helpers without extending
+`Base.\` for external types.
+
+## Plotting and validation
+
+Install `Plots` in your application environment and load it to activate `plot_model(fit)` and
+`plot_diagnostics(solve(model, grid; history=true))`. The numerical package does
+not load Plots itself.
 
 ```sh
-GKSwstype=100 julia --project=. test/runtests.jl
+GKSwstype=100 julia --project=. -e 'using Pkg; Pkg.test()'
 ```
 
-`test/test-performance-contracts.jl` checks cache invalidation, selective storage,
-streamed moments, warm starts, fixed sparse patterns, block/tridiagonal
-agreement, and finite-difference checks of derivatives. The earlier P1 tests
-continue to cover generator positivity and probability conservation.
+The API tests cover scientific invariants, finite-difference checks of AD,
+probability contracts, observation invariance, and numerical agreement with the
+pre-redesign solver on identical explicit grids. Implementation and downstream
+validation progress is tracked in [API_IMPLEMENTATION.md](API_IMPLEMENTATION.md).
 
-Run reproducible performance comparisons with:
+`technology_crossing` is the crossing of production technologies, not the
+optimal Skiba threshold. SmoothSkiba steady-state helpers are asymptotic
+references. Stochastic steady states are reference values, not stationary
+capital moments. The unfinished two-asset model is not part of this API.
 
-```sh
-julia --project=. test/benchmark-performance.jl
-```
+## Extending models and processes
 
-The benchmark reports medians of three runs after compilation, including setup
-and factorization costs. It compares cached/uncached forward steps, full/final
-output storage, cold/same-model warm HJB solves, and sparse differentiation.
-An optional first argument loads another checkout using the current project's
-dependencies for an HJB/differentiation comparison. Timing is informational;
-correctness and reuse contracts, rather than machine-dependent timing limits,
-are enforced in tests.
+A custom one-capital model supplies `production(model, state)`,
+`preferences(model)` returning `(γ=..., ρ=..., δ=...)`, and
+`default_grid_spec(model)`. Override `resources` for disposable-income rules;
+the default is production. Override `population` for ability support/shares.
+Supported canonical schemas are `(:k,)`, `(:k,:z)`, and
+`(:k,:z,:ability)`; other schemas raise an error. Stochastic models expose their
+process as `stochasticprocess`. `marginal_product` defaults to differentiating
+production with respect to capital.
 
-## Scientific defaults and remaining limitations
-
-Default OU productivity bounds are `exp(±z_width * σ / sqrt(2θ))`, with
-`z_width=4`. This represents a zero-mean OU process in log productivity.
-Parametric stochastic models size the upper capital bound from the highest
-productivity and ability, then apply `kmax_f`. Custom nonparametric production
-functions still require the caller to assess their chosen capital bounds.
-Wider grids at a fixed number of points have coarser resolution: refine both
-bounds and grid size when validating numerical results.
-
-`technology_crossing(model)` names the crossing of the two Skiba production
-branches. The historical `k_star` alias does **not** compute the optimal Skiba
-threshold. SmoothSkiba steady-state helpers remain asymptotic approximations;
-its high approximation no longer adds a capital shift absent from production.
-Stochastic steady-state helpers are reference values, not claims about the
-stationary distribution of optimal capital under uncertainty.
-
-State constraints are checked across **every lower-capital boundary state**.
-Negative net output at high capital is allowed when capital can drift inward;
-it is not, by itself, evidence of an invalid grid. Boundary derivatives use the
-same floored zero-drift marginal value convention throughout the solver.
-
-`flat_transfer` remains a solver option in this compatibility-preserving release,
-but is retained with the solved policy and included in interpolated capital
-drift. The unfinished two-asset model remains experimental and unsupported.
-The larger grid/result/evolution API redesign and further performance tuning
-are deferred. See [CORRECTNESS_REVIEW.md](CORRECTNESS_REVIEW.md) for validation
-and changes that require regenerating default-based results.
+A custom process implements `generator(process, coordinates)`, returning the
+axis generator acting on values. Rows sum to zero and off-diagonal rates must
+be nonnegative. The operator layer validates and embeds that generator in the
+joint grid; it owns stacking and independent ability blocks. Supply explicit
+productivity coordinates or bounds for a custom process. This interface covers
+one exogenous productivity process with fixed ability classes.

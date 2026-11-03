@@ -6,16 +6,16 @@ function StochasticSkibaModel(
     if isnothing(stochasticprocess)
         stochasticprocess = OrnsteinUhlenbeckProcess(θ = -log(0.9), σ =  0.1)
     end
-    StochasticSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, stochasticprocess)
+    StochasticSkibaModel(promote(γ, α, ρ, δ, A_H, A_L, κ)..., stochasticprocess)
 end
 
 function StochasticSkibaModel(;γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0, θ = -log(0.9), σ = 0.1)
-    StochasticSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
+    StochasticSkibaModel(promote(γ, α, ρ, δ, A_H, A_L, κ)..., OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
 end
 
 # let us pass param vecs
 function StochasticSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, θ, σ)
-    StochasticSkibaModel(γ, α, ρ, δ, A_H, A_L, κ, OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
+    StochasticSkibaModel(promote(γ, α, ρ, δ, A_H, A_L, κ)..., OrnsteinUhlenbeckProcess(θ = θ, σ = σ))
 end
 
 

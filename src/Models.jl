@@ -75,11 +75,11 @@ struct StochasticSkibaAbilityModel{T <: Real, S <: StochasticProcess} <: Stochas
     stochasticprocess::S
 end
 
-struct StochasticNPAbilityModel{T <: Real, S <: StochasticProcess} <: StochasticModel{T, S}
+struct StochasticNPAbilityModel{T <: Real, S <: StochasticProcess, F} <: StochasticModel{T, S}
     γ::T
     ρ::T
     δ::T
-    f::Function
+    f::F
     η_mean::T
     stochasticprocess::S
 end

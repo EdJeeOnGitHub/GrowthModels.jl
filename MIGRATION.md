@@ -1,0 +1,60 @@
+# Breaking API migration
+
+There are no compatibility adapters. Economic parameters and resource rules
+belong to models; numerical settings belong to grid construction and `solve`.
+
+| Previous API | Replacement |
+|---|---|
+| `StateSpaceHyperParams`, `StateSpace` | `StateGrid(model; k=..., z=...)` |
+| `solve_HJB`, `solve_growth_model` | `solve(model, grid)` |
+| `Value`, `init_value` | `fit.value`, `initial=fit` or a shaped array |
+| `SolvedModel` | `GrowthSolution` returned by `solve` |
+| `sm.variables.c`, `sm.value.v` | `fit.policy.consumption`, `fit.value` |
+| `sm.variables.k` | `coordinates(fit.grid).k` |
+| `flat_transfer` solver keyword | `ResourceModel(base; transfer=...)` |
+| `update_v` overrides | `resources(model, state)` or `ResourceModel` |
+| `EvolutionWorkspace`, `workspace=` | `Evolution(fit; dt=...)` |
+| `StateEvolution`, `save=:all` | `trajectory(evolution, initial, times)` |
+| `save=:final` | `advance(evolution, initial, duration)` |
+| `save=:none`, callbacks | `observe(evolution, initial, times, named_observables)` |
+| `iterate_g` | Typed distribution plus `advance` / `trajectory` |
+| `StationaryDistribution` | `stationary(fit, initial)` |
+| `k_star` | `technology_crossing` (not the optimal threshold) |
+
+Provide unit-mass probability arrays or density arrays with unit weighted
+integral. Normalize explicitly before construction if needed. Density is per
+unit capital and mass over productivity/ability states. Accessors return shaped
+copies; do not depend on flattened storage or mutate solver caches.
+
+`dt` is required. Observation interpolation replaces endpoint-dependent
+substeps, so off-lattice output can differ from the previous implementation.
+Shared observations are now independent of the requested schedule. Stationary
+calculation is separate and has no timestep. Incremental stepping is deferred.
+
+`fit.settings` records the resolved solve options and `fit.initial_value` owns
+the actual starting array. A failed fit retains finite values and policy with
+`converged=false`; downstream economic calculations require convergence.
+Warm starts with changed coordinates require explicit `regrid`.
+
+For GrowthCounterfactuals, replace solver overrides with the standard
+`GrowthModels.solve` call and a resource model implementing the income floor.
+Use `StateGrid`, model-owned population support/shares, and `fit.value` for value
+interpolation. Qualify `GrowthModels.solve` where packages such as Roots also
+export `solve`. Verify the active environment resolves this checkout: changing
+source files alone does not update an environment pinned to an old git tree.
+
+## Downstream grid defaults
+
+GrowthCounterfactuals retains its split capital-grid formula and empirical
+population bin shares. Productivity bounds now use the analytical central 98%
+interval of the stationary OU law instead of quantiles from 100 simulated
+paths. This eliminates grid construction's global RNG reset, but changes its
+realized bounds and can change counterfactual numbers. Treat that as a separate
+numerical-default change: supply a grid with the previous realized coordinates
+when comparing numerical cores, and regenerate default-grid analyses.
+
+The checked-in `test/integration/Project.toml` resolves sibling working checkouts
+for the migrated package. It is a runnable adoption environment; it does not
+rewrite the aggregate-transfers root Manifest or migrate its historical notebooks
+and separate modeling packages. Use this environment for the migrated package
+until those separate callers have adopted the breaking API.

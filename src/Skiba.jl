@@ -18,7 +18,7 @@ function SkibaModel{T}(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_
 end
 
 function SkibaModel(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A_H = 0.6, A_L = 0.4, κ = 2.0)
-    SkibaModel(γ, α, ρ, δ, A_H, A_L, κ)
+    SkibaModel(promote(γ, α, ρ, δ, A_H, A_L, κ)...)
 end
 
 
@@ -71,16 +71,4 @@ end
 
 #### Misc Functions ####
 statespace_k_dot(m::SkibaModel) = (variables::NamedTuple) -> variables.y .- m.δ .* variables.k .- variables.c
-
-#### Plotting ####
-function plot_production_function(m::SkibaModel, k)
-    y = production_function(m, collect(k))
-    yH = y_H(m).(k)
-    yL = y_L(m).(k)
-    plot(k, y, label="y")
-    plot!(k, yH, linestyle=:dash, label="yH")
-    plot!(k, yL, linestyle=:dash, label="yL")
-    xlabel!("\$k\$")
-    ylabel!("\$f(k)\$")
-end
 

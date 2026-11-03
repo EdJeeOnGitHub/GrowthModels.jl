@@ -1,59 +1,3 @@
-struct StateEvolution{T <: Real}
-    S::Matrix{T}
-    times::Vector{Float64}
-    g::Vector{T}
-    A::SparseMatrixCSC{T,Int}
-    dx_stacked::Vector{T}
-    cell_masses::Array{T}
-    stationary_dist::Union{Nothing,Vector{T}}
-    final_density::Vector{T}
-    final_time::Float64
-end
-
-function Base.getindex(s::StateEvolution, t::Real)
-    index = searchsortedfirst(s.times, t)
-    index <= length(s.times) && s.times[index] == t ||
-        throw(ArgumentError("Time $t was not saved"))
-    return s.S[:, index]
-end
-
-# Implicit Euler method
-function iterate_g!(g, A_t; time_step = 1)
-    evolution = I - time_step * A_t
-    g .= evolution \ g
-end
-# Implicit Euler method
-function iterate_g(g, A_t; time_step = 1)
-    evolution = I - time_step * A_t
-    return evolution \ g
-end
-
-"""
-    iterate_g(g, A_t, dx_stacked; time_step = 1)
-
-Advance a density using the transpose of the HJB generator. Internally evolve
-cell masses `dx_stacked .* g`, then convert back to a density. This preserves
-weighted mass without renormalization, including on nonuniform grids.
-The two-argument overload instead advances cell masses directly.
-"""
-function iterate_g(g, A_t, dx_stacked; time_step = 1, workspace = nothing)
-    if workspace !== nothing
-        update_evolution!(workspace, A_t; time_step = time_step, dx_stacked = dx_stacked)
-        return iterate_g(g, workspace)
-    end
-    evolution = I - time_step * A_t
-    return (evolution \ (dx_stacked .* g)) ./ dx_stacked
-end
-
-function iterate_g!(g, A_t, dx_stacked; time_step = 1, workspace = nothing)
-    if workspace !== nothing
-        update_evolution!(workspace, A_t; time_step = time_step, dx_stacked = dx_stacked)
-        return iterate_g!(g, workspace)
-    end
-    g .= iterate_g(g, A_t, dx_stacked; time_step = time_step)
-    return g
-end
-
 function create_dx_stacked(x, N_second_dim)
     dxf, dxb = generate_dx(x)
     dx_tilde = 0.5 * (dxf + dxb)
@@ -192,11 +136,11 @@ function StationaryDistribution(A_t::SparseMatrixCSC, dx_stacked;
     # Integrated transient occupancy solves -A_TT * occupation = initial_mass_T.
     # Its outflow into each closed class is that class's eventual absorbed mass.
     occupation = if initial_mass !== nothing && !isempty(transient)
-        (-A_t[transient, transient]) \ initial_mass[transient]
+        solve_sparse_factor(factor_sparse(-A_t[transient, transient]), initial_mass[transient])
     else
         nothing
     end
-    mass = zeros(promote_type(Float64, eltype(A_t), eltype(dx_stacked)), n)
+    mass = zeros(promote_type(Float64, eltype(A_t), eltype(dx_stacked), initial_mass === nothing ? Float64 : eltype(initial_mass)), n)
     for states in classes
         weight = if initial_mass === nothing
             one(eltype(mass))
@@ -211,132 +155,8 @@ function StationaryDistribution(A_t::SparseMatrixCSC, dx_stacked;
         block[1, 1] = 1
         rhs = zeros(eltype(mass), length(states))
         rhs[1] = 1
-        stationary_mass = block \ rhs
+        stationary_mass = solve_sparse_factor(factor_sparse(block), rhs)
         mass[states] .= weight .* stationary_mass ./ sum(stationary_mass)
     end
     return mass ./ dx_stacked
-end
-
-# Subtracting large observation times introduces error on their scale, not
-# merely on the interval's scale. Avoid spurious half-steps on a regular grid.
-function evolution_substeps(interval, dt, left, right)
-    dt === nothing && return 1
-    tolerance = 8eps(max(abs(left), abs(right), abs(dt))) / dt
-    return max(1, ceil(Int, interval / dt - tolerance))
-end
-
-"""
-    StateEvolution(g, sm, times; dt=0.1, save=:all, callback=nothing,
-                   stationary=false, workspace=nothing, normalize=true)
-
-Evolve an initial density to strictly increasing real observation `times`.
-The first time labels the initial state. `dt` limits the internal step size;
-the default maximum step is 0.1. Explicit `dt=nothing` requests one step per interval.
-
-`save=:all` stores only observation-time densities, `:final` stores only the
-last, and `:none` stores no trajectory. `final_density` is always available.
-`callback(t, cell_masses)` runs at every observation time, including the first,
-independently of `save`. Its mass buffer is borrowed: do not mutate or retain it.
-This permits streaming moments without storing a distribution history.
-
-Stationary computation is opt-in via `stationary=true`, or can be requested
-later with `StationaryDistribution(result)`. No input array is mutated.
-
-The legacy integer argument `T` means T observations at `0:T-1`;
-`implicit_steps` specifies the number of steps per unit interval.
-"""
-function StateEvolution(g::AbstractVector, A_t::SparseMatrixCSC, times::AbstractVector,
-                        v_dim, dx_stacked; dt = 0.1, save = :all,
-                        callback = nothing, stationary = false, workspace = nothing,
-                        normalize = true)
-    observations = Float64.(times)
-    !isempty(observations) && all(isfinite, observations) && all(diff(observations) .> 0) ||
-        throw(ArgumentError("Observation times must be finite, nonempty, and strictly increasing"))
-    save in (:all, :final, :none) || throw(ArgumentError("save must be :all, :final, or :none"))
-    dt === nothing || (isfinite(dt) && dt > 0) || throw(ArgumentError("dt must be finite and positive"))
-    length(g) == prod(v_dim) == size(A_t, 1) || throw(DimensionMismatch("Density, grid shape, and generator must agree"))
-    all(x -> isfinite(x) && x >= 0, g) && weighted_mass(g, dx_stacked) > 0 ||
-        throw(ArgumentError("Initial density must be finite, nonnegative, and have positive mass"))
-    first_step = length(observations) > 1 ? observations[2] - observations[1] : 1.0
-    first_step /= evolution_substeps(first_step, dt, observations[1], observations[min(2, end)])
-    preferred = length(v_dim) > 2 ? prod(v_dim[1:2]) : length(g)
-    blocksize = independent_blocksize(A_t, preferred)
-    ws = if workspace === nothing
-        EvolutionWorkspace(A_t, dx_stacked; time_step = first_step, blocksize = blocksize)
-    else
-        update_evolution!(workspace, A_t; time_step = first_step, dx_stacked = dx_stacked)
-    end
-    T = eltype(ws.mass)
-    initial = Vector{T}(g)
-    normalize && normalize_by_weighted_mass!(initial, ws.dx_stacked)
-    ws.mass .= ws.dx_stacked .* initial
-    saved_times = save == :all ? observations : save == :final ? observations[end:end] : Float64[]
-    saved = Matrix{T}(undef, length(g), length(saved_times))
-    saved_index = 0
-    for i in eachindex(observations)
-        if i > 1
-            interval = observations[i] - observations[i-1]
-            # Equal substeps land exactly on the requested time without a
-            # floating-point remainder creating a spurious extra tiny step.
-            steps = evolution_substeps(interval, dt, observations[i-1], observations[i])
-            step = interval / steps
-            step == ws.time_step || update_evolution!(ws; time_step = step)
-            for _ in 1:steps
-                step_mass!(ws)
-            end
-        end
-        if save == :all || (save == :final && i == length(observations))
-            saved_index += 1
-            @views saved[:, saved_index] .= ws.mass ./ ws.dx_stacked
-        end
-        callback === nothing || callback(observations[i], ws.mass)
-    end
-    final = ws.mass ./ ws.dx_stacked
-    masses = reshape(saved .* ws.dx_stacked, (v_dim..., length(saved_times)))
-    stationary_density = stationary ? weighted_mass(initial, ws.dx_stacked) .*
-        StationaryDistribution(ws.A_t, ws.dx_stacked; initial_density = initial) : nothing
-    return StateEvolution(saved, saved_times, initial, copy(ws.A_t), copy(ws.dx_stacked),
-        masses, stationary_density, final, observations[end])
-end
-
-function StateEvolution(g::AbstractVector, A_t::SparseMatrixCSC, T::Int, v_dim, dx_stacked;
-                        implicit_steps = 1, kwargs...)
-    T >= 1 && implicit_steps isa Integer && implicit_steps >= 1 ||
-        throw(ArgumentError("T and implicit_steps must be positive integers"))
-    return StateEvolution(g, A_t, collect(0:T-1), v_dim, dx_stacked;
-        dt = 1 / implicit_steps, kwargs...)
-end
-
-function evolution_grid(sm::SolvedModel)
-    dims = size(sm.value.v)
-    k = collect(view(reshape(sm.variables.k, dims[1], :), :, 1))
-    return dims, create_dx_stacked(k, prod(dims) ÷ length(k))
-end
-
-function StateEvolution(g, sm::SolvedModel, times; kwargs...)
-    dims, weights = evolution_grid(sm)
-    return StateEvolution(g, sparse(sm.value.A'), times, dims, weights; kwargs...)
-end
-
-function StationaryDistribution(evolution::StateEvolution)
-    return weighted_mass(evolution.g, evolution.dx_stacked) .*
-        StationaryDistribution(evolution.A, evolution.dx_stacked; initial_density = evolution.g)
-end
-
-function StationaryDistribution(sm::SolvedModel; initial_density = nothing)
-    _, weights = evolution_grid(sm)
-    return StationaryDistribution(sparse(sm.value.A'), weights; initial_density = initial_density)
-end
-
-# helper to find group ids for plotting when the value function has been stacked
-function create_group_ids(sm::SolvedModel)
-    v_dim = size(sm.value.v)
-    if length(v_dim) == 1
-        col_ids = fill(1, v_dim[1])
-        row_ids = collect(1:v_dim[1])
-    else 
-        col_ids = repeat(1:v_dim[2], inner = v_dim[1])
-        row_ids = repeat(1:v_dim[1], outer = v_dim[2])
-    end
-    return col_ids, row_ids
 end

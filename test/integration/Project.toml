@@ -1,0 +1,13 @@
+[deps]
+GrowthModels = "47660a32-d12f-45a8-8e9e-9bf97893ab41"
+GrowthCounterfactuals = "c54d807c-9d88-472a-a9ea-c8acc0d9726e"
+StochasticEM = "aa0a0013-2250-47cb-a816-9e92e18af301"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[sources]
+GrowthModels = {path = "../.."}
+GrowthCounterfactuals = {path = "../../../aggregate-transfers/packages/GrowthCounterfactuals"}
+StochasticEM = {path = "../../../StochasticEM.jl"}
+
+[compat]
+julia = "1.11"

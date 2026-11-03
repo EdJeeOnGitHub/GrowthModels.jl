@@ -1,5 +1,9 @@
 # Correctness follow-up to the external review
 
+> Historical pre-redesign record. For the implemented API and current validation,
+> see [README.md](README.md), [MIGRATION.md](MIGRATION.md), and
+> [API_VALIDATION.md](API_VALIDATION.md).
+
 The external review was checked against `614172c`. This pass addresses
 scientific correctness and misleading failure modes; the larger API redesign,
 starting-guess experiments, threading, and further memory tuning are deferred.
