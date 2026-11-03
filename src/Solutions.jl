@@ -65,7 +65,7 @@ function solution_result(m, g, ws, v, initial, settings, iterations, stop, updat
 end
 
 function nonlinear_residual(ws, m, v)
-    residual = ws.A * vec(v)
+    residual = generator_action(ws.A,vec(v))
     for i in eachindex(residual)
         residual[i] += utility(ws.c[i], preferences(m).γ) - preferences(m).ρ * v[i]
     end

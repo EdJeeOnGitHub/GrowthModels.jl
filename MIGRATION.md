@@ -100,3 +100,14 @@ width four informed the capital proposal even when another support was selected.
 Explicit capital bounds and fixed grids remain unchanged. Re-run default-grid
 analyses and assess bounds and resolution together; the strict explicit-grid
 refactor comparison does not measure this intentional default change.
+
+## Separate numerical fix: residual evaluation on stretched grids
+
+The nonlinear HJB residual now evaluates generator action as weighted value
+differences, using the zero-row-sum identity, instead of subtracting large
+level products. Convergence tolerances are unchanged. A 900-point RCK grid with
+power 3.9 previously reported a residual around `1.31e-6` after 1000 iterations,
+while a 256-bit recomputation of the same iterate gave `5.53e-7`. The stable
+calculation agrees with high precision and avoids that false failure. Very
+ill-conditioned grids can still fail legitimately; this is not a relaxation of
+the acceptance criterion.

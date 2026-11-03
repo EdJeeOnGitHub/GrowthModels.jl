@@ -63,3 +63,19 @@ function validate_utility(m)
     preferences(m).γ != 1 || throw(ArgumentError("γ=1 (log utility) is not supported; the CRRA value normalization is singular there"))
 end
 initial_guess(m::Model, resources::AbstractArray) = utility.(resources, preferences(m).γ) ./ preferences(m).ρ
+
+# For a zero-row-sum generator, A*v = sum(j != i, A[i,j]*(v[j]-v[i])).
+# Evaluating differences avoids cancellation between enormous diagonal and
+# off-diagonal level products on highly stretched grids. This does not change
+# the convergence tolerance or the assembled operator.
+function generator_action(A::SparseMatrixCSC,v::AbstractVector)
+    size(A,1) == size(A,2) == length(v) || throw(DimensionMismatch("Generator and value dimensions differ"))
+    result=zeros(promote_type(eltype(A),eltype(v)),length(v))
+    rows,rates=rowvals(A),nonzeros(A)
+    for j in axes(A,2), ptr in nzrange(A,j)
+        i=rows[ptr]
+        i == j && continue
+        result[i] += rates[ptr]*(v[j]-v[i])
+    end
+    return result
+end
