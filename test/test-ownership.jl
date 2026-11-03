@@ -28,6 +28,8 @@ end
     @test_throws ArgumentError parent(f.value)[1] = 0
     @test_throws ArgumentError f.value.storage
     @test sparse(f.generator) * vec(f.value) ≈ f.generator * vec(f.value)
+    @test sum(f.generator;dims=2) == sum(sparse(f.generator);dims=2)
+    @test maximum(abs,f.generator) == maximum(abs,sparse(f.generator))
     @test sum(transpose(f.generator)*ones(length(g))) ≈ 0 atol=1e-9
     retrieved=f.model
     retrieved.stochasticprocess.z[1]=.9
@@ -55,5 +57,5 @@ end
     restored=deserialize(io)
     @test restored.value == f.value
     @test_throws ArgumentError restored.value[1]=0
-    @test solve(f.model,g;initial=f).converged # m's process was mutated above: restore first
+    @test solve(f.model,g;initial=f).converged
 end

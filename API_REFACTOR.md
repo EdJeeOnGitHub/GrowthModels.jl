@@ -1,6 +1,8 @@
 # API refactor implementation plan
 
-Status: proposed; implementation has not started.
+Status: implementation in progress. Core refactor and numerical fixes are
+implemented and verified; downstream caller migration and its final audit remain
+in progress. See the implementation evidence below.
 
 Implement in this order: capture baselines → resource composition → model/process
 interfaces → grid semantics → numerical bridge removal → probability semantics
@@ -416,3 +418,32 @@ Architecture acceptance is concrete:
 The plan adopts compositional resource rules, population-weighted stationary
 defaults, and read-only array views as described above; these are no longer
 open implementation choices.
+
+## Implementation evidence (2026-11-03)
+
+- Baseline commit `b0104e8` captures `067806e` on Julia 1.12.3, including the
+  300 × 20 stretched case and same-environment iteration counts.
+- Resource composition is isolated in `cef5480`.
+- Structural contracts, read-only snapshots, probability defaults, dependency
+  cleanup, and migrated legacy coverage are in `43ef54d`.
+- Selected-support capital bounds are isolated in `276354a`.
+- High-precision-verified residual evaluation is isolated in `5126a3c`.
+- Full `Pkg.test()` passed with `GROWTHMODELS_STRICT_ITERATIONS=true`; README
+  examples passed. The first full run exposed a Plots/GrowthModels `density`
+  import ambiguity in the new tests, which was corrected before the passing run.
+- GrowthCounterfactuals integration passed 20 assertions against this checkout.
+- Scalar inspection benchmark: 1000 reads of `fit.value[i]` allocated 16 bytes,
+  without whole-array copies. Numerical benchmark iteration counts remained 56
+  (Skiba) and 12 (OU); timings are workload-dependent.
+- `test/legacy/` was deleted after coverage migration; `test/COVERAGE.md` retains
+  the audit and references to the historical revision.
+- Root migration is underway. Its Project/Manifest now use a pinned local Git
+  revision of GrowthModels instead of `main`. Resolving required replacing
+  unavailable `Qt6Base_jll 6.10.2+1` with `6.10.2+2`; no other unrelated package
+  version upgrades were requested. Removed obsolete GrowthModels dependencies
+  are allowed to leave the resolved graph.
+- Mainline structural solvers and counterfactual/fitting scripts have been
+  migrated; representative mainline validation is running. Notebook callers,
+  historical-source loaders, root validation, and the final downstream source
+  inventory still require work. Do not mark the goal complete from the core
+  package tests alone.

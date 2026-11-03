@@ -35,3 +35,11 @@ SparseArrays.sparse(a::ReadOnlyArray{T,2}) where T = copy(sparse(_storage(a)))
 # Preserve structured/sparse multiplication without exposing the backing matrix.
 Base.:*(a::ReadOnlyArray{T,2}, b::AbstractVector) where T = _storage(a) * _storage(b)
 Base.:*(a::ReadOnlyArray{T,2}, b::AbstractMatrix) where T = _storage(a) * _storage(b)
+# In particular, reductions of a sparse generator must not scan its dense
+# logical shape merely because inspection wraps its storage.
+Base.sum(a::ReadOnlyArray;kwargs...) = sum(_storage(a);kwargs...)
+Base.sum(f,a::ReadOnlyArray;kwargs...) = sum(f,_storage(a);kwargs...)
+Base.maximum(a::ReadOnlyArray;kwargs...) = maximum(_storage(a);kwargs...)
+Base.maximum(f,a::ReadOnlyArray;kwargs...) = maximum(f,_storage(a);kwargs...)
+Base.minimum(a::ReadOnlyArray;kwargs...) = minimum(_storage(a);kwargs...)
+Base.minimum(f,a::ReadOnlyArray;kwargs...) = minimum(f,_storage(a);kwargs...)

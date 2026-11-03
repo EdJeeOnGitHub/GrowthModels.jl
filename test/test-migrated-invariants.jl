@@ -10,7 +10,7 @@ using Test, GrowthModels, SparseArrays
         @test sum(mass(initial)) ≈ 1
         for dt in (.1,.25)
             path=trajectory(Evolution(fit;dt=dt),initial,[0.,.13,1.,2.])
-            @test all(t -> abs(sum(density(path,t).*cell_weights(grid))-1)<1e-10,path.times)
+            @test all(t -> abs(sum(GrowthModels.density(path,t).*cell_weights(grid))-1)<1e-10,path.times)
         end
         replay=solve(model,grid)
         @test replay.value == fit.value
