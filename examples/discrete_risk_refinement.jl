@@ -1,9 +1,12 @@
-# Run with: julia --project=. examples/discrete_risk_refinement.jl
+# Run with: julia --project=. examples/discrete_risk_refinement.jl [individuals_per_type]
+# The default of 1000 is a quick consistency run; use 40000 to resolve grid bias.
 # Finite-chain comparison: both matrix evolution and simulation use the same
 # Rouwenhorst chain. Only the simulation keeps capital continuous (no grid lottery).
 using GrowthModels, Random, SparseArrays
 
-function risk_case(nk,nz;upper=20.0,periods=40,individuals_per_type=1000,
+const INDIVIDUALS_PER_TYPE = isempty(ARGS) ? 1000 : parse(Int,only(ARGS))
+
+function risk_case(nk,nz;upper=20.0,periods=40,individuals_per_type=INDIVIDUALS_PER_TYPE,
         persistence=0.9,innovation_std=0.1)
     types=Population([0.9,1.1],[0.5,0.5])
     m=DiscreteSkibaModel(productivity=LogAR1(;persistence,innovation_std),population=types)

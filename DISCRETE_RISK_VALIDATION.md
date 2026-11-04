@@ -28,6 +28,11 @@ the same finite-state shock process.
   positive-mass periodicity rejection, and zero-share population handling.
 - Simulation timing, budget identities, fixed ability, empirical shock frequencies,
   reproducible RNGs, and continuous-capital policy evaluation.
+- Invariant probabilities on fine shock chains (11 and 21 states), whose tail
+  entries are small enough for a direct solve to return tiny negative values. Such
+  roundoff, within the package's probability tolerance, is removed and renormalized;
+  a materially negative solve remains an error. Tail entries are therefore accurate
+  in absolute terms only.
 
 The deterministic suite remains in place, including its analytical log-growth
 benchmark, Skiba threshold refinement, and numerical-failure recovery. The full
@@ -60,9 +65,10 @@ Results on Julia 1.12.3:
 | 200 | 7 | 20 | 2.38511 | 2.37357 ± 0.03321 | 0.37689 | 0.3790 ± 0.00941 |
 | 300 | 5 | 30 | 2.37024 | 2.34654 ± 0.03397 | 0.37238 | 0.3625 ± 0.00945 |
 
-For the mean capital and hitting probabilities in this table, grid and
-continuous-capital simulations differ by less than two estimated standard errors. This is a finite-sample consistency check, not a
-guarantee that interpolation error is negligible. Capital refinement still
+At this sample size, grid and continuous-capital simulations differ by less than
+two estimated standard errors for mean capital and hitting probabilities. That
+reflects limited power, not agreement; see
+[Grid bias at larger samples](#grid-bias-at-larger-samples). Capital refinement still
 changes the computed hitting probability, and shock refinement from three to seven
 states shifts it by about 0.029. Expanding bounds at similar capital spacing
 changes the five-state hitting probability by about 0.0006.
@@ -100,11 +106,37 @@ initial condition, greater persistence lowers the 40-period target-hitting
 probability and increases restricted waiting time. This is not a general
 comparative-statics result for all Skiba calibrations.
 
-Waiting times reveal additional capital-grid sensitivity: at 100 points and
-persistence 0.9, the grid estimate is 30.40444 versus simulation 31.0885 ± 0.25470
-(about 2.7 standard errors apart). At 400 points the estimates are 31.15760 and
-31.4435 ± 0.25145 (about 1.1 standard errors apart). Agreement of simpler moments
-alone would not detect this sensitivity.
+## Grid bias at larger samples
+
+Rerunning every case above with 40,000 individuals per type, using
+`examples/discrete_risk_refinement.jl 40000`, resolves differences that the
+1,000-individual runs cannot. Here `z` is (grid − simulation) / SE.
+
+| Requested capital points | Shock states | Upper bound | Persistence | Grid hit | Simulation hit ± SE | z | Grid restricted wait | Simulation restricted wait ± SE | z | Mean capital z |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 5 | 20 | 0.90 | 0.3864 | 0.3767 ± 0.0015 | 6.4 | 30.40 | 31.01 ± 0.04 | -14.9 | -2.6 |
+| 200 | 5 | 20 | 0.90 | 0.3718 | 0.3654 ± 0.0015 | 4.2 | 30.97 | 31.27 ± 0.04 | -7.3 | -1.1 |
+| 400 | 5 | 20 | 0.90 | 0.3667 | 0.3611 ± 0.0015 | 3.7 | 31.16 | 31.40 ± 0.04 | -6.1 | 0.5 |
+| 200 | 3 | 20 | 0.90 | 0.3478 | 0.3482 ± 0.0015 | -0.3 | 31.74 | 31.77 ± 0.04 | -0.7 | -1.0 |
+| 200 | 7 | 20 | 0.90 | 0.3769 | 0.3754 ± 0.0015 | 1.0 | 30.86 | 30.96 ± 0.04 | -2.7 | -2.5 |
+| 300 | 5 | 30 | 0.90 | 0.3724 | 0.3655 ± 0.0015 | 4.6 | 30.95 | 31.24 ± 0.04 | -7.2 | -0.8 |
+| 200 | 5 | 20 | 0.50 | 0.4336 | 0.4306 ± 0.0011 | 2.8 | 28.53 | 28.85 ± 0.03 | -9.3 | -3.7 |
+| 200 | 5 | 20 | 0.95 | 0.3220 | 0.3207 ± 0.0015 | 0.8 | 32.82 | 32.93 ± 0.04 | -3.1 | -0.8 |
+
+Interpolated grid evolution reaches the target sooner than continuous-capital
+simulation under the same finite shock chain: the restricted-wait gap is negative
+in all eight cases, and beyond two standard errors in seven. At five shock states
+and persistence 0.9 the grid hit probability is also too high, by 0.0097, 0.0064 and
+0.0056 at 100, 200 and 400 points. The waiting-time gap falls from 0.60 to 0.24 periods over the same
+refinement, slowing after 200 points, so 400 points does not remove it. Splitting
+mass between capital nodes can place some of it past the target early, which is
+consistent with this direction but has not been isolated as the cause.
+
+The bias is not uniform. The hit-probability gap is undetectable at three shock
+states, and about one standard error at seven states and at persistence 0.95. Mean capital is less affected
+than first-passage statistics. Report hitting probabilities and waiting times from
+matrix evolution only with a simulation comparison at adequate sample size, or
+compute them by simulation directly.
 
 ## Operator storage and performance
 
@@ -127,10 +159,12 @@ GKSwstype=100 julia --project=. -e 'using Pkg; Pkg.test()'
 julia --project=. test/check-readme.jl
 julia --project=. examples/discrete_risk.jl
 julia --project=. examples/discrete_risk_refinement.jl
+julia --project=. examples/discrete_risk_refinement.jl 40000
 ```
 
-The full package suites pass on Julia 1.12.3 and 1.9.4, including the original
-continuous-time regressions, 1,080 deterministic discrete-time assertions, 334
-new stochastic/ability assertions, and the plotting extension. README examples,
+The full package suites pass on Julia 1.12.3, including the original
+continuous-time regressions, 1,102 deterministic discrete-time assertions, 345
+stochastic/ability assertions, and the plotting extension. README examples,
 the population/individual-path example, and the refinement experiment execute
-successfully. The implementation adds no dependencies. See the PR for CI results.
+successfully. The implementation adds no dependencies. See the PR for CI results, including the
+minimum supported Julia version.

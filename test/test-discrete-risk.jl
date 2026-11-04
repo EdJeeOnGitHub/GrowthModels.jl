@@ -250,3 +250,25 @@ end
     @test mass(advance(Evolution(fit),invariant,1))≈mass(invariant) atol=1e-12
     @test_throws ArgumentError stationary(fit,initial;require_aperiodic=true)
 end
+
+@testset "Invariant probabilities tolerate solver roundoff" begin
+    # Tail probabilities of a fine shock chain are near machine precision, so a
+    # direct solve returns tiny negative entries for these valid chains.
+    for (ctor,nk,nz,upper) in ((DiscreteRamseyCassKoopmansModel,200,11,6.0),
+                               (DiscreteSkibaModel,300,21,20.0))
+        m=ctor(productivity=LogAR1())
+        g=StateGrid(m;k=(n=nk,bounds=(0.2,upper)),z=(n=nz,))
+        fit=solve(m,g)
+        @test fit.converged
+        initial=distribution(g;masses=fill(1/length(g),size(g)))
+        invariant=stationary(fit,initial)
+        @test all(>=(0),mass(invariant))
+        @test sum(mass(invariant))≈1 atol=1e-13
+        @test mass(advance(Evolution(fit),invariant,1))≈mass(invariant) atol=1e-12
+    end
+    # Roundoff is removed; a materially negative solve remains an error.
+    cleaned=GrowthModels.clip_probability_roundoff!([0.5,-1e-16,0.5])
+    @test cleaned[2]==0
+    @test sum(cleaned)≈1 atol=1e-15
+    @test_throws ArgumentError GrowthModels.clip_probability_roundoff!([0.6,-0.1,0.5])
+end

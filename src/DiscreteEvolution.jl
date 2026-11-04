@@ -107,6 +107,17 @@ function communicating_period(Pt,states)
     return period
 end
 
+# Direct solves meet nonnegativity only up to roundoff, which matters for tail
+# probabilities near machine precision. Remove that roundoff; a materially
+# negative entry means the solve failed and must not be hidden by clipping.
+function clip_probability_roundoff!(p)
+    minimum(p) >= -PROBABILITY_TOLERANCE ||
+        throw(ArgumentError("Invariant solve returned a negative probability of $(minimum(p)); tolerance=$PROBABILITY_TOLERANCE"))
+    p .= max.(p,0)
+    p ./= sum(p)
+    return p
+end
+
 # Invariant/Cesaro probabilities. This works directly with I-P′ and reuses only
 # the graph and factorization helpers from continuous time, not its interpretation.
 function stationary_transition(P;initial_mass=nothing,require_aperiodic=false)
@@ -138,6 +149,7 @@ function stationary_transition(P;initial_mass=nothing,require_aperiodic=false)
         invariant ./= sum(invariant)
         result[states].=weight.*invariant
     end
+    clip_probability_roundoff!(result)
     validate_probability(result)
     return result
 end
@@ -153,6 +165,8 @@ Without initial probabilities, population shares weight ability blocks only when
 each positive-share block has a unique closed class. Explicit initial probabilities
 override population shares. A unique productivity invariant law alone does not
 imply uniqueness of the joint capital/productivity invariant law.
+Solver roundoff within the probability tolerance is removed and renormalized, so
+very small tail probabilities are accurate in absolute terms only.
 """
 function stationary(fit::DiscreteGrowthSolution,initial::Union{Nothing,StateDistribution}=nothing;
         require_aperiodic=false)

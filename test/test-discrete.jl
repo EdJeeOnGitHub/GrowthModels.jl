@@ -172,6 +172,9 @@ end
 
 @testset "Skiba threshold and path refinement" begin
     m=DiscreteSkibaModel()
+    user_cost=1/m.discount-1+m.depreciation
+    low_state=(m.α*m.A_L/user_cost)^(1/(1-m.α))
+    high_state=(m.α*m.A_H/user_cost)^(1/(1-m.α))+m.κ
     function threshold(fit)
         lo,hi=2.8,3.5
         @test next_capital(fit,(k=lo,)) < lo
@@ -194,6 +197,7 @@ end
         @test left < t < right
         @test !any(fit.diagnostics.boundary.lower_choice)
         @test !any(fit.diagnostics.boundary.upper_choice)
+        spacing=fit.grid.k[3]-fit.grid.k[2]
         for (start,high) in ((t-0.05,false),(t+0.05,true))
             k=start
             for _ in 1:200
@@ -201,7 +205,9 @@ end
                 @test consumption(fit,(k=k,))+kp ≈ resources(m,(k=k,))+(1-m.depreciation)*k
                 k=kp
             end
-            @test high ? k > 3.5 : k < 1.1
+            # Both branch steady states solve 1 = β(f′(k) + 1 - δ). Piecewise-linear
+            # continuation pins paths to a nearby node, so compare at grid resolution.
+            @test abs(k-(high ? high_state : low_state)) < spacing
         end
         # Distinct local maxima persist near the investment switch.
         q=GrowthModels.bellman_choice(GrowthModels.discrete_budget(m,t),fit.grid.k,
@@ -225,4 +231,58 @@ end
     @test isfinite(fit.diagnostics.residual_norm)
     @test fit.diagnostics.admissible
     @test all(isfinite,fit.policy.consumption)
+end
+
+@testset "Smooth steady state from both sides" begin
+    m=DiscreteRamseyCassKoopmansModel()
+    state=(m.α*m.A/(1/m.discount-1+m.depreciation))^(1/(1-m.α))
+    g=StateGrid(m;k=(n=500,bounds=(0.05*state,1.5*state)))
+    fit=solve(m,g)
+    @test fit.converged
+    spacing=g.k[2]-g.k[1]
+    for start in (0.5*state,1.4*state)
+        k=start
+        for _ in 1:500
+            k=next_capital(fit,(k=k,))
+        end
+        @test abs(k-state) < spacing
+    end
+end
+
+# The per-period economy with period Δ has budget c + k′ = Δf(k) + (1-δΔ)k and
+# discount exp(-ρΔ). CRRA homogeneity makes its policy independent of the constant
+# scale between period consumption and flow reward, so c/Δ approaches the HJB
+# policy. This mapping is a validation device only: the package performs no conversion.
+@testset "Continuous-time limit of the Skiba economy" begin
+    ρ,δ=0.05,0.05
+    hjb=SkibaModel(ρ=ρ,δ=δ)
+    hjbgrid=StateGrid(hjb;k=(n=2000,bounds=(0.01,8.0)))
+    hjbfit=solve(hjb,hjbgrid;maxiters=5000)
+    @test hjbfit.converged
+    drift=copy(hjbfit.policy.drift)
+    # Above the low steady state, the only negative-to-positive drift switch.
+    switches=[hjbgrid.k[i] for i in 1:length(drift)-1 if hjbgrid.k[i]>2 && drift[i]<0 && drift[i+1]>0]
+    @test length(switches)==1
+    target=only(switches)
+    errors=map(((1.0,1000),(0.5,2000))) do (Δ,n)
+        m=DiscreteSkibaModel(discount=exp(-ρ*Δ),depreciation=δ*Δ,risk_aversion=hjb.γ,
+            A_H=hjb.A_H*Δ,A_L=hjb.A_L*Δ,α=hjb.α,κ=hjb.κ)
+        fit=solve(m,StateGrid(m;k=(n=n,bounds=(0.01,8.0))))
+        @test fit.converged
+        lo,hi=2.0,2.8
+        @test next_capital(fit,(k=lo,))<lo
+        @test next_capital(fit,(k=hi,))>hi
+        for _ in 1:40
+            mid=(lo+hi)/2
+            next_capital(fit,(k=mid,))>mid ? (hi=mid) : (lo=mid)
+        end
+        for x in (1.5,2.0,4.0,5.0)
+            @test consumption(fit,(k=x,))/Δ ≈ consumption(hjbfit,(k=x,)) atol=0.01
+        end
+        (lo+hi)/2-target
+    end
+    # Same-signed first-order error: halving the period halves the threshold gap.
+    @test all(>(0),errors)
+    @test 1.5 < errors[1]/errors[2] < 2.5
+    @test errors[2] < 0.06
 end
