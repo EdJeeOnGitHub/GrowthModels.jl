@@ -1,0 +1,7 @@
+Source commit: 067806e
+Julia: 1.12.3
+Machine: x86_64-linux-gnu
+Generator: test/test-refactor-baseline.jl --generate
+Settings: solve defaults; evolution dt=0.25, duration=1; uniform initial mass.
+Grids and models: refactor_cases() in generator.
+Strict iteration comparison: GROWTHMODELS_STRICT_ITERATIONS=true in same runtime.

@@ -4,8 +4,9 @@ struct PoissonProcess{T <: Real} <: StochasticProcess
     z::AbstractVector{T}
     Q::AbstractMatrix{T}
 end
-function PoissonProcess(; z::AbstractVector{T}, Q::AbstractMatrix{T}) where T <: Real
-    PoissonProcess(z, Q)
+function PoissonProcess(; z::AbstractVector{<:Real}, Q::AbstractMatrix{<:Real})
+    T = promote_type(eltype(z), eltype(Q))
+    PoissonProcess(T.(z), T.(Q))
 end
 
 function process_mean(p::PoissonProcess)
@@ -22,7 +23,7 @@ struct OrnsteinUhlenbeckProcess{T <: Real} <: StochasticProcess
     # y = log(z) ~ N(0, ln_stationary_σ)
     # y ~ N(ln_mean, ln_stationary_σ)
 
-    # dlog(z) = -θ log(z) dt + σ^2 dW
+    # dlog(z) = -θ log(z) dt + σ dW
     # lognormal variance = exp(μ + σ^2 / 2) => exp(σ^2 / (2*θ) / 2 )
     # ln_stationary_σ = σ^2 / (2θ)
 
@@ -32,7 +33,8 @@ struct OrnsteinUhlenbeckProcess{T <: Real} <: StochasticProcess
     ln_stationary_μ::T  # Mean of lognormal 
 end
 
-function OrnsteinUhlenbeckProcess(;θ::T, σ::T) where T <: Real
+function OrnsteinUhlenbeckProcess(;θ::Real, σ::Real)
+    θ, σ = promote(θ, σ)
     ln_stationary_μ = exp((σ^2)/(2*θ)/2)
     ρ = exp(-θ)
     OrnsteinUhlenbeckProcess(θ, σ, ρ, ln_stationary_μ)
@@ -79,8 +81,9 @@ function sample(process::OrnsteinUhlenbeckProcess, x0::Float64, T, dt; seed=noth
     if seed !== nothing
         Random.seed!(seed)
     end
-    N = round(Int, T/dt)
+    T >= 0 && dt > 0 || throw(ArgumentError("T must be nonnegative and dt positive"))
     times = 0:dt:T
+    N = length(times) - 1
     values = zeros(N+1)
     values[1] = x0
 
@@ -135,8 +138,9 @@ function sample(process::OrnsteinUhlenbeckProcess, x0s::Vector, T, dt; seed=noth
         Random.seed!(seed)
     end
     N_traj = length(x0s)
-    N_time = round(Int, T/dt)
+    T >= 0 && dt > 0 || throw(ArgumentError("T must be nonnegative and dt positive"))
     times = 0:dt:T
+    N_time = length(times) - 1
     values = zeros(N_traj, N_time+1)
     
     # Exact solution parameters
@@ -188,8 +192,9 @@ function sample(process::OrnsteinUhlenbeckProcess, x0, T, dt, K; seed=nothing)
         Random.seed!(seed)
     end
     N_dim = length(x0)
-    N_time = round(Int, T/dt)
+    T >= 0 && dt > 0 || throw(ArgumentError("T must be nonnegative and dt positive"))
     times = 0:dt:T
+    N_time = length(times) - 1
     values = zeros(N_dim, N_time+1, K)
     
     # Exact solution parameters
@@ -210,4 +215,86 @@ end
 
 
 
+
+
+"""
+    generator(process, coordinates)
+
+Return a sparse continuous-time generator on the process axis, acting on value
+functions (rows sum to zero, off-diagonal entries are nonnegative). The solver
+embeds it in the joint state layout. Custom processes implement this method and
+use explicit grid coordinates or model-provided bounds.
+"""
+function generator(p::PoissonProcess, z::AbstractVector)
+    z == p.z || throw(ArgumentError("Poisson coordinates must equal process support"))
+    Q = sparse(p.Q)
+    size(Q) == (length(z),length(z)) || throw(DimensionMismatch("Poisson generator size differs from support"))
+    check_generator(Q)
+    return copy(Q)
+end
+function generator(p::OrnsteinUhlenbeckProcess, z::AbstractVector)
+    length(z) >= 2 && all(isfinite,z) && first(z) > 0 && all(diff(z) .> 0) ||
+        throw(ArgumentError("OU coordinates must be positive and increasing"))
+    dz = (last(z)-first(z))/(length(z)-1)
+    maximum(abs.(diff(z) .- dz)) <= 1e-6 || throw(ArgumentError("OU coordinates must be uniformly spaced"))
+    mu = (-p.θ .* log.(z) .+ p.σ^2/2) .* z
+    variance = p.σ^2 .* z.^2
+    backward = variance ./ (2dz^2) .+ max.(-mu,0) ./ dz
+    forward = variance ./ (2dz^2) .+ max.(mu,0) ./ dz
+    diagonal = .-(backward .+ forward)
+    diagonal[1] += backward[1]
+    diagonal[end] += forward[end]
+    Q = spdiagm(-1=>backward[2:end],0=>diagonal,1=>forward[1:end-1])
+    check_generator(Q)
+    return Q
+end
+
+"""
+    process_axis(process, specification)
+
+Resolve an axis specification (coordinates or a NamedTuple of numerical options)
+to `(coordinates=..., kind=:interpolable)` or `kind=:categorical`. Custom processes
+implement this together with `generator`. The process owns support restrictions
+and option validation; the grid owns axis order and joint layout.
+"""
+function process_axis end
+
+function validate_options(spec::NamedTuple, allowed, context)
+    unknown = setdiff(keys(spec), allowed)
+    isempty(unknown) || throw(ArgumentError("Unknown $context options $(Tuple(unknown)); supported options: $allowed"))
+    return spec
+end
+function process_axis(p::PoissonProcess, spec)
+    if spec isa NamedTuple
+        validate_options(spec, (:n,), "Poisson axis")
+        get(spec,:n,length(p.z)) == length(p.z) || throw(DimensionMismatch("Poisson grid size must match the process"))
+    else
+        primal.(collect(spec)) == primal.(p.z) || throw(ArgumentError("Poisson support belongs to the process"))
+    end
+    return (coordinates=copy(p.z),kind=:categorical)
+end
+function process_axis(p::OrnsteinUhlenbeckProcess, spec)
+    z = if spec isa NamedTuple
+        validate_options(spec, (:n,:bounds,:width), "OU axis")
+        n = get(spec,:n,40)
+        n isa Integer && n >= 2 || throw(ArgumentError("OU grid needs at least two points"))
+        bounds = haskey(spec,:bounds) ? spec.bounds : productivity_bounds(p,get(spec,:width,4))
+        collect(range(bounds[1],bounds[2];length=n))
+    else
+        collect(spec)
+    end
+    length(z) >= 2 && all(isfinite,z) && first(z) > 0 && all(diff(z) .> 0) ||
+        throw(ArgumentError("OU coordinates must be positive and increasing"))
+    dz=(last(z)-first(z))/(length(z)-1)
+    maximum(abs.(diff(z).-dz)) <= 1e-6 || throw(ArgumentError("OU coordinates must be uniformly spaced"))
+    return (coordinates=z,kind=:interpolable)
+end
+
+# Bounds for log productivity use the stationary log standard deviation.
+function productivity_bounds(p::OrnsteinUhlenbeckProcess, standard_deviations = 4)
+    p.θ > 0 && p.σ >= 0 || throw(ArgumentError("OU grid requires positive mean reversion and nonnegative volatility"))
+    standard_deviations > 0 || throw(ArgumentError("z_width must be positive"))
+    width = standard_deviations * p.σ / sqrt(2p.θ)
+    return exp(-width), exp(width)
+end
 

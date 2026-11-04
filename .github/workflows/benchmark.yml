@@ -1,8 +1,9 @@
-name: Julia Example with BenchmarkTools.jl
+name: API benchmarks
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -40,17 +41,14 @@ jobs:
             ${{ runner.os }}-
       - name: Run benchmark
         run: |
-          cd test
-          julia --project --color=yes -e '
-            using Pkg;
-            Pkg.instantiate();
-            include("benchmark.jl")'
+          julia --project=. --color=yes -e 'using Pkg; Pkg.instantiate()'
+          julia --project=. --color=yes test/benchmark-api.jl --output test/output.json
 
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
           name: Julia benchmark result
-          tool: 'julia'
+          tool: 'customSmallerIsBetter'
           output-file-path: test/output.json
           # Use personal access token instead of GITHUB_TOKEN due to https://github.community/t/github-action-not-triggering-gh-pages-upon-push/16096
           github-token: ${{ secrets.ED_PAT }}

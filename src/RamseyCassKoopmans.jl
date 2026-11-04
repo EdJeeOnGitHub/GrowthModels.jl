@@ -5,7 +5,7 @@
 
 
 function RamseyCassKoopmansModel(; γ = 2.0, α = 0.3, ρ = 0.05, δ = 0.05, A = 0.6)
-    RamseyCassKoopmansModel(γ, α, ρ, δ, A)
+    RamseyCassKoopmansModel(promote(γ, α, ρ, δ, A)...)
 end
 
 k_steady_state_RCK(α::Real, A::Real, ρ::Real, δ::Real) = (α*A/(ρ + δ))^(1/(1-α))
@@ -40,9 +40,3 @@ end
 #### Misc Functions ####
 
 #### Plotting ####
-function plot_production_function(m::RamseyCassKoopmansModel, k)
-    y = production_function(m, collect(k))
-    plot(k, y, label="y")
-    xlabel!("\$k\$")
-    ylabel!("\$f(k)\$")
-end

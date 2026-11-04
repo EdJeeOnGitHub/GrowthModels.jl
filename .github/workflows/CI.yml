@@ -16,6 +16,7 @@ jobs:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    continue-on-error: ${{ matrix.version == 'nightly' }}
     permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
       actions: write
       contents: read
@@ -23,8 +24,9 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - '1.8.3'
+          - '1.9'
           - '1.10'
+          - '1'
           - 'nightly'
         os:
           - ubuntu-latest
@@ -39,3 +41,5 @@ jobs:
       - uses: julia-actions/cache@v1
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
+      - name: Execute README examples
+        run: julia --project=. test/check-readme.jl
