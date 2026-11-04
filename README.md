@@ -102,7 +102,10 @@ so their final length can exceed `n`. Explicit coordinates remain unchanged.
 Numerical bounds constrain capital choices: a positive `kmin` is an artificial
 saving constraint, and a low `kmax` can suppress investment. Inspect
 `diagnostics.boundary.lower_choice` and `upper_choice`, and refine bounds and
-resolution together. Zero is allowed on discrete grids, but zero income at zero
+resolution together. Bounds can remove a growth branch without any choice reaching
+them, so also check `diagnostics.boundary.uncovered_steady_states`, which lists
+fixed-productivity steady states outside the capital grid and does not affect
+convergence. Zero is allowed on discrete grids, but zero income at zero
 capital has negative-infinite value for log utility or risk aversion above one;
 the solver reports this unsupported finite-value domain instead of adding a
 consumption floor. No continuation extrapolation occurs during solving.
@@ -165,7 +168,9 @@ expected continuation values. Simulations keep capital continuous and sample the
 finite productivity chain, rather than adding capital-grid lotteries.
 
 Discrete `stationary` returns invariant/time-average probabilities, including
-initial-dependent absorption weights. Periodic chains need not converge at each
+initial-dependent absorption weights. Interpolation can make neighbouring capital
+nodes absorbing around one steady state, so several closed classes need checking
+against a refined grid before reading them as several economic outcomes. Periodic chains need not converge at each
 date; `require_aperiodic=true` rejects positive-mass periodic classes. Without an
 initial distribution, population shares select ability blocks only when each
 positive-share block has a unique closed class. `advance`, `trajectory`, and

@@ -110,19 +110,31 @@ technology_crossing(m::DiscreteSkibaModel) = k_star_Skiba(m.α,m.A_H,m.A_L,m.κ)
 discrete_budget(m,s::NamedTuple) = resources(m,s)+(1-preferences(m).δ)*s.k
 discrete_budget(m,k::Real) = discrete_budget(m,(k=k,))
 
+# Solutions of 1 = discount*(f′(k) + 1 - depreciation) with productivity scale held
+# fixed, keeping only those on the branch where their technology is the best one.
+capital_steady_states(b::DiscreteRamseyCassKoopmansModel,scale) =
+    [(b.α*b.A*scale/(1/b.discount-1+b.depreciation))^(1/(1-b.α))]
+function capital_steady_states(b::DiscreteSkibaModel,scale)
+    cost=1/b.discount-1+b.depreciation
+    low=(b.α*b.A_L*scale/cost)^(1/(1-b.α))
+    high=(b.α*b.A_H*scale/cost)^(1/(1-b.α))+b.κ
+    crossing=technology_crossing(b)
+    return vcat(low <= crossing ? [low] : Float64[],high >= crossing ? [high] : Float64[])
+end
 function discrete_capital_spec(m,z,ability)
     b=base_model(m)
-    cost=1/b.discount-1+b.depreciation
-    scale=maximum(z)*maximum(ability)
-    reference = if b isa DiscreteRamseyCassKoopmansModel
-        (b.α*b.A*scale/cost)^(1/(1-b.α))
-    else
-        low=(b.α*b.A_L*scale/cost)^(1/(1-b.α))
-        high=(b.α*b.A_H*scale/cost)^(1/(1-b.α))+b.κ
-        crossing=technology_crossing(b)
-        max(low <= crossing ? low : 0.0,high >= crossing ? high : 0.0,crossing)
-    end
+    states=capital_steady_states(b,maximum(z)*maximum(ability))
+    reference=b isa DiscreteSkibaModel ? max(technology_crossing(b),states...) : only(states)
     return (n=500,bounds=(max(1e-8,0.001*reference),1.3*reference),spacing=:linear)
+end
+# Steady states of the represented productivity/ability pairs that the numerical
+# capital domain excludes. Bounds can remove a growth branch without any capital
+# choice reaching them, so boundary choices alone cannot reveal this.
+function uncovered_steady_states(m,g)
+    axes=getfield(g,:axes)
+    scales=[z*a for z in get(axes,:z,[1.0]) for a in get(axes,:ability,[1.0])]
+    states=reduce(vcat,capital_steady_states(base_model(m),scale) for scale in scales)
+    return sort!(unique!(filter(x -> !(first(g.k) <= x <= last(g.k)),states)))
 end
 function default_grid_spec(m::DiscreteTimeModel)
     p=process(m)

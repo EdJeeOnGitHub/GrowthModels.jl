@@ -107,15 +107,26 @@ function communicating_period(Pt,states)
     return period
 end
 
+# Interpolation can make neighbouring nodes absorbing around one true steady state,
+# so several classes are not by themselves evidence of several economic outcomes.
+# Report where they are rather than merging them, which could hide a real trap.
+function multiple_class_location(classes,capital)
+    capital === nothing && return ""
+    ranges=sort!([extrema(view(capital,states)) for states in classes])
+    return ". Capital ranges: "*join(ranges,", ")*". Classes within a few grid spacings "*
+        "may be interpolation artefacts of one steady state; compare a refined grid"
+end
+
 # Invariant/Cesaro probabilities. This works directly with I-P′ and reuses only
 # the graph and factorization helpers from continuous time, not its interpretation.
-function stationary_transition(P;initial_mass=nothing,require_aperiodic=false)
+function stationary_transition(P;initial_mass=nothing,require_aperiodic=false,capital=nothing)
     check_transition(P)
     Pt=sparse(transpose(P))
     classes,transient=closed_communicating_classes(Pt)
     n=size(P,1)
     if initial_mass === nothing
-        length(classes)==1 || throw(ArgumentError("Multiple stationary classes: supply an initial distribution"))
+        length(classes)==1 || throw(ArgumentError("Multiple stationary classes: supply an initial distribution"*
+            multiple_class_location(classes,capital)))
     else
         length(initial_mass)==n || throw(DimensionMismatch("Initial probabilities differ from transition size"))
         validate_probability(initial_mass)
@@ -161,13 +172,14 @@ function stationary(fit::DiscreteGrowthSolution,initial::Union{Nothing,StateDist
         require_aperiodic=false)
     require_converged(fit)
     P=getfield(fit,:transition)
+    capital=vec(coordinates(fit.grid).k)
     if initial !== nothing
         compatible_grid(fit.grid,initial.grid) || throw(ArgumentError("Initial grid differs from fit"))
         p=stationary_transition(P;initial_mass=vec(mass(initial)),require_aperiodic)
     else
         types=population(getfield(fit,:model))
         if types === nothing
-            p=stationary_transition(P;require_aperiodic)
+            p=stationary_transition(P;require_aperiodic,capital)
         else
             nk,nz,na=discrete_dimensions(fit.grid)
             blocksize=nk*nz
@@ -176,7 +188,7 @@ function stationary(fit::DiscreteGrowthSolution,initial::Union{Nothing,StateDist
                 share=types.shares[a]
                 share == 0 && continue
                 indices=(a-1)*blocksize+1:a*blocksize
-                p[indices].=share.*stationary_transition(P[indices,indices];require_aperiodic)
+                p[indices].=share.*stationary_transition(P[indices,indices];require_aperiodic,capital=capital[indices])
             end
         end
     end
