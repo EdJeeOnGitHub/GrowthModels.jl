@@ -97,7 +97,7 @@ experiments support this calibration, not universal error guarantees.
 ## Absorbing nodes around a smooth steady state
 
 Piecewise-linear continuation can make neighbouring nodes absorbing around one true
-steady state. For default Ramsey parameters with bounds `0.05k*` and `1.5k*`, 1,000
+steady state. For default Ramsey preferences with `A=1` and bounds `0.05k*` and `1.5k*`, 1,000
 requested points give two absorbing nodes, 3.6275 and 3.6327, around `k*=3.6302`.
 Paths from below and above end at different nodes, and `stationary` reports multiple
 classes. At 500 points there is one. The error stays near half a grid spacing, but

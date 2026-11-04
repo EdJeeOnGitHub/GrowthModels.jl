@@ -61,18 +61,21 @@ end
         g=StateGrid(m;k=support)
         @test state_schema(m)==(:k,:ability)
         @test size(g)==(65,2)
-        fit=solve(m,g)
+        # Separate solves can stop an iteration apart, so compare them more tightly
+        # than these assertions rather than at the default stopping tolerance.
+        tight=(value_tolerance=1e-10,residual_tolerance=1e-10)
+        fit=solve(m,g;tight...)
         @test fit.converged
         for (a,type) in enumerate(ability.values)
             isolated=ctor(population=Population([type],[1.0]))
-            single=solve(isolated,StateGrid(isolated;k=support))
+            single=solve(isolated,StateGrid(isolated;k=support);tight...)
             @test fit.value[:,a] ≈ vec(single.value) atol=1e-8
             @test fit.policy.next_capital[:,a] ≈ vec(single.policy.next_capital) atol=1e-8
         end
         other=ctor(population=Population([0.8,1.2],[0.9,0.1]))
-        @test solve(other,g).value==fit.value
+        @test solve(other,g;tight...).value==fit.value
         frozen=ctor(productivity=MarkovChain(values=[0.8,1.2],transition=Matrix{Float64}(I,2,2)))
-        frozenfit=solve(frozen,StateGrid(frozen;k=support))
+        frozenfit=solve(frozen,StateGrid(frozen;k=support);tight...)
         @test frozenfit.value≈fit.value atol=1e-8
         @test frozenfit.policy.next_capital≈fit.policy.next_capital atol=1e-8
         @test_throws ArgumentError next_capital(fit,(k=2.0,ability=1.0))
@@ -176,6 +179,7 @@ end
     initial=distribution(g;masses=fill(1/length(g),size(g)))
     e=Evolution(fit)
     @test e isa DiscreteEvolution
+    @test e isa Evolution
     @test_throws ArgumentError Evolution(fit;dt=1)
     @test_throws ArgumentError advance(e,initial,1.0)
     @test_throws ArgumentError trajectory(e,initial,[0,0.5,1])
@@ -254,9 +258,8 @@ end
 @testset "Invariant probabilities tolerate solver roundoff" begin
     # Tail probabilities of a fine shock chain are near machine precision, so a
     # direct solve returns tiny negative entries for these valid chains.
-    for (ctor,nk,nz,upper) in ((DiscreteRamseyCassKoopmansModel,200,11,6.0),
-                               (DiscreteSkibaModel,300,21,20.0))
-        m=ctor(productivity=LogAR1())
+    for (m,nk,nz,upper) in ((DiscreteRamseyCassKoopmansModel(A=1.0,productivity=LogAR1()),200,11,6.0),
+                            (DiscreteSkibaModel(productivity=LogAR1()),300,21,20.0))
         g=StateGrid(m;k=(n=nk,bounds=(0.2,upper)),z=(n=nz,))
         fit=solve(m,g)
         @test fit.converged

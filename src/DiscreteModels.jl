@@ -16,7 +16,7 @@ end
 
 """
     DiscreteRamseyCassKoopmansModel(; discount=0.96, depreciation=0.08,
-        risk_aversion=2.0, A=1.0, α=0.3, productivity=nothing, population=nothing)
+        risk_aversion=2.0, A=0.6, α=0.3, productivity=nothing, population=nothing)
 
 Native growth with production `A*k^α` and budget
 `c + k′ = production + (1-depreciation)*k`. Investment is reversible and
@@ -34,7 +34,7 @@ struct DiscreteRamseyCassKoopmansModel{S,P} <: DiscreteTimeModel
     productivity::S
     population::P
     function DiscreteRamseyCassKoopmansModel(; discount=0.96, depreciation=0.08,
-            risk_aversion=2.0, A=1.0, α=0.3, productivity=nothing, population=nothing)
+            risk_aversion=2.0, A=0.6, α=0.3, productivity=nothing, population=nothing)
         β, δ, γ, α, A = discrete_parameters(discount, depreciation, risk_aversion, α, A)
         A > 0 || throw(ArgumentError("A must be positive"))
         validate_discrete_heterogeneity(productivity,population)
