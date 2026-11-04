@@ -15,3 +15,5 @@ include("test-ownership.jl")
 include("test-migrated-invariants.jl")
 include("test-default-bounds.jl")
 include("test-residual-precision.jl")
+
+include("test-discrete.jl")
