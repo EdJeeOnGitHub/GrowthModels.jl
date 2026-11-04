@@ -49,6 +49,7 @@ if "--generate" in ARGS
         "Strict iteration comparison: GROWTHMODELS_STRICT_ITERATIONS=true in same runtime.\n")
 else
     @testset "Structural refactor baseline (067806e)" begin
+        strict = get(ENV,"GROWTHMODELS_STRICT_ITERATIONS","false") == "true"
         expected=Dict{Tuple{Symbol,Symbol},Vector{Float64}}()
         for line in readlines(fixture)[2:end]
             name,quantity,index,value=split(line,',')
@@ -56,10 +57,10 @@ else
         end
         for (name,model,grid) in refactor_cases()
             snapshot=refactor_snapshot(model,grid)
-            for (quantity,data) in pairs(snapshot)
+            @testset "$(name) $(quantity)" for (quantity,data) in pairs(snapshot)
                 reference=expected[(name,quantity)]
                 if quantity == :iterations
-                    if get(ENV,"GROWTHMODELS_STRICT_ITERATIONS","false") == "true"
+                    if strict
                         @test data == reference
                     elseif data != reference
                         @info "Iteration count differs across environments" name expected=reference actual=data
@@ -67,7 +68,13 @@ else
                 elseif quantity in (:rows,:cols,:converged)
                     @test data == reference
                 else
-                    @test maximum(abs.(data .- reference)) <= 1e-11
+                    # On Julia 1.9 the pre-refactor implementation itself differs
+                    # from this Julia 1.12 fixture by 6e-11 in stretched-grid
+                    # rates: tiny policy differences are divided by cell widths.
+                    # Old/new snapshots agree exactly on the same runtime. Keep
+                    # the strict gate and every other quantity at 1e-11.
+                    tolerance = quantity == :rates && !strict ? 1e-10 : 1e-11
+                    @test maximum(abs.(data .- reference)) <= tolerance
                 end
             end
         end

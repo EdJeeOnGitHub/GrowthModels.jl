@@ -1,5 +1,25 @@
 # API redesign validation
 
+## Release CI baseline portability (2026-11-04)
+
+The first release CI run exposed one stored-baseline assertion on Julia 1.9,
+1.10, and 1.13.3: stretched-grid generator rates differed from the Julia 1.12.3
+fixture by roughly 5–6e-11. A local Julia 1.9.4 reproduction measured
+5.996603213986873e-11, with consumption/drift differences of only
+1.3876677584789832e-12 amplified by division by capital-cell widths.
+
+Running both the pre-refactor source (`067806e`) and the release source under
+Julia 1.9.4 produced byte-identical numerical snapshot CSVs, including the same
+deviation from the stored fixture. Their Julia 1.13.3 snapshots also agreed
+exactly locally. This establishes an environment-sensitive fixture comparison,
+not a numerical change introduced by the refactor.
+
+Portable baseline comparisons therefore allow 1e-10 absolute error for generator
+rates only. All other numerical quantities retain 1e-11; the explicit
+`GROWTHMODELS_STRICT_ITERATIONS=true` same-environment gate retains 1e-11 for
+rates and exact iteration counts. Solver tolerances and numerical code are
+unchanged. Individual case/quantity testsets now identify any future mismatch.
+
 ## Correctness and integration
 
 `GKSwstype=100 julia --project=. -e 'using Pkg; Pkg.test()'` passes all **237
