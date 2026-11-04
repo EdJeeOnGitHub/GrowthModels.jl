@@ -14,4 +14,8 @@ using Test, GrowthModels
     @test plot_diagnostics(discrete_fit) isa Plots.Plot
     @test_throws ArgumentError plot_diagnostics(solve(discrete,discrete_fit.grid))
 
+    stochastic=DiscreteSkibaModel(productivity=LogAR1(),population=Population([0.8,1.2],[0.3,0.7]))
+    stochastic_fit=solve(stochastic,StateGrid(stochastic;k=(n=40,),z=(n=3,)))
+    @test plot_model(stochastic_fit) isa Plots.Plot
+
 end

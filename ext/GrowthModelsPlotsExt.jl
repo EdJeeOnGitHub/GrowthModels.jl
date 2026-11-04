@@ -19,9 +19,9 @@ end
 function GrowthModels.plot_model(fit::DiscreteGrowthSolution)
     require_converged(fit)
     k = fit.grid.k
-    return plot(plot(k,fit.value;xlabel="Capital",ylabel="Value",legend=false),
-        plot(k,fit.policy.consumption;xlabel="Capital",ylabel="Consumption",legend=false),
-        plot(k,fit.policy.next_capital;xlabel="Capital",ylabel="Next-period capital",legend=false);
+    return plot(plot(k,reshape(fit.value,length(k),:);xlabel="Capital",ylabel="Value",legend=false),
+        plot(k,reshape(fit.policy.consumption,length(k),:);xlabel="Capital",ylabel="Consumption",legend=false),
+        plot(k,reshape(fit.policy.next_capital,length(k),:);xlabel="Capital",ylabel="Next-period capital",legend=false);
         layout=(1,3))
 end
 function GrowthModels.plot_diagnostics(fit::DiscreteGrowthSolution)

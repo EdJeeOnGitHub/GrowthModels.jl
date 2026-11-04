@@ -1,5 +1,8 @@
 # Discrete-time implementation and validation
 
+This document records the deterministic milestone. The subsequent ability and
+productivity-risk extension is documented in [its validation report](DISCRETE_RISK_VALIDATION.md).
+
 ## Implemented scope
 
 The deterministic milestones in [the design](DISCRETE_TIME_DESIGN.md) are

@@ -1,7 +1,8 @@
 # GrowthModels
 
 One-capital growth models with continuous-time HJB and probability evolution,
-plus native deterministic discrete-time Bellman solvers. For the version 1.0
+plus native discrete-time Bellman solvers with individual productivity risk and
+fixed ability types. For the version 1.0
 breaking API revision, see
 [MIGRATION.md](MIGRATION.md) for the old-to-new mapping.
 
@@ -73,8 +74,8 @@ end
 
 `DiscreteRamseyCassKoopmansModel` uses the same preference keywords and `A`, `α`.
 `risk_aversion=1` supports log utility in discrete time. These solvers use Float64;
-automatic differentiation, stochastic discrete-time models, and discrete-time
-population evolution are not supported yet. Continuous-time APIs keep their
+automatic differentiation is not supported for discrete time. Native productivity
+risk and population evolution are described below. Continuous-time APIs keep their
 existing semantics. `ResourceModel` can apply transfers and income floors to a
 discrete model, including nested resource rules.
 
@@ -108,6 +109,73 @@ problem only. Thresholds and policies require separate refinement checks. See
 [the capital-path example](examples/discrete_time.jl),
 [the reproducible refinement experiment](examples/discrete_refinement.jl), and
 [the design document](DISCRETE_TIME_DESIGN.md).
+
+## Discrete-time ability and productivity risk
+
+Both discrete model constructors accept `population=Population(...)` and
+`productivity=MarkovChain(...)` or `LogAR1(...)`. Ability and productivity multiply
+both production technologies equally. Ability is fixed; each individual's current
+productivity is observed before choosing capital, and its next value is drawn
+subsequently. Population shares change aggregate results without changing policies.
+
+```julia
+risk = LogAR1(persistence=0.9, innovation_std=0.1, log_mean=0.0)
+types = Population([0.8, 1.2], [0.3, 0.7])
+risky_model = DiscreteSkibaModel(productivity=risk, population=types)
+risky_grid = StateGrid(risky_model; k=(n=150, bounds=(0.001, 20.0)), z=(n=5,))
+risky_fit = solve(risky_model, risky_grid)
+require_converged(risky_fit)
+
+initial_masses = zeros(size(risky_grid))
+initial_masses[50, 3, :] .= types.shares
+risky_initial = distribution(risky_grid; masses=initial_masses)
+risky_evolution = Evolution(risky_fit) # Integer periods; no dt.
+risky_path = trajectory(risky_evolution, risky_initial, 0:20)
+risky_stationary = stationary(risky_fit, risky_initial)
+
+using Random
+individual = simulate(risky_fit,
+    (k=2.0, z=risky_grid.z[3], ability=0.8), 20; rng=MersenneTwister(42))
+```
+
+For an explicit chain, use
+`MarkovChain(values=[0.8,1.2], transition=[0.9 0.1; 0.2 0.8])`.
+Rows are conditional on current productivity; entries are next-period
+probabilities. Inputs are validated without normalization. This convention is
+independent of continuous-time OU/Poisson economic conventions.
+
+`LogAR1` models `log(z′) = log_mean + persistence*(log(z)-log_mean) + ε`,
+where `innovation_std` is the **innovation** standard deviation. Rouwenhorst
+approximation uses `z=(n=...)`, defaulting to seven states. Zero volatility
+collapses to one stationary state. No level normalization occurs: `log_mean=0`
+does not imply mean productivity one. Productivity and ability are categorical;
+queries must use represented values, and regridding cannot interpolate across
+shock states or types. Ability-only models have axes `(k, ability)` without a dummy
+productivity axis. Models with both have `(k, z, ability)`.
+
+`transition(process(risky_model), risky_grid.z)` returns the exogenous matrix.
+`risky_fit.transition` is the joint capital/productivity/type matrix, acting on
+vectorized values. Fixed-policy sweeps use a factorized operator, while the sparse
+joint matrix is stored once; its storage can grow quadratically in the number of
+shock states for dense chains. Off-grid queries and `simulate` share cached
+expected continuation values. Simulations keep capital continuous and sample the
+finite productivity chain, rather than adding capital-grid lotteries.
+
+Discrete `stationary` returns invariant/time-average probabilities, including
+initial-dependent absorption weights. Periodic chains need not converge at each
+date; `require_aperiodic=true` rejects positive-mass periodic classes. Without an
+initial distribution, population shares select ability blocks only when each
+positive-share block has a unique closed class. `advance`, `trajectory`, and
+`observe` require integer periods and preserve ability shares and total mass.
+These describe individual risk, not realized paths under common aggregate shocks.
+
+Refine capital bounds/resolution and shock resolution separately. Bounded
+Rouwenhorst support can change rare escape probabilities and apparent absorbing
+classes relative to unbounded Gaussian shocks. A small Bellman residual or matched
+log moments does not settle those questions. See the
+[stochastic design](DISCRETE_RISK_DESIGN.md),
+[validation evidence](DISCRETE_RISK_VALIDATION.md), and
+[refinement experiment](examples/discrete_risk_refinement.jl).
 
 ## Economics and grids
 

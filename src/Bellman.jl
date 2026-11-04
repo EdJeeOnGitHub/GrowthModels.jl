@@ -8,19 +8,39 @@ end
 
 mutable struct BellmanWorkspace
     budget::Vector{Float64}
-    slopes::Vector{Float64}
+    slopes::Array{Float64,3}
+    expected::Array{Float64,3}
+    productivity::Matrix{Float64}
     next_value::Vector{Float64}
     capital::Vector{Float64}
     consumption::Vector{Float64}
     alternative_capital::Vector{Float64}
     choice_gap::Vector{Float64}
 end
-function BellmanWorkspace(m, k)
-    budget = Float64[discrete_budget(m,x) for x in k]
+function discrete_dimensions(g)
+    axes=getfield(g,:axes)
+    return (length(g.k),haskey(axes,:z) ? length(axes.z) : 1,
+        haskey(axes,:ability) ? length(axes.ability) : 1)
+end
+function productivity_transition(m,g)
+    p=process(m)
+    return p === nothing ? ones(1,1) : transition(p,g.z)
+end
+function BellmanWorkspace(m,g::StateGrid)
+    budget=vec(Float64[discrete_budget(m,grid_state(g,i)) for i in CartesianIndices(size(g))])
     all(isfinite,budget) || throw(ArgumentError("Nonfinite available goods"))
-    n = length(k)
-    BellmanWorkspace(budget, zeros(n-1), zeros(n), zeros(n), zeros(n),
-        fill(NaN,n), fill(Inf,n))
+    nk,nz,na=discrete_dimensions(g)
+    n=length(g)
+    BellmanWorkspace(budget,zeros(nk-1,nz,na),zeros(nk,nz,na),
+        productivity_transition(m,g),zeros(n),zeros(n),zeros(n),fill(NaN,n),fill(Inf,n))
+end
+
+function expected_continuation!(out,v,P)
+    values=reshape(v,size(out))
+    for a in axes(out,3)
+        mul!(view(out,:,:,a),view(values,:,:,a),transpose(P))
+    end
+    return out
 end
 
 # Detect distinct local maxima, not neighboring candidates along the same
@@ -73,27 +93,66 @@ function bellman_choice(B, k, v, slopes, β, γ; alternatives=false)
         alternative_capital=alt, choice_gap=best-runnerup)
 end
 
-function bellman_step!(ws, k, v, β, γ; alternatives=false)
-    ws.slopes .= diff(v) ./ diff(k)
-    all(isfinite,ws.slopes) || throw(ArgumentError("Nonfinite continuation slopes at Float64 precision"))
-    for i in eachindex(k)
-        q = bellman_choice(ws.budget[i],k,v,ws.slopes,β,γ; alternatives)
-        ws.next_value[i] = q.value
-        ws.capital[i] = q.capital
-        ws.consumption[i] = q.consumption
-        ws.alternative_capital[i] = q.alternative_capital
-        ws.choice_gap[i] = q.choice_gap
+function bellman_step!(ws,k,v,β,γ;alternatives=false)
+    expected_continuation!(ws.expected,v,ws.productivity)
+    nk,nz,na=size(ws.expected)
+    for a in 1:na, z in 1:nz, j in 1:nk-1
+        ws.slopes[j,z,a]=(ws.expected[j+1,z,a]-ws.expected[j,z,a])/(k[j+1]-k[j])
     end
-    return maximum(abs, ws.next_value .- v)
+    all(isfinite,ws.slopes) || throw(ArgumentError("Nonfinite continuation slopes at Float64 precision"))
+    for a in 1:na, z in 1:nz
+        continuation=view(ws.expected,:,z,a)
+        slopes=view(ws.slopes,:,z,a)
+        for j in 1:nk
+            i=j+nk*(z-1)+nk*nz*(a-1)
+            q=bellman_choice(ws.budget[i],k,continuation,slopes,β,γ;alternatives)
+            ws.next_value[i]=q.value
+            ws.capital[i]=q.capital
+            ws.consumption[i]=q.consumption
+            ws.alternative_capital[i]=q.alternative_capital
+            ws.choice_gap[i]=q.choice_gap
+        end
+    end
+    return maximum(abs,ws.next_value .- vec(v))
 end
 
-function policy_transition(k, capital)
-    n = length(k)
-    rows, cols, weights = Int[], Int[], Float64[]
-    for i in eachindex(capital)
-        j = clamp(searchsortedlast(k,capital[i]),1,n-1)
-        w = (capital[i]-k[j])/(k[j+1]-k[j])
-        push!(rows,i,i); push!(cols,j,j+1); push!(weights,1-w,w)
+# Fixed-policy action without constructing the joint matrix. Expectations are
+# over tomorrow's z at the capital chosen using today's z; ability never changes.
+function policy_action(ws,k,v)
+    expected_continuation!(ws.expected,v,ws.productivity)
+    nk,nz,na=size(ws.expected)
+    out=similar(ws.capital)
+    for a in 1:na, z in 1:nz, i in 1:nk
+        index=i+nk*(z-1)+nk*nz*(a-1)
+        kp=ws.capital[index]
+        j=clamp(searchsortedlast(k,kp),1,nk-1)
+        w=(kp-k[j])/(k[j+1]-k[j])
+        out[index]=(1-w)*ws.expected[j,z,a]+w*ws.expected[j+1,z,a]
+    end
+    return out
+end
+
+function policy_transition(k,capital,P=ones(1,1),na=1)
+    nk,nz=length(k),size(P,1)
+    n=nk*nz*na
+    length(capital)==n || throw(DimensionMismatch("Policy differs from joint state layout"))
+    rows,cols,weights=Int[],Int[],Float64[]
+    for a in 1:na, z in 1:nz, i in 1:nk
+        index=i+nk*(z-1)+nk*nz*(a-1)
+        kp=capital[index]
+        j=clamp(searchsortedlast(k,kp),1,nk-1)
+        w=(kp-k[j])/(k[j+1]-k[j])
+        for zp in 1:nz
+            probability=P[z,zp]
+            probability == 0 && continue
+            offset=nk*(zp-1)+nk*nz*(a-1)
+            if w < 1
+                push!(rows,index); push!(cols,j+offset); push!(weights,(1-w)*probability)
+            end
+            if w > 0
+                push!(rows,index); push!(cols,j+1+offset); push!(weights,w*probability)
+            end
+        end
     end
     return sparse(rows,cols,weights,n,n)
 end
