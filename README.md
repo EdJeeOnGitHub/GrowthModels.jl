@@ -4,6 +4,16 @@ Continuous-time, one-capital growth models solved with a finite-difference HJB
 and probability evolution. This is a breaking API revision; see
 [MIGRATION.md](MIGRATION.md) for the old-to-new mapping.
 
+Install the release directly from GitHub:
+
+```julia-repl
+julia> using Pkg
+julia> Pkg.add(url="https://github.com/EdJeeOnGitHub/GrowthModels.jl", rev="v1.0.0")
+```
+
+Julia 1.9 or newer is required. Existing users should follow the migration guide
+before updating: version 1.0 replaces the previous solver and state-space API.
+
 ## Solve and simulate
 
 ```julia
