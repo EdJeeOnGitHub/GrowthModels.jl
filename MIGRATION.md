@@ -55,9 +55,20 @@ when comparing numerical cores, and regenerate default-grid analyses.
 
 The checked-in `test/integration/Project.toml` resolves sibling working checkouts
 for the migrated package. The broader aggregate-transfers root and
-joint-generative-model and filter environments are migrated and currently
-pin local Git revision `a6230e7`. These pins require the local GrowthModels Git
-repository; replace them with the published revision when releasing the change.
+joint-generative-model and filter environments were validated initially with
+local Git revision `a6230e7`. For release adoption, replace that local pin in each
+active environment with the GitHub release:
+
+```julia
+using Pkg
+Pkg.add(url="https://github.com/EdJeeOnGitHub/GrowthModels.jl", rev="v1.0.0",
+    preserve=Pkg.PRESERVE_ALL)
+```
+
+Where a Project has a `[sources]` entry, update its URL and revision to the same
+GitHub URL and `v1.0.0` before resolving. Commit the updated Project and any
+tracked Manifest. The downstream source audit checks these portable release
+pins as well as the installed executable source.
 Active notebook API calls are migrated; see `API_COMPLETION.md` for pre-existing
 exploratory-cell limitations. The historical loader now
 keeps archived source unchanged and substitutes the shared recovery numerical

@@ -3,6 +3,9 @@
 using GrowthModels, Statistics, Printf
 const GM = GrowthModels
 const modern = isdefined(GM, :GrowthSolution)
+const measurements = NamedTuple{(:name,:seconds),Tuple{String,Float64}}[]
+isempty(ARGS) || (length(ARGS) == 2 && ARGS[1] == "--output") ||
+    error("Usage: benchmark-api.jl [--output results.json]")
 function measure(f)
     f() # compile
     samples = [@timed(f()) for _ in 1:3]
@@ -38,6 +41,7 @@ for name in (:skiba,:ou)
     solver,evolve,iterations=setup(name)
     for (operation,f) in ((:solve,solver),(:trajectory,evolve))
         seconds,bytes=measure(f)
+        push!(measurements,(name="$(name) $(operation)",seconds=seconds))
         @printf("%s %s median_seconds=%.6f allocated_bytes=%d iterations=%d\n",name,operation,seconds,bytes,iterations)
     end
 end
@@ -52,6 +56,7 @@ if modern
         final_only=()->advance(e,d,20.))
     for (name,f) in pairs(operations)
         seconds,bytes=measure(f)
+        push!(measurements,(name="ou $(name)",seconds=seconds))
         @printf("ou %s median_seconds=%.6f allocated_bytes=%d\n",name,seconds,bytes)
     end
 end
@@ -66,5 +71,20 @@ if modern
         total
     end
     seconds,bytes=measure(()->inspect_values(fit))
+    push!(measurements,(name="inspection 1000_scalar_reads",seconds=seconds))
     @printf("inspection 1000_scalar_reads median_seconds=%.9f allocated_bytes=%d\n",seconds,bytes)
+end
+
+# Names above are fixed ASCII identifiers; emit the custom benchmark-action
+# schema without adding a JSON dependency to the numerical package.
+if !isempty(ARGS)
+    open(ARGS[2],"w") do io
+        println(io,"[")
+        for (i,result) in enumerate(measurements)
+            isfinite(result.seconds) && result.seconds >= 0 || error("Invalid benchmark time")
+            print(io,"  {\"name\":\"",result.name,"\",\"unit\":\"seconds\",\"value\":",result.seconds,"}")
+            println(io,i == length(measurements) ? "" : ",")
+        end
+        println(io,"]")
+    end
 end

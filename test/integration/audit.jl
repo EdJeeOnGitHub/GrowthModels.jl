@@ -26,9 +26,12 @@ const retired = r"\b(?:SolvedModel|StateSpaceHyperParams|HyperParams|solve_HJB|S
     end
     for environment in ("", "filter", "code/joint-generative-model")
         project = TOML.parsefile(joinpath(analysis_root,environment,"Project.toml"))
-        @test project["sources"]["GrowthModels"]["rev"] == "a6230e7"
+        @test project["sources"]["GrowthModels"]["rev"] == "v1.0.0"
+        @test project["sources"]["GrowthModels"]["url"] == "https://github.com/EdJeeOnGitHub/GrowthModels.jl"
         manifest = TOML.parsefile(joinpath(analysis_root,environment,"Manifest.toml"))
         package = only(manifest["deps"]["GrowthModels"])
-        @test package["repo-rev"] == "a6230e7"
+        @test package["repo-rev"] == "v1.0.0"
+        @test package["repo-url"] == "https://github.com/EdJeeOnGitHub/GrowthModels.jl"
+        @test package["version"] == "1.0.0"
     end
 end
