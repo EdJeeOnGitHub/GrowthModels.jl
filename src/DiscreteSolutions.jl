@@ -47,7 +47,7 @@ function discrete_initial(initial, g)
 end
 
 function discrete_result(m,g,v,ws,initial,settings,n,stop,update,residual,history)
-    β, γ = preferences(m).discount, preferences(m).risk_aversion
+    β, γ = preferences(m).discount, preferences(m).γ
     # Always return policy and residual for the retained value, including failure.
     residual = bellman_step!(ws,g.k,v,β,γ;alternatives=true)
     shaped(x)=reshape(copy(x),size(g))
@@ -81,7 +81,7 @@ function solve_discrete(m,g::StateGrid; initial=nothing,maxiters=2000,
     v, strategy = discrete_initial(initial,g)
     initial_snapshot = copy(v)
     ws = BellmanWorkspace(m,g)
-    β, γ = preferences(m).discount, preferences(m).risk_aversion
+    β, γ = preferences(m).discount, preferences(m).γ
     residual = bellman_step!(ws,g.k,v,β,γ)
     isfinite(residual) || throw(ArgumentError("No finite initial Bellman residual"))
     settings = (;algorithm,policy_steps,maxiters,value_tolerance,residual_tolerance,
@@ -146,7 +146,7 @@ function discrete_policy(fit::DiscreteGrowthSolution,state::NamedTuple;expected=
     continuation=view(expected,:,z,a)
     p=preferences(m)
     return bellman_choice(discrete_budget(m,state),k,continuation,
-        diff(continuation)./diff(k),p.discount,p.risk_aversion)
+        diff(continuation)./diff(k),p.discount,p.γ)
 end
 """Optimal next-period capital, re-optimized against the fitted value at the query state."""
 next_capital(fit::DiscreteGrowthSolution,state::NamedTuple) = discrete_policy(fit,state).capital

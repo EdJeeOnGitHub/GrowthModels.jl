@@ -73,6 +73,9 @@ end
 ```
 
 `DiscreteRamseyCassKoopmansModel` uses the same preference keywords and `A`, `α`.
+`preferences(model)` returns `(γ=..., discount=..., δ=...)`. `γ` and `δ` match the
+continuous-time names, with `δ` per period here and a rate there. `discount` is a
+per-period factor, not the rate `ρ`, and neither is converted to the other.
 `risk_aversion=1` supports log utility in discrete time. These solvers use Float64;
 automatic differentiation is not supported for discrete time. Native productivity
 risk and population evolution are described below. Continuous-time APIs keep their

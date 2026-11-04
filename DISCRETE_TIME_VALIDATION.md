@@ -165,7 +165,7 @@ julia --project=. examples/discrete_continuous_limit.jl
 ```
 
 The full package suite passes on Julia 1.12.3, including all existing
-continuous-time tests and 1,102 discrete-time assertions. README examples, the
+continuous-time tests and 1,108 discrete-time assertions. README examples, the
 capital-path example, and the refinement experiment also execute successfully.
 Method-ambiguity detection reports no ambiguities in GrowthModels.
 

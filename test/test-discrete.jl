@@ -286,3 +286,16 @@ end
     @test 1.5 < errors[1]/errors[2] < 2.5
     @test errors[2] < 0.06
 end
+
+@testset "Preferences share names across time domains" begin
+    native=DiscreteSkibaModel(discount=0.9,depreciation=0.1,risk_aversion=3.0)
+    @test preferences(native)==(γ=3.0,discount=0.9,δ=0.1)
+    @test preferences(ResourceModel(native;transfer=0.1))==preferences(native)
+    # Generic code reads risk aversion and depreciation without knowing the domain.
+    shared(m)=(preferences(m).γ,preferences(m).δ)
+    @test shared(native)==(3.0,0.1)
+    @test shared(SkibaModel(γ=3.0,δ=0.1))==(3.0,0.1)
+    # A discount factor is not a rate, so neither domain reports the other's.
+    @test !haskey(preferences(native),:ρ)
+    @test !haskey(preferences(SkibaModel()),:discount)
+end
