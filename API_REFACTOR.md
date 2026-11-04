@@ -326,8 +326,8 @@ In particular, review the historical branches in
 [generate-baseline.jl](test/integration/generate-baseline.jl) before removing
 references.
 
-Delete `test/legacy/` after verifying migrated coverage. First audit the existing
-[coverage mapping](test/legacy/COVERAGE.md), port any missing tests for supported
+Delete `test/legacy/` after verifying migrated coverage. First audit the
+[coverage mapping](test/COVERAGE.md) (originally `test/legacy/COVERAGE.md`), port any missing tests for supported
 behavior, and record intentionally unsupported historical behavior. Preserve the
 completed coverage mapping outside the deleted directory, and update references
 to the archive. Deletion follows successful validation of the migrated tests;
@@ -364,6 +364,11 @@ the Project and Manifest deliberately to the migrated API, pin the intended
 GrowthModels revision, and verify the actual loaded source. Keep unrelated
 dependency upgrades out of this migration. Record affected entry points,
 validation results, and any expected result differences in the migration notes.
+Include an old-to-new API mapping in [MIGRATION.md](MIGRATION.md), covering model
+process access, explicit grid construction, solution inspection, and probability
+evolution. Identify saved results that must be regenerated because their retired
+types cannot be loaded under the new API. Keep archival source immutable and
+migrate active loaders or callers that still depend on it.
 Downstream migration is not complete with only the isolated package test: the
 root environment and migrated callers must also be validated.
 
@@ -413,7 +418,10 @@ Architecture acceptance is concrete:
 1. **Historical tests:** Delete `test/legacy/` after migrating and verifying
    supported coverage; preserve the coverage audit outside that directory.
 2. **Downstream root environment:** Include migration of the root analysis
-   environment and its callers, in addition to GrowthCounterfactuals integration.
+   environment and its scripts, notebooks, and package callers, in addition to
+   GrowthCounterfactuals integration. Include migration documentation and
+   representative workflow validation; an API replacement list alone is not
+   sufficient.
 
 The plan adopts compositional resource rules, population-weighted stationary
 defaults, and read-only array views as described above; these are no longer
@@ -428,7 +436,8 @@ open implementation choices.
   cleanup, and migrated legacy coverage are in `43ef54d`.
 - Selected-support capital bounds are isolated in `276354a`.
 - High-precision-verified residual evaluation is isolated in `5126a3c`.
-- Full `Pkg.test()` passed with `GROWTHMODELS_STRICT_ITERATIONS=true`; README
+- Full `Pkg.test()` passed all 406 assertions with
+  `GROWTHMODELS_STRICT_ITERATIONS=true`; README
   examples passed. The first full run exposed a Plots/GrowthModels `density`
   import ambiguity in the new tests, which was corrected before the passing run.
 - GrowthCounterfactuals integration passed 20 assertions against this checkout.
@@ -439,11 +448,25 @@ open implementation choices.
   the audit and references to the historical revision.
 - Root migration is underway. Its Project/Manifest now use a pinned local Git
   revision of GrowthModels instead of `main`. Resolving required replacing
-  unavailable `Qt6Base_jll 6.10.2+1` with `6.10.2+2`; no other unrelated package
-  version upgrades were requested. Removed obsolete GrowthModels dependencies
-  are allowed to leave the resolved graph.
+  unavailable `Qt6Base_jll 6.10.2+1` with `6.10.2+2`; adding StochasticEM also
+  required AdvancedHMC 0.8.3 → 0.8.5. JointModel loading required aligning
+  PCNMCMC with the analysis environment's existing `50ead01` pin.
+  Removed obsolete GrowthModels dependencies may leave the resolved graph.
 - Mainline structural solvers and counterfactual/fitting scripts have been
-  migrated; representative mainline validation is running. Notebook callers,
-  historical-source loaders, root validation, and the final downstream source
-  inventory still require work. Do not mark the goal complete from the core
-  package tests alone.
+  migrated; mainline integration passed 8 assertions in the root environment.
+- The analytical Skiba export and traps notebook share a migrated probability
+  module. Its 13 integration assertions cover exports, mass conservation,
+  forward/backward duality, and exact-node threshold semantics.
+- The joint-generative-model environment is also pinned to `a6230e7`.
+- The PCCA notebook retains its warped grid and passes 8 integration assertions,
+  including clustering. Optim and Arpack are now explicit root dependencies
+  at their existing resolved versions. Installed GrowthModels executable source
+  was checked against this checkout.
+  Remaining notebook callers, root validation, and
+  the final downstream source inventory still require work. Do not mark the
+  goal complete from the core package tests alone.
+- Historical-loader integration passes 18 assertions for unchanged archived
+  source and the current recovery source. The continuous-shock recovery example
+  passes 8 assertions in the root environment, preserving historical linear
+  extrapolation as an explicit analysis approximation. The analysis declares
+  Interpolations directly; it is not restored as a core dependency.

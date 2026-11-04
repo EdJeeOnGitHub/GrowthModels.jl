@@ -84,3 +84,51 @@ Derivatives at economic kinks or changes in stationary communicating classes
 are not guaranteed smooth. Log utility and the unfinished two-asset model remain
 unsupported. Incremental integration and estimation frameworks are deferred by
 the accepted design.
+
+## Deep-module refactor validation (2026-11-03)
+
+The refactor's full isolated `Pkg.test()` run passed **406 assertions** with
+`GROWTHMODELS_STRICT_ITERATIONS=true` on Julia 1.12.3. This includes all 70
+same-environment comparisons against `067806e`, population default/override
+checks, read-only storage, migrated historical invariants, default-bound checks,
+and a 256-bit residual cross-check. README examples passed. GrowthCounterfactuals
+integration passed 20 assertions. The broader root analysis migration remains
+in progress; these results do not certify its remaining callers.
+
+The first full run caught an import ambiguity between Plots and GrowthModels
+for `density` in a newly added test. Plotting tests now import Plots without
+polluting the test namespace, and probability tests qualify the evaluator.
+
+Before/after workflow timings were collected with the existing benchmark script.
+Other validation/precompilation jobs ran during this work, so these timings are
+indicative, not isolated performance guarantees:
+
+| Workflow | Before | After | Before allocation | After allocation |
+|---|---:|---:|---:|---:|
+| Skiba solve | 12.34 ms | 8.64 ms | 1,176,616 B | 1,145,608 B |
+| Skiba trajectory | 1.95 ms | 1.33 ms | 210,720 B | 210,368 B |
+| OU solve | 141.10 ms | 106.80 ms | 48,161,808 B | 48,123,336 B |
+| OU trajectory | 31.74 ms | 29.58 ms | 805,208 B | 804,744 B |
+| OU warm solve | 21.92 ms | 12.96 ms | 10,236,264 B | 10,201,120 B |
+
+Iteration counts remained 56 (Skiba) and 12 (OU). A loop of 1000 public scalar
+reads from `fit.value` took about 5.9 microseconds and allocated 16 bytes, avoiding
+whole-array copies. Sparse multiplication and reductions delegate to backing
+storage while public mutation remains forbidden.
+
+The residual investigation distinguished two cases. On a 900-node RCK grid
+with bounds `(0.001,20)` and power 3.9, the former direct computation reported
+`1.31e-6` while 256-bit arithmetic gave `5.53e-7`: a false iteration-limit failure.
+Value-difference evaluation fixes it without changing tolerances. On the more
+extreme 1000-node/power-4 grid, high precision also found residual above tolerance;
+that numerical difficulty must not be hidden by simply weakening convergence.
+
+Root-environment integration now passes 8 mainline structural assertions, 13
+analytical-export/probability assertions, and 8 metastability/PCCA assertions.
+The installed executable GrowthModels source matches this checkout. These
+small synthetic cases validate the migrated callers, not full empirical
+estimation or figure jobs. The separate joint-generative-model environment is
+also pinned. Historical-loader integration passes 18 assertions against an
+unchanged archive and current source; the migrated continuous-shock recovery
+example passes 8 assertions in the root environment. Its separate analysis
+environment validation and remaining notebook coverage are still incomplete.

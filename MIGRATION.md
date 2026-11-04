@@ -54,10 +54,34 @@ numerical-default change: supply a grid with the previous realized coordinates
 when comparing numerical cores, and regenerate default-grid analyses.
 
 The checked-in `test/integration/Project.toml` resolves sibling working checkouts
-for the migrated package. It is a runnable adoption environment; it does not
-rewrite the aggregate-transfers root Manifest or migrate its historical notebooks
-and separate modeling packages. Use this environment for the migrated package
-until those separate callers have adopted the breaking API.
+for the migrated package. The broader aggregate-transfers root and
+joint-generative-model environments are being migrated separately and currently
+pin local Git revision `a6230e7`. These pins require the local GrowthModels Git
+repository; replace them with the published revision when releasing the change.
+Remaining notebook migration is still in progress. The historical loader now
+keeps archived source unchanged and substitutes the shared recovery numerical
+adapter for its retired solver/generator methods.
+
+Saved Julia objects containing retired `SolvedModel` or `StateSpace` types must
+be regenerated with the migrated callers. Keep original archives and their
+environment pins for historical reproduction; do not overwrite them with new
+results that use different numerical defaults.
+
+The analytical Skiba export and traps notebook now share
+`code/growth-models/TrapProbabilities.jl` downstream. They initialize explicit
+uniform cell mass and use `Evolution(fit; dt=1)` for twelve time units. Their
+forward and backward threshold events both mean `k >= threshold`; previously
+the backward event used strict `>`. This changes results only at exact threshold
+nodes. Per-ability output retains joint probabilities, rather than silently
+changing them to conditional probabilities.
+
+Continuous-shock recovery simulations previously used multilinear interpolation
+and linear extrapolation on all three axes. They now opt into
+`AnalysisPolicy.continuous_ability_policy(fit; extrapolate=true)` downstream to
+retain that approximation. Bounded-grid simulations reject extrapolation.
+This is an explicit analysis assumption, not an extension of the core solver's
+categorical ability semantics or evidence of an optimal policy outside the grid.
+The analysis environment declares its own Interpolations dependency.
 
 ## Compositional resource adjustments
 

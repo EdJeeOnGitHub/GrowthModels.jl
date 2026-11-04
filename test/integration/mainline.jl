@@ -1,5 +1,6 @@
 # Run with the migrated root environment, or its joint-generative-model environment.
 using Test, GrowthModels
+include("verify-source.jl")
 const analysis_root=normpath(joinpath(@__DIR__,"../../../aggregate-transfers"))
 include(joinpath(analysis_root,"sims/mainline/StructuralDGP.jl"))
 include(joinpath(analysis_root,"sims/mainline/StructuralCalibration.jl"))
