@@ -1,8 +1,8 @@
 # API refactor implementation plan
 
-Status: implementation in progress. Core refactor and numerical fixes are
-implemented and verified; downstream caller migration and its final audit remain
-in progress. See the implementation evidence below.
+Status: implemented and locally validated, including active downstream API
+migration. See [API_COMPLETION.md](API_COMPLETION.md) for the requirement audit,
+verification scope, and pre-existing exploratory notebook limitations.
 
 Implement in this order: capture baselines → resource composition → model/process
 interfaces → grid semantics → numerical bridge removal → probability semantics
@@ -446,7 +446,7 @@ open implementation choices.
   (Skiba) and 12 (OU); timings are workload-dependent.
 - `test/legacy/` was deleted after coverage migration; `test/COVERAGE.md` retains
   the audit and references to the historical revision.
-- Root migration is underway. Its Project/Manifest now use a pinned local Git
+- Root migration is implemented. Its Project/Manifest now use a pinned local Git
   revision of GrowthModels instead of `main`. Resolving required replacing
   unavailable `Qt6Base_jll 6.10.2+1` with `6.10.2+2`; adding StochasticEM also
   required AdvancedHMC 0.8.3 → 0.8.5. JointModel loading required aligning
@@ -462,11 +462,15 @@ open implementation choices.
   including clustering. Optim and Arpack are now explicit root dependencies
   at their existing resolved versions. Installed GrowthModels executable source
   was checked against this checkout.
-  Remaining notebook callers, root validation, and
-  the final downstream source inventory still require work. Do not mark the
-  goal complete from the core package tests alone.
+  The remaining notebook API calls have been migrated. A 90-file active caller
+  inventory passes 390 source/environment assertions; notebook workflows pass
+  43 assertions and filter simulation/profile checks pass 24.
 - Historical-loader integration passes 18 assertions for unchanged archived
   source and the current recovery source. The continuous-shock recovery example
   passes 8 assertions in the root environment, preserving historical linear
   extrapolation as an explicit analysis approximation. The analysis declares
   Interpolations directly; it is not restored as a core dependency.
+
+- Recovery and filter integration also pass in their separate analysis environments.
+  The filter environment now pins the same GrowthModels revision. No full
+  empirical estimation or exploratory figure job is claimed by these checks.

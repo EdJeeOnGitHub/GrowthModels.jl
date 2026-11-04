@@ -43,6 +43,9 @@ julia --project=../aggregate-transfers test/integration/analytical.jl
 julia --project=../aggregate-transfers test/integration/metastability.jl
 julia --project=../aggregate-transfers test/integration/historical.jl
 julia --project=../aggregate-transfers test/integration/recovery.jl
+julia --project=../aggregate-transfers test/integration/notebooks.jl
+julia --project=../aggregate-transfers test/integration/filter.jl
+julia --project=../aggregate-transfers test/integration/audit.jl
 ```
 
 These exercise the actual structural solver/calibration callers, shared
@@ -52,3 +55,14 @@ Historical checks load unchanged source from aggregate-transfers revision
 `0d43c03d2841c1ec7395daade2acd40d58db8f6c` and compare its migrated adapter with
 the current recovery source. Recovery checks retain the example's explicit
 linear extrapolation outside its numerical support.
+
+`notebooks.jl` loads the actual migrated functions without executing exploratory
+or empirical cells. `filter.jl` runs both RCK and Skiba panel simulation and
+checks budget identities and analysis derivatives. `audit.jl` reads the active
+caller inventory from downstream `docs/growthmodels-api-callers.txt`; historical
+archive sources are intentionally excluded. It does not equate syntax checks
+with end-to-end scientific validation.
+
+The recovery and filter checks can also run with
+`--project=../aggregate-transfers/code/joint-generative-model` and
+`--project=../aggregate-transfers/filter`, respectively.

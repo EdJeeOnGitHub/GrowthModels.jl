@@ -55,10 +55,11 @@ when comparing numerical cores, and regenerate default-grid analyses.
 
 The checked-in `test/integration/Project.toml` resolves sibling working checkouts
 for the migrated package. The broader aggregate-transfers root and
-joint-generative-model environments are being migrated separately and currently
+joint-generative-model and filter environments are migrated and currently
 pin local Git revision `a6230e7`. These pins require the local GrowthModels Git
 repository; replace them with the published revision when releasing the change.
-Remaining notebook migration is still in progress. The historical loader now
+Active notebook API calls are migrated; see `API_COMPLETION.md` for pre-existing
+exploratory-cell limitations. The historical loader now
 keeps archived source unchanged and substitutes the shared recovery numerical
 adapter for its retired solver/generator methods.
 
@@ -135,3 +136,11 @@ while a 256-bit recomputation of the same iterate gave `5.53e-7`. The stable
 calculation agrees with high precision and avoids that false failure. Very
 ill-conditioned grids can still fail legitimately; this is not a relaxation of
 the acceptance criterion.
+
+
+The structural panel notebook now samples from cell masses rather than density
+values, which previously over-weighted narrow cells on stretched grids. Its
+integer horizon retains the historical `0:T-1` clock. KKT analysis derivatives
+are reconstructed from public value arrays and state-constraint boundary values;
+private workspace access is no longer required. These downstream numerical
+interpretations are explicit and do not change the core refactor baseline.

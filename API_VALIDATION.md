@@ -92,8 +92,8 @@ The refactor's full isolated `Pkg.test()` run passed **406 assertions** with
 same-environment comparisons against `067806e`, population default/override
 checks, read-only storage, migrated historical invariants, default-bound checks,
 and a 256-bit residual cross-check. README examples passed. GrowthCounterfactuals
-integration passed 20 assertions. The broader root analysis migration remains
-in progress; these results do not certify its remaining callers.
+integration passed 20 assertions. The broader root analysis migration has separate workflow and source-audit
+evidence below; package tests alone do not certify analysis callers.
 
 The first full run caught an import ambiguity between Plots and GrowthModels
 for `density` in a newly added test. Plotting tests now import Plots without
@@ -130,5 +130,12 @@ small synthetic cases validate the migrated callers, not full empirical
 estimation or figure jobs. The separate joint-generative-model environment is
 also pinned. Historical-loader integration passes 18 assertions against an
 unchanged archive and current source; the migrated continuous-shock recovery
-example passes 8 assertions in the root environment. Its separate analysis
-environment validation and remaining notebook coverage are still incomplete.
+example passes 8 assertions in the root environment. Recovery and filter
+integration also pass in their separate environments.
+Notebook solver/prediction/profile/sampling checks pass 43 assertions; filter
+simulation and analysis checks pass 24. The 90-file active caller inventory
+passes 390 syntax, retired-API, literal-include, and dependency-pin assertions.
+See `API_COMPLETION.md` for the distinction between migrated API workflows and
+pre-existing incomplete exploratory cells. The eight downstream workflow suites
+contain 142 assertions in total, excluding repeated environment runs and the
+source audit.
