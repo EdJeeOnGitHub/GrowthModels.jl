@@ -6,12 +6,17 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  deployments: write
+  contents: read
+
+concurrency:
+  group: benchmark-pages
+  cancel-in-progress: false
 
 jobs:
   benchmark:
     name: Run benchmarks
+    permissions:
+      contents: write
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -50,11 +55,36 @@ jobs:
           name: Julia benchmark result
           tool: 'customSmallerIsBetter'
           output-file-path: test/output.json
-          # Use personal access token instead of GITHUB_TOKEN due to https://github.community/t/github-action-not-triggering-gh-pages-upon-push/16096
-          github-token: ${{ secrets.ED_PAT }}
+          github-token: ${{ github.token }}
           auto-push: true
           # Show alert with commit comment on detecting possible performance regression
           alert-threshold: '200%'
           comment-on-alert: true
           fail-on-alert: true
           alert-comment-cc-users: '@EdJeeOnGitHub'
+
+      - name: Check out generated dashboard
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: benchmark-site
+          persist-credentials: false
+      - name: Upload dashboard
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: benchmark-site
+
+  deploy:
+    name: Publish benchmark dashboard
+    needs: benchmark
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy dashboard
+        id: deployment
+        uses: actions/deploy-pages@v4
