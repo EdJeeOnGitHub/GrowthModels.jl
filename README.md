@@ -1,7 +1,8 @@
 # GrowthModels
 
-Continuous-time, one-capital growth models solved with a finite-difference HJB
-and probability evolution. This is a breaking API revision; see
+One-capital growth models with continuous-time HJB and probability evolution,
+plus native deterministic discrete-time Bellman solvers. For the version 1.0
+breaking API revision, see
 [MIGRATION.md](MIGRATION.md) for the old-to-new mapping.
 
 Install the release directly from GitHub:
@@ -48,6 +49,65 @@ Refine `dt` to assess accuracy. `advance` is a one-shot duration request, not
 an incremental integrator with an arbitrary-time composition guarantee.
 Reuse `Evolution` for another initial distribution; use separate objects for
 concurrent simulations. Construct a new evolution for a changed fit.
+
+## Native discrete time
+
+Discrete-time models have per-period parameters and reversible investment:
+`consumption + next_capital = resources + (1-depreciation)*capital`.
+Capital cannot be negative. Skiba models select the best technology each period;
+the capital offset is not an adoption payment.
+
+```julia
+discrete_model = DiscreteSkibaModel(discount=0.96, depreciation=0.08,
+    risk_aversion=2.0, A_H=0.6, A_L=0.4, α=0.3, κ=2.0)
+discrete_grid = StateGrid(discrete_model; k=(n=500, bounds=(0.001, 20.0)))
+discrete_fit = solve(discrete_model, discrete_grid; history=true)
+require_converged(discrete_fit)
+next_k = next_capital(discrete_fit, (k=2.0,))
+current_c = consumption(discrete_fit, (k=2.0,))
+capital_path = [2.0]
+for period in 1:100
+    push!(capital_path, next_capital(discrete_fit, (k=last(capital_path),)))
+end
+```
+
+`DiscreteRamseyCassKoopmansModel` uses the same preference keywords and `A`, `α`.
+`risk_aversion=1` supports log utility in discrete time. These solvers use Float64;
+automatic differentiation, stochastic discrete-time models, and discrete-time
+population evolution are not supported yet. Continuous-time APIs keep their
+existing semantics. `ResourceModel` can apply transfers and income floors to a
+discrete model, including nested resource rules.
+
+The default modified policy iteration globally searches every piecewise-linear
+continuation interval, allowing nonconcave values and policy jumps. Use
+`algorithm=:value_iteration` as the reference method; `policy_steps` controls
+fixed-policy sweeps in the accelerated method. Both value updates and the global
+Bellman residual must converge. `maxiters=0` returns an inspectable failed fit.
+Warm starts, explicit `regrid`, read-only snapshots, `plot_model`, and
+`plot_diagnostics` are supported. `DiscreteGrowthSolution.transition` is a
+row-stochastic policy matrix, not a continuous-time generator.
+
+Off-grid policy queries re-optimize against the fitted continuation value instead
+of interpolating policies across jumps. Exact ties choose lower next-period
+capital. `diagnostics.alternative_capital` and `choice_gap` describe another
+local maximum when one exists (`NaN`/`Inf` otherwise); small gaps indicate
+sensitivity, not a uniquely identified threshold.
+
+Generated discrete grids insert known production and resource-floor crossings,
+so their final length can exceed `n`. Explicit coordinates remain unchanged.
+Numerical bounds constrain capital choices: a positive `kmin` is an artificial
+saving constraint, and a low `kmax` can suppress investment. Inspect
+`diagnostics.boundary.lower_choice` and `upper_choice`, and refine bounds and
+resolution together. Zero is allowed on discrete grids, but zero income at zero
+capital has negative-infinite value for log utility or risk aversion above one;
+the solver reports this unsupported finite-value domain instead of adding a
+consumption floor. No continuation extrapolation occurs during solving.
+
+`diagnostics.value_error_bound` bounds iteration error for the interpolated
+problem only. Thresholds and policies require separate refinement checks. See
+[the capital-path example](examples/discrete_time.jl),
+[the reproducible refinement experiment](examples/discrete_refinement.jl), and
+[the design document](DISCRETE_TIME_DESIGN.md).
 
 ## Economics and grids
 
@@ -106,7 +166,7 @@ Stationary calculation has no timestep.
 
 ## Failure, warm starts, and differentiation
 
-`solve` always returns the same result structure. Check `fit.converged`,
+`solve` returns a consistent result structure within each time formulation. Check `fit.converged`,
 `fit.diagnostics`, `fit.settings`, and the copied `fit.initial_value`.
 Iteration-limit or numerical-breakdown failures retain the last finite value
 and its policy. Invalid input, or an initial guess with no finite policy, throws.
@@ -129,9 +189,9 @@ Initial guesses are copied. `regrid` rejects
 extrapolation by default; use `extrapolate=true` explicitly if appropriate.
 Discrete population support cannot be changed by continuous interpolation.
 
-Convergence checks both value updates and the nonlinear HJB residual, including
+Continuous-time convergence checks both value updates and the nonlinear HJB residual, including
 Dual tangents. Default `Delta` is 1 for γ<1 and 1000 otherwise; resolved settings
-are recorded. γ=1 (log utility) is currently unsupported.
+are recorded. γ=1 (log utility) is unsupported by the continuous-time solver.
 
 ForwardDiff differentiates fixed-grid models while holding coordinates fixed.
 Constructing a grid inside the differentiated function also differentiates its
@@ -163,7 +223,7 @@ capital moments. The unfinished two-asset model is not part of this API.
 
 ## Extending models and processes
 
-A custom one-capital model supplies `production(model, state)`,
+A custom continuous-time one-capital model supplies `production(model, state)`,
 `preferences(model)` returning `(γ=..., ρ=..., δ=...)`, and
 `default_grid_spec(model)`. Override `resources` for disposable-income rules;
 the default is production. Override `population` for ability support/shares.

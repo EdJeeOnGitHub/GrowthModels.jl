@@ -16,4 +16,19 @@ function GrowthModels.plot_diagnostics(fit::GrowthSolution)
     return plot([x.iteration for x in h],hcat([x.update for x in h],[x.residual for x in h]);
         label=["Value update" "HJB residual"],yscale=:log10,xlabel="Iteration")
 end
+function GrowthModels.plot_model(fit::DiscreteGrowthSolution)
+    require_converged(fit)
+    k = fit.grid.k
+    return plot(plot(k,fit.value;xlabel="Capital",ylabel="Value",legend=false),
+        plot(k,fit.policy.consumption;xlabel="Capital",ylabel="Consumption",legend=false),
+        plot(k,fit.policy.next_capital;xlabel="Capital",ylabel="Next-period capital",legend=false);
+        layout=(1,3))
+end
+function GrowthModels.plot_diagnostics(fit::DiscreteGrowthSolution)
+    h = fit.diagnostics.history
+    isempty(h) && throw(ArgumentError("No iteration history retained; solve with history=true"))
+    return plot([x.iteration for x in h],hcat([x.update for x in h],[x.residual for x in h]);
+        label=["Value update" "Bellman residual"],yscale=:log10,xlabel="Iteration")
+end
+
 end

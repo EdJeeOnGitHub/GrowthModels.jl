@@ -9,7 +9,9 @@ abstract type StochasticProcess end
 abstract type DeterministicModel{T<:Real} <: Model{T} end
 abstract type StochasticModel{T<:Real,S<:StochasticProcess} <: Model{T} end
 
-export Model, DeterministicModel, StochasticModel, StochasticProcess,
+export DiscreteTimeModel, DiscreteRamseyCassKoopmansModel, DiscreteSkibaModel,
+    DiscreteGrowthSolution, next_capital,
+    Model, DeterministicModel, StochasticModel, StochasticProcess,
     SkibaModel, SmoothSkibaModel, RamseyCassKoopmansModel,
     StochasticSkibaModel, StochasticRamseyCassKoopmansModel,
     StochasticSkibaAbilityModel, StochasticNPAbilityModel,
@@ -38,6 +40,9 @@ include("Economics.jl")
 include("Grids.jl")
 include("HJBWorkspace.jl")
 include("Solutions.jl")
+include("DiscreteModels.jl")
+include("Bellman.jl")
+include("DiscreteSolutions.jl")
 include("Distributions.jl")
 include("StateEvolution.jl")
 include("Evolution.jl")
