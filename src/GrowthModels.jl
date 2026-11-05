@@ -23,7 +23,9 @@ export MarkovChain, LogAR1, transition, DiscreteEvolution, simulate,
     require_converged, consumption, capital_drift, technology_crossing,
     StateDistribution, distribution, mass, density, expectation, boundary_mass,
     Evolution, ContinuousEvolution, trajectory, advance, observe, stationary, Trajectory, Observations,
-    at, final, plot_model, plot_diagnostics
+    at, final, plot_model, plot_diagnostics,
+    CreditModel, CreditEquilibrium, capital_choice, credit_equilibrium, clearing_rate,
+    CreditTransition, credit_transition
 
 include("ReadOnly.jl")
 include("StochasticProcesses.jl")
@@ -49,6 +51,8 @@ include("DiscreteSolutions.jl")
 include("Distributions.jl")
 include("StateEvolution.jl")
 include("Evolution.jl")
+include("CreditMarket.jl")
+include("CreditTransition.jl")
 include("DiscreteEvolution.jl")
 include("DiscreteSimulation.jl")
 

@@ -193,6 +193,99 @@ log moments does not settle those questions. See the
 [validation evidence](DISCRETE_RISK_VALIDATION.md), and
 [refinement experiment](examples/discrete_risk_refinement.jl).
 
+## Credit market
+
+`CreditModel` adds borrowing against capital to a continuous-time Skiba or Ramsey model
+with Ornstein-Uhlenbeck productivity. Capital is chosen each instant subject to
+`k ≤ λa`, and wealth follows `ȧ = profit + r*a - c`, where
+`profit = output - (r+δ)*k`. **On a `CreditModel` grid the `k` axis is net worth `a`,
+not capital;** use `capital_choice` for capital.
+
+`λ = 1/(1-θ)` for a pledgeable share `θ` of capital. It is a reduced-form collateral
+constraint, usually read as limited enforcement, and is not tied to one policy. `λ=1`
+is no borrowing and, at a low enough rate, reproduces the underlying model. The Skiba
+offset `κ` is ordinary capital: reversible and pledgeable, so the wealth needed to adopt
+the high technology falls like `1/λ` at a given rate. A fixed `r` is a small open economy.
+
+`credit_equilibrium` finds rates clearing `∫(k-a)dμ = 0` with one rate in a closed
+economy:
+
+```julia
+credit_base = StochasticSkibaModel(OrnsteinUhlenbeckProcess(θ=-log(0.9), σ=0.1))
+credit_grid = StateGrid(credit_base; k=(n=100, bounds=(0.05, 60.0), spacing=:stretched), z=(n=15,))
+market = credit_equilibrium(credit_base, credit_grid; λ=2.0)
+r_star = clearing_rate(market)
+cleared = only(market.equilibria)
+(cleared.capital, cleared.wealth, cleared.borrowing, cleared.output, cleared.upper_mass)
+credit_model = CreditModel(credit_base; λ=2.0, r=r_star)
+capital_choice(credit_model, (k=2.0, z=credit_grid.z[8]))
+stationary_wealth = cleared.distribution
+```
+
+It scans `(-δ, ρ)`, solving the household problem and its stationary distribution at
+each rate, then bisects each sign change of excess demand. Keep these limits in mind:
+
+- **Risk is required.** Below `ρ`, only precautionary saving creates lenders. Without
+  risk, nobody lends below `ρ`, and at `ρ` the wealth distribution is indeterminate.
+- **Several outcomes are possible.** `equilibria` can hold several rates, and
+  `discontinuities` lists sign changes where excess demand jumps instead of clearing.
+  `clearing_rate` throws unless one rate clears and `boundary_ok` is true. A coarse
+  `rates` scan can miss crossings.
+- **Productivity resolution matters most.** Unconstrained households at one `z` state
+  all switch technology at the same rate, so excess demand jumps there by that state's
+  mass. With few `z` states the market may not clear at all: at seven states the default
+  Skiba model has a jump at `r≈0.0343` where 29% of the mass switches. That jump comes
+  from the discretization, and it shrinks as `z` is refined. Clearing rates converge
+  slowly in `z`, so refine it separately from wealth.
+- **Wealth can reach the grid top.** As `r→ρ` wealth grows large, and mass at the top
+  makes excess demand wrong even when the solve converges. Check `upper_mass`, and
+  refine bounds and resolution together.
+- **Stationary or finite horizon.** By default the market clears on the stationary
+  distribution. If escaping the trap is possible but extremely slow, that distribution
+  cannot be computed reliably: `stationary` then throws, and the scan reports
+  `:no_stationary`. Pass `horizon=100.0, initial=...` to clear the market on the
+  distribution after 100 years at each fixed rate, as in Buera and Shin (2013). It depends
+  on the start, and `late_change` reports how much it moved over the final ten years. With
+  the rate held fixed, this approximates long-run equilibrium; it is not a transition path.
+- **Automatic differentiation is not supported through the rate.**
+- **Population shares now matter for policies,** because they affect the rate.
+
+See the [refinement example](examples/credit_market.jl).
+
+### Transition paths
+
+`credit_transition` solves the perfect-foresight path after an unanticipated change to
+`λ` at `t=0`:
+
+```julia
+autarky = solve(credit_base, credit_grid)
+require_converged(autarky)
+transition = credit_transition(credit_base, credit_grid, stationary(autarky);
+    λ=2.0, terminal=market, T=20.0, dt=0.5, rate_tolerance=1e-3, maxiters=100)
+require_converged(transition)
+(transition.times, transition.rates, transition.capital, transition.output)
+transition.diagnostics.terminal
+wealth_at_ten = expectation(at(transition.distributions, 10.0), state -> state.k)
+```
+
+Each iteration solves households backward from the terminal value, pushes the
+distribution forward, finds the rate clearing each date's static market, and damps toward
+it. This follows the numerical scheme of Achdou et al. and the update of Buera and Shin
+(2013). That example is deliberately coarse; for results, refine as below.
+
+- **Converged means the rate has settled.** Jumps at technology switches can leave a
+  clearing error at some dates. Check `diagnostics.largest_relative_excess` shrinks as `z`
+  is refined.
+- **Check the horizon.** `diagnostics.terminal` gives the gap from the terminal equilibrium
+  at `T`, since rare escapes from the trap can make adjustment very slow.
+- **Check uniqueness.** It is not guaranteed, so compare `initial_rates` and `damping`.
+- **Capital reallocates immediately at `t=0`,** because it is reversible and rented. Output
+  can jump although total capital cannot; that follows from those assumptions.
+- **The change is a one-time surprise.** Households then foresee the whole path, there is
+  no aggregate risk, and `λ` stays fixed after `t=0`.
+
+See the [transition example](examples/credit_transition.jl).
+
 ## Economics and grids
 
 Production, resource rules, processes, and population support belong to the

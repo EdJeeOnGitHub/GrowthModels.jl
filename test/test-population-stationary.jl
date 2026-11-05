@@ -49,3 +49,22 @@ end
     end
     @test derivative ≈ 1 atol=1e-12
 end
+
+@testset "Metastable states fail loudly, not silently" begin
+    # Low-ability types can escape the low state only through a rare productivity path,
+    # so the transient solve is singular to machine precision.
+    model=ResourceModel(StochasticSkibaAbilityModel(OrnsteinUhlenbeckProcess(θ=-log(.9),σ=.1);
+        A_L=.4,A_H=.9,α=.5,κ=1.,δ=.25,ρ=.05);population=Population(collect(range(.5,1.5;length=40)),fill(1/40,40)))
+    grid=StateGrid(model;k=(n=150,bounds=(.02,30.),spacing=:stretched),z=(n=15,bounds=(.9,1.1)))
+    initial=distribution(grid;masses=fill(1/length(grid),size(grid)))
+    fit=solve(model,grid)
+    err=try stationary(fit,initial); nothing catch e; e end
+    @test err isa ArgumentError
+    @test occursin("metastable",sprint(showerror,err))
+    # The suggested finite horizon works and keeps each type's mass.
+    d=advance(Evolution(fit;dt=1.0),initial,100.0)
+    @test vec(sum(mass(d);dims=(1,2))) ≈ fill(1/40,40) rtol=1e-8
+    # Transient mass is still absorbed into the class it leads to.
+    block=sparse([-1. 0 0;1. 0 0;0 0 0])
+    @test GrowthModels.stationary_mass(block;initial_mass=[.5,.25,.25]) ≈ [0,.75,.25]
+end
