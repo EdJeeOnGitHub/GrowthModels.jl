@@ -138,6 +138,30 @@ than first-passage statistics. Report hitting probabilities and waiting times fr
 matrix evolution only with a simulation comparison at adequate sample size, or
 compute them by simulation directly.
 
+## Policy jumps with shocks
+
+`policy_jumps(fit; z, ability)` reports one productivity and ability slice. Run
+`julia --project=. examples/discrete_policy_jumps.jl`. These results use the default
+Skiba technology with a two-state chain and two ability types:
+
+| Requested capital points | z | Ability | Jumps of at least one cell | All jumps | Five largest (k: size) |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 500 | 0.8 | 0.8 | 0 | 16 | 2.952: 0.021; 3.185: 0.008; 3.419: 0.007; 3.661: 0.006; 3.909: 0.005 |
+| 500 | 1.25 | 1.2 | 2 | 13 | 2.485: 0.037; 2.298: 0.029; 2.13: 0.017; 1.98: 0.011; 1.846: 0.009 |
+| 1000 | 0.8 | 0.8 | 2 | 27 | 2.953: 0.022; 3.192: 0.013; 3.426: 0.011; 3.667: 0.007; 4.169: 0.005 |
+| 1000 | 1.25 | 1.2 | 4 | 21 | 2.485: 0.035; 2.298: 0.029; 1.985: 0.015; 2.133: 0.015; 1.719: 0.007 |
+| 2000 | 0.8 | 0.8 | 6 | 55 | 2.952: 0.021; 3.193: 0.016; 3.427: 0.013; 3.664: 0.008; 3.909: 0.007 |
+| 2000 | 1.25 | 1.2 | 5 | 39 | 2.485: 0.035; 2.298: 0.03; 2.133: 0.023; 1.984: 0.017; 1.848: 0.013 |
+| 4000 | 0.8 | 0.8 | 10 | 85 | 2.952: 0.021; 3.193: 0.016; 3.427: 0.013; 3.664: 0.011; 3.909: 0.009 |
+| 4000 | 1.25 | 1.2 | 10 | 65 | 2.485: 0.035; 2.298: 0.03; 2.133: 0.023; 1.984: 0.017; 1.848: 0.013 |
+
+The locations of the largest jumps barely move under refinement. Their sizes settle
+by 2,000 points, though smaller ones are understated before that: the jump near 2.133
+is 0.015 at 1,000 points and 0.023 at 4,000. The number of jumps keeps growing as the
+grid resolves smaller ones. Compare resolutions before interpreting a count, and do
+not treat the number of jumps as an economic quantity. A reversal in one slice is not
+a threshold, because capital's direction can change with the next draw.
+
 ## Operator storage and performance
 
 At five shock states and two types, requested capital resolutions 100, 200, and
@@ -163,7 +187,7 @@ julia --project=. examples/discrete_risk_refinement.jl 40000
 ```
 
 The full package suites pass on Julia 1.12.3, including the original
-continuous-time regressions, 1,130 deterministic discrete-time assertions, 345
+continuous-time regressions, 1,182 deterministic discrete-time assertions, 366
 stochastic/ability assertions, and the plotting extension. README examples,
 the population/individual-path example, and the refinement experiment execute
 successfully. The implementation adds no dependencies. See the PR for CI results, including the

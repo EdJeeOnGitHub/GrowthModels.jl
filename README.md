@@ -97,6 +97,14 @@ capital. `diagnostics.alternative_capital` and `choice_gap` describe another
 local maximum when one exists (`NaN`/`Inf` otherwise); small gaps indicate
 sensitivity, not a uniquely identified threshold.
 
+`policy_jumps(fit)` locates discontinuities in next-period capital. Each entry gives
+the capital state, the two competing choices, the jump size, and whether capital
+reverses direction there, which marks an escape threshold in a model without shocks.
+The default Skiba policy has a cascade of jumps below its threshold, not just one.
+Models with productivity or ability axes take `z=` and `ability=`. Jumps smaller than
+a grid cell are omitted by default, and the number of jumps can grow with resolution,
+so compare a refined grid before interpreting a count.
+
 Generated discrete grids insert known production and resource-floor crossings,
 so their final length can exceed `n`. Explicit coordinates remain unchanged.
 Numerical bounds constrain capital choices: a positive `kmin` is an artificial

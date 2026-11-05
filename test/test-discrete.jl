@@ -269,17 +269,10 @@ end
             A_H=hjb.A_H*Δ,A_L=hjb.A_L*Δ,α=hjb.α,κ=hjb.κ)
         fit=solve(m,StateGrid(m;k=(n=n,bounds=(0.01,8.0))))
         @test fit.converged
-        lo,hi=2.0,2.8
-        @test next_capital(fit,(k=lo,))<lo
-        @test next_capital(fit,(k=hi,))>hi
-        for _ in 1:40
-            mid=(lo+hi)/2
-            next_capital(fit,(k=mid,))>mid ? (hi=mid) : (lo=mid)
-        end
         for x in (1.5,2.0,4.0,5.0)
             @test consumption(fit,(k=x,))/Δ ≈ consumption(hjbfit,(k=x,)) atol=0.01
         end
-        (lo+hi)/2-target
+        only(filter(j->j.reverses_direction,policy_jumps(fit))).k-target
     end
     # Same-signed first-order error: halving the period halves the threshold gap.
     @test all(>(0),errors)
@@ -358,4 +351,81 @@ end
     @test DiscreteRamseyCassKoopmansModel().A==RamseyCassKoopmansModel().A
     @test DiscreteSkibaModel().A_H==SkibaModel().A_H
     @test DiscreteSkibaModel().A_L==SkibaModel().A_L
+end
+
+@testset "Policy jumps" begin
+    m=DiscreteSkibaModel()
+    g=StateGrid(m;k=(n=1000,bounds=(0.001,8.0)))
+    fit=solve(m,g)
+    jumps=policy_jumps(fit)
+    # The cascade: each jump's choices straddle the previous jump point, starting at
+    # the production crossing, and only the last changes the direction of capital.
+    @test length(jumps)==6
+    @test issorted(j.k for j in jumps)
+    previous=technology_crossing(m)
+    for j in jumps
+        @test j.next_capital_below < previous < j.next_capital_above
+        previous=j.k
+        @test j.jump==j.next_capital_above-j.next_capital_below
+        # The reported choices are what the policy does on either side.
+        @test next_capital(fit,(k=j.k-1e-9,)) ≈ j.next_capital_below atol=1e-7
+        @test next_capital(fit,(k=j.k+1e-9,)) ≈ j.next_capital_above atol=1e-7
+    end
+    @test [j.reverses_direction for j in jumps]==[false,false,false,false,false,true]
+    # Independent bisection on the sign of capital's change finds the same threshold.
+    lo,hi=2.8,3.5
+    for _ in 1:50
+        mid=(lo+hi)/2
+        next_capital(fit,(k=mid,))>mid ? (hi=mid) : (lo=mid)
+    end
+    @test last(jumps).k ≈ (lo+hi)/2 atol=1e-8
+    # An independent lattice scan finds every reported jump, and no others this large.
+    lattice=range(first(g.k),last(g.k);length=40001)
+    actions=[next_capital(fit,(k=x,)) for x in lattice]
+    width=g.k[3]-g.k[2]
+    scanned=[lattice[i] for i in 1:length(actions)-1 if actions[i+1]-actions[i]>=width]
+    @test length(scanned)==length(jumps)
+    @test all(abs(s-j.k)<=step(lattice) for (s,j) in zip(scanned,jumps))
+    # The largest jumps persist under refinement; bracket width does not limit them.
+    finer=policy_jumps(solve(m,StateGrid(m;k=(n=2000,bounds=(0.001,8.0)))))
+    @test last(finer).k ≈ last(jumps).k atol=0.001
+    @test last(finer).jump ≈ last(jumps).jump atol=0.002
+    # The cutoff is explicit and monotone.
+    @test length(policy_jumps(fit;minimum_jump=0.05))==1
+    @test length(policy_jumps(fit;minimum_jump=0))>=length(jumps)
+    @test isempty(policy_jumps(fit;minimum_jump=1.0))
+    # Smooth models have no jumps, including with absorbing nodes and income floors.
+    ramsey=DiscreteRamseyCassKoopmansModel(A=1.0)
+    @test isempty(policy_jumps(solve(ramsey,StateGrid(ramsey;k=(n=1000,bounds=(0.18,5.4))))))
+    floor=ResourceModel(m;income_floor=0.8)
+    floorjumps=policy_jumps(solve(floor,StateGrid(floor;k=(n=500,bounds=(0.01,8.0)))))
+    @test all(j->j.next_capital_above>j.next_capital_below,floorjumps)
+    # Consumption is constant beside this jump, so roundoff there must not divert the
+    # search. The largest jump in the cell is what gets reported.
+    Δ=0.5
+    short=DiscreteSkibaModel(discount=exp(-0.05Δ),depreciation=0.05Δ,A_H=0.6Δ,A_L=0.4Δ)
+    shortfit=solve(short,StateGrid(short;k=(n=2000,bounds=(0.01,8.0))))
+    escape=only(filter(j->j.reverses_direction,policy_jumps(shortfit)))
+    @test next_capital(shortfit,(k=escape.k-1e-9,)) < escape.k-1e-9
+    @test next_capital(shortfit,(k=escape.k+1e-9,)) > escape.k+1e-9
+    @test escape.jump > 0.05
+    # A coarse grid must not lose the escape threshold to the default size cutoff: at
+    # these resolutions it is smaller than its cell. An explicit cutoff still applies.
+    for n in (100,250)
+        coarse=solve(m,StateGrid(m;k=(n=n,bounds=(0.001,20.0))))
+        reversing=only(filter(j->j.reverses_direction,policy_jumps(coarse)))
+        @test reversing.jump < coarse.grid.k[3]-coarse.grid.k[2]
+        @test abs(reversing.k-last(jumps).k) < 0.05
+        @test isempty(policy_jumps(coarse;minimum_jump=0.5))
+    end
+    # Exactly one reversal without shocks, even when small jumps are included. Knot-level
+    # sign changes beside the low steady state have no jump and are not reported.
+    @test count(j->j.reverses_direction,policy_jumps(fit;minimum_jump=0))==1
+    @test count(j->j.reverses_direction,policy_jumps(shortfit;minimum_jump=0))==1
+    # Contract errors.
+    @test_throws ArgumentError policy_jumps(fit;z=1.0)
+    @test_throws ArgumentError policy_jumps(fit;ability=1.0)
+    @test_throws ArgumentError policy_jumps(fit;minimum_jump=-1.0)
+    @test_throws ArgumentError policy_jumps(fit;minimum_jump=NaN)
+    @test_throws ArgumentError policy_jumps(solve(m,g;maxiters=0))
 end

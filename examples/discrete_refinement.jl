@@ -1,18 +1,8 @@
 # Run with: julia --project=. examples/discrete_refinement.jl
-# This experiment locates the negative-to-positive investment switch in a
-# specified bracket for this calibration. It is not a general threshold finder.
+# This experiment follows the jump where capital reverses direction, which this
+# calibration has exactly once.
 using GrowthModels
 
-function escape_threshold(fit; bracket=(2.8,3.5))
-    lo,hi=bracket
-    drift(k)=next_capital(fit,(k=k,))-k
-    drift(lo)<0<drift(hi) || error("Calibration has no bracketed escape threshold")
-    for _ in 1:45
-        mid=(lo+hi)/2
-        drift(mid)>0 ? (hi=mid) : (lo=mid)
-    end
-    return (lo+hi)/2
-end
 function endpoint(fit,k;periods=300)
     for _ in 1:periods
         k=next_capital(fit,(k=k,))
@@ -29,9 +19,8 @@ for (n,upper,insert_crossing) in ((250,20.0,true),(500,20.0,true),
         StateGrid(model;k=collect(range(0.001,upper;length=n)))
     fit=solve(model,grid)
     require_converged(fit)
-    threshold=escape_threshold(fit)
-    left=next_capital(fit,(k=threshold-1e-7,))
-    right=next_capital(fit,(k=threshold+1e-7,))
+    escape=only(filter(j->j.reverses_direction,policy_jumps(fit)))
+    threshold,left,right=escape.k,escape.next_capital_below,escape.next_capital_above
     low=endpoint(fit,threshold-0.05)
     high=endpoint(fit,threshold+0.05)
     boundary=count(fit.diagnostics.boundary.lower_choice)+count(fit.diagnostics.boundary.upper_choice)

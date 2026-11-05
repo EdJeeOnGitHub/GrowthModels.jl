@@ -275,3 +275,35 @@ end
     @test sum(cleaned)≈1 atol=1e-15
     @test_throws ArgumentError GrowthModels.clip_probability_roundoff!([0.6,-0.1,0.5])
 end
+
+@testset "Policy jumps with shocks and types" begin
+    shock=MarkovChain(values=[0.8,1.25],transition=[0.85 0.15;0.25 0.75])
+    types=Population([0.8,1.2],[0.5,0.5])
+    m=DiscreteSkibaModel(productivity=shock,population=types)
+    fit=solve(m,StateGrid(m;k=(n=1000,bounds=(0.01,12.0))))
+    @test_throws ArgumentError policy_jumps(fit)
+    @test_throws ArgumentError policy_jumps(fit;z=1.25)
+    @test_throws ArgumentError policy_jumps(fit;ability=1.2)
+    @test_throws ArgumentError policy_jumps(fit;z=1.0,ability=1.2)
+    @test_throws ArgumentError policy_jumps(fit;z=1.25,ability=1.0)
+    jumps=policy_jumps(fit;z=1.25,ability=1.2)
+    @test !isempty(jumps)
+    state(x)=(k=x,z=1.25,ability=1.2)
+    for j in jumps
+        @test next_capital(fit,state(j.k-1e-9)) ≈ j.next_capital_below atol=1e-7
+        @test next_capital(fit,state(j.k+1e-9)) ≈ j.next_capital_above atol=1e-7
+    end
+    # Slices are independent: each uses its own shock and type.
+    @test policy_jumps(fit;z=0.8,ability=0.8)!=jumps
+    # The largest jump persists under refinement, though the count need not.
+    finer=solve(m,StateGrid(m;k=(n=2000,bounds=(0.01,12.0))))
+    largest(list)=list[argmax([j.jump for j in list])]
+    @test largest(policy_jumps(finer;z=1.25,ability=1.2)).k ≈ largest(jumps).k atol=0.01
+    @test largest(policy_jumps(finer;z=1.25,ability=1.2)).jump ≈ largest(jumps).jump atol=0.005
+    # Axes that are absent cannot be supplied, and present ones are required.
+    abilityonly=DiscreteSkibaModel(population=types)
+    af=solve(abilityonly,StateGrid(abilityonly;k=(n=300,bounds=(0.01,12.0))))
+    @test policy_jumps(af;ability=1.2) isa Vector
+    @test_throws ArgumentError policy_jumps(af;z=1.0,ability=1.2)
+    @test_throws ArgumentError policy_jumps(af)
+end
