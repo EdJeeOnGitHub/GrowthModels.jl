@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793841106941,
+  "lastUpdate": 1793852483208,
   "repoUrl": "https://github.com/EdJeeOnGitHub/GrowthModels.jl",
   "entries": {
     "Julia benchmark result": [
@@ -319,6 +319,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "inspection 1000_scalar_reads",
             "value": 0.000004278,
+            "unit": "seconds"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "34009555+EdJeeOnGitHub@users.noreply.github.com",
+            "name": "Ed Jee",
+            "username": "EdJeeOnGitHub"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "eff4a1a3b632af19b6560cac0302ad9c7ab11f33",
+          "message": "Merge pull request #15 from EdJeeOnGitHub/release/v1.1.0\n\nRelease v1.1.0",
+          "timestamp": "2026-11-04T21:20:42-07:00",
+          "tree_id": "52a65873586a3b7dab7074907d675f6d04efc353",
+          "url": "https://github.com/EdJeeOnGitHub/GrowthModels.jl/commit/eff4a1a3b632af19b6560cac0302ad9c7ab11f33"
+        },
+        "date": 1793852482641,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "skiba solve",
+            "value": 0.005635202,
+            "unit": "seconds"
+          },
+          {
+            "name": "skiba trajectory",
+            "value": 0.000971897,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou solve",
+            "value": 0.065337463,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou trajectory",
+            "value": 0.009950338,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou warm_solve",
+            "value": 0.008271803,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou moments",
+            "value": 0.009492232,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou final_only",
+            "value": 0.009206653,
+            "unit": "seconds"
+          },
+          {
+            "name": "inspection 1000_scalar_reads",
+            "value": 0.000004466,
             "unit": "seconds"
           }
         ]
