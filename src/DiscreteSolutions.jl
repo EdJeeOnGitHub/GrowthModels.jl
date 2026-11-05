@@ -152,6 +152,84 @@ end
 """Optimal next-period capital, re-optimized against the fitted value at the query state."""
 next_capital(fit::DiscreteGrowthSolution,state::NamedTuple) = discrete_policy(fit,state).capital
 consumption(fit::DiscreteGrowthSolution,state::NamedTuple) = discrete_policy(fit,state).consumption
+
+"""
+    policy_jumps(fit::DiscreteGrowthSolution; z=nothing, ability=nothing, minimum_jump=nothing)
+
+Discontinuities in next-period capital at one productivity and ability, in increasing
+capital order. Supply `z` and `ability` exactly when the model has those axes, using
+represented values. Each entry has:
+
+- `k`: the capital state where the choice switches.
+- `next_capital_below` and `next_capital_above`: the two competing choices.
+- `jump`: their difference.
+- `reverses_direction`: whether capital falls just below `k` and rises just above it.
+  Without shocks this marks an escape threshold. Knot-level sign changes in
+  `next_capital(state)-k` that have no jump are not reported.
+
+By default a jump is reported when it is at least the width of its grid cell, because
+a choice is not resolved more finely than that, or when it reverses direction, so that
+a coarse grid cannot silently lose an escape threshold. An explicit `minimum_jump`
+applies to every jump, and `minimum_jump=0` also returns small jumps, which can be
+interpolation structure. At most one jump is located per cell.
+
+The locations of large jumps are stable under grid refinement. Sizes can be understated
+on coarse grids, and the number of jumps need not be stable, particularly with shocks,
+so compare a refined grid before interpreting either. With
+shocks a reversal describes one productivity state only, and is not a threshold,
+because capital's direction can change with the next draw.
+"""
+function policy_jumps(fit::DiscreteGrowthSolution;z=nothing,ability=nothing,minimum_jump=nothing)
+    require_converged(fit)
+    minimum_jump === nothing || (minimum_jump isa Real && isfinite(minimum_jump) && minimum_jump >= 0) ||
+        throw(ArgumentError("minimum_jump must be finite and nonnegative"))
+    g=fit.grid
+    axes=getfield(g,:axes)
+    supplied=(z=z,ability=ability)
+    for name in keys(supplied)
+        (supplied[name] === nothing) == !haskey(axes,name) ||
+            throw(ArgumentError("Supply $name exactly when the model has that axis; axes are $(keys(axes))"))
+    end
+    k=axes.k
+    fixed=NamedTuple{Tuple(filter(!=(:k),keys(axes)))}(map(key -> supplied[key],Tuple(filter(!=(:k),keys(axes)))))
+    state(x)=merge((k=x,),fixed)
+    zi,ai=discrete_state_indices(g,state(first(k)))
+    dims=discrete_dimensions(g)
+    policy=getfield(fit,:policy)
+    capital=view(reshape(policy.next_capital,dims),:,zi,ai)
+    consumed=view(reshape(policy.consumption,dims),:,zi,ai)
+    jumps=NamedTuple{(:k,:next_capital_below,:next_capital_above,:jump,:reverses_direction),
+        Tuple{Float64,Float64,Float64,Float64,Bool}}[]
+    for i in 1:length(k)-1
+        cutoff=minimum_jump === nothing ? k[i+1]-k[i] : minimum_jump
+        # Resources rise with capital, and consumption is nondecreasing wherever the
+        # policy is continuous. Only a jump in capital can make consumption fall, so a
+        # fall brackets one. The two halves' falls sum to the total, so the larger stays
+        # positive; following it reaches the largest jump despite roundoff on stretches
+        # of constant consumption or smaller jumps elsewhere in the cell.
+        consumed[i+1] < consumed[i]-1e-10*max(1.0,abs(consumed[i])) || continue
+        may_reverse=minimum_jump === nothing && capital[i] < k[i] && capital[i+1] > k[i+1]
+        may_reverse || capital[i+1]-capital[i] >= cutoff || continue
+        lo,hi=k[i],k[i+1]
+        low,high=capital[i],capital[i+1]
+        c_lo,c_hi=consumed[i],consumed[i+1]
+        for _ in 1:100
+            mid=lo+(hi-lo)/2
+            lo < mid < hi || break
+            choice=discrete_policy(fit,state(mid))
+            if c_lo-choice.consumption >= choice.consumption-c_hi
+                hi,high,c_hi=mid,choice.capital,choice.consumption
+            else
+                lo,low,c_lo=mid,choice.capital,choice.consumption
+            end
+        end
+        reverses=low < lo && high > hi
+        (high-low >= cutoff || (may_reverse && reverses)) &&
+            push!(jumps,(k=hi,next_capital_below=low,next_capital_above=high,
+                jump=high-low,reverses_direction=reverses))
+    end
+    return jumps
+end
 function regrid(fit::DiscreteGrowthSolution,g::StateGrid;extrapolate=false)
     validate_regrid(fit.grid,g)
     v = [interpolate_grid(fit.value,fit.grid,grid_state(g,i);extrapolate) for i in CartesianIndices(size(g))]

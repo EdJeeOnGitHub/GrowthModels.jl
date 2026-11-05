@@ -60,10 +60,9 @@ julia --project=. examples/discrete_continuous_limit.jl
 ```
 
 The default calibration is discount 0.96, depreciation 0.08, risk aversion 2,
-`A_H=0.6`, `A_L=0.4`, `α=0.3`, and `κ=2`. The experiment bisects a verified
-negative-to-positive investment switch in `[2.8,3.5]`. This is a calibration-specific
-escape-threshold calculation, not a general claim that every model has one
-threshold. Paths start 0.05 below and above the estimated switch and run 300
+`A_H=0.6`, `A_L=0.4`, `α=0.3`, and `κ=2`. The experiment follows the jump where capital
+reverses direction, from `policy_jumps`. This is a calibration-specific result, not
+a general claim that every model has one threshold. Paths start 0.05 below and above the estimated switch and run 300
 periods, re-optimizing at every continuous capital state.
 
 Results on Julia 1.12.3 (requested grid sizes; generated grids add the crossing):
@@ -110,30 +109,38 @@ reports each class's capital range. Tests pin this behaviour.
 
 ## Policy jump cascade
 
-The escape threshold is the top of a sequence of jumps. Run
-`julia --project=. examples/discrete_policy_jumps.jl`. At 8,000 requested points,
-with jumps above five grid spacings listed:
+The escape threshold is one of a sequence of jumps, reported by `policy_jumps`. Run
+`julia --project=. examples/discrete_policy_jumps.jl`. At 8,000 requested points:
 
-| Jump at k | Action before | Action after | Jump size |
-| ---: | ---: | ---: | ---: |
-| 2.8436 | 2.6799 | 2.7154 | 0.0354 |
-| 2.9581 | 2.8280 | 2.8580 | 0.0300 |
-| 3.0500 | 2.9452 | 2.9702 | 0.0250 |
-| 3.1243 | 3.0393 | 3.0601 | 0.0208 |
-| 3.1846 | 3.1155 | 3.1329 | 0.0174 |
-| 3.2016 | 3.1482 | 3.2400 | 0.0918 |
+| Jump at k | Choice below | Choice above | Jump size | Reverses direction |
+| ---: | ---: | ---: | ---: | --- |
+| 2.8436 | 2.6799 | 2.7153 | 0.0353 | no |
+| 2.9582 | 2.8280 | 2.8579 | 0.0299 | no |
+| 3.0501 | 2.9452 | 2.9701 | 0.0249 | no |
+| 3.1244 | 3.0394 | 3.0601 | 0.0207 | no |
+| 3.1847 | 3.1156 | 3.1329 | 0.0173 | no |
+| 3.2016 | 3.1482 | 3.2400 | 0.0918 | yes |
 
-Each jump's two actions straddle the previous jump point, and the first straddles
+Each jump's two choices straddle the previous jump point, and the first straddles
 the production crossing at 2.6985. The objective has a convex kink at a convex kink
 of the value function, so optimal choices skip it, and the state where the choice
 switches sides produces a further kink. Only the last jump changes the direction of
-capital; the others occur on the declining path.
+capital; the others occur on the declining path. All six locations agree to within
+about 0.0001 from 1,000 to 8,000 points. Generated grids place a knot at the
+production crossing but not at these induced kinks.
 
-These locations agree to about 0.0001 between 4,000 and 8,000 points. At 2,000
-points the same script omits the 3.1846 jump only because its size falls below the
-listing cutoff. Generated grids place a knot at the production crossing but not at
-these induced kinks. `diagnostics.choice_gap` flags nearby grid states. Whether the
-cascade thins as the period shortens has not been measured.
+The cascade need not lie below the threshold. Where the threshold is below the
+production crossing, as in the continuous-time comparison below at periods 1 and 0.5,
+the other jumps lie above it, on the rising path.
+
+`policy_jumps` omits jumps smaller than their grid cell by default, because a choice
+is not resolved more finely than that, but always reports reversals. Without this
+exception the default calibration loses its threshold at 250 points and bound 20,
+where the jump (0.0798) is just under one cell (0.0803). With `minimum_jump=0`, all 11
+deterministic Skiba runs checked had exactly one reversal, down to 100 points, and
+smooth Ramsey runs had no jumps. Knot-level sign changes in capital's drift beside a
+low steady state have no jump, so they are not reported as thresholds. This is
+evidence from these runs, not a proof for every calibration.
 
 ## Continuous-time limit
 
@@ -145,18 +152,25 @@ is a validation device; the package performs no such conversion.
 
 With ρ = δ = 0.05, the existing HJB solver on 4,000 points has its switch at
 2.2777. The flow-consumption error is the largest gap at capital 1.5, 2, 2.5, 4
-and 5.
+and 5. The threshold is the reversing jump from `policy_jumps`.
 
-| Period Δ | Capital points | Threshold | Error against HJB | Largest flow-consumption error |
-| ---: | ---: | ---: | ---: | ---: |
-| 1.00 | 2000 | 2.3516 | 0.0739 | 0.0039 |
-| 0.50 | 3000 | 2.3167 | 0.0390 | 0.0021 |
-| 0.25 | 4000 | 2.2979 | 0.0202 | 0.0011 |
-| 0.10 | 5000 | 2.2863 | 0.0085 | 0.0003 |
+| Period Δ | Capital points | Threshold | Error against HJB | Largest flow-consumption error | Threshold jump |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1.00 | 2000 | 2.3516 | 0.0739 | 0.0039 | 0.1459 |
+| 0.50 | 3000 | 2.3167 | 0.0390 | 0.0021 | 0.0688 |
+| 0.25 | 4000 | 2.2979 | 0.0202 | 0.0011 | 0.0342 |
+| 0.10 | 5000 | 2.2863 | 0.0085 | 0.0003 | 0.0136 |
 
 The threshold error falls roughly in proportion to Δ, and consumption agrees at the
 sampled states. This supports both solvers independently of the analytic benchmark.
-It covers this calibration only. `test/test-discrete.jl` checks a coarser version.
+It covers this calibration only. The threshold jump also shrinks in proportion to Δ,
+which fits the continuous-time switch, where capital's drift changes sign rather than
+capital jumping.
+
+No other jump reaches one grid cell at periods 0.25 and 0.1 on these grids, though
+periods 1 and 0.5 have four and seven. Grid size changes between these rows, so this
+does not establish how the cascade behaves as the period shortens.
+`test/test-discrete.jl` checks a coarser version of the limit.
 
 ## Performance check
 
@@ -179,7 +193,7 @@ julia --project=. examples/discrete_continuous_limit.jl
 ```
 
 The full package suite passes on Julia 1.12.3, including all existing
-continuous-time tests and 1,130 discrete-time assertions. README examples, the
+continuous-time tests and 1,182 discrete-time assertions. README examples, the
 capital-path example, and the refinement experiment also execute successfully.
 Method-ambiguity detection reports no ambiguities in GrowthModels.
 

@@ -11,7 +11,7 @@ abstract type StochasticModel{T<:Real,S<:StochasticProcess} <: Model{T} end
 
 export MarkovChain, LogAR1, transition, DiscreteEvolution, simulate,
     DiscreteTimeModel, DiscreteRamseyCassKoopmansModel, DiscreteSkibaModel,
-    DiscreteGrowthSolution, next_capital,
+    DiscreteGrowthSolution, next_capital, policy_jumps,
     Model, DeterministicModel, StochasticModel, StochasticProcess,
     SkibaModel, SmoothSkibaModel, RamseyCassKoopmansModel,
     StochasticSkibaModel, StochasticRamseyCassKoopmansModel,
