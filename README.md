@@ -10,7 +10,7 @@ Install the release directly from GitHub:
 
 ```julia-repl
 julia> using Pkg
-julia> Pkg.add(url="https://github.com/EdJeeOnGitHub/GrowthModels.jl", rev="v1.0.0")
+julia> Pkg.add(url="https://github.com/EdJeeOnGitHub/GrowthModels.jl", rev="v1.1.0")
 ```
 
 Julia 1.9 or newer is required. Existing users should follow the migration guide
