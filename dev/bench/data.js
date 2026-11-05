@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793839653724,
+  "lastUpdate": 1793839718161,
   "repoUrl": "https://github.com/EdJeeOnGitHub/GrowthModels.jl",
   "entries": {
     "Julia benchmark result": [
@@ -127,6 +127,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "inspection 1000_scalar_reads",
             "value": 0.000002464,
+            "unit": "seconds"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "34009555+EdJeeOnGitHub@users.noreply.github.com",
+            "name": "Ed Jee",
+            "username": "EdJeeOnGitHub"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1a6afec3cae441653b5289135948aa27298d80c2",
+          "message": "Merge pull request #10 from EdJeeOnGitHub/feat/discrete-preferences\n\nUnify preference names across time domains",
+          "timestamp": "2026-11-04T17:47:55-07:00",
+          "tree_id": "0c675f5dd0ded810d2df71cd1c4aea558d978f50",
+          "url": "https://github.com/EdJeeOnGitHub/GrowthModels.jl/commit/1a6afec3cae441653b5289135948aa27298d80c2"
+        },
+        "date": 1793839717543,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "skiba solve",
+            "value": 0.0052305,
+            "unit": "seconds"
+          },
+          {
+            "name": "skiba trajectory",
+            "value": 0.001013938,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou solve",
+            "value": 0.051984231,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou trajectory",
+            "value": 0.009798634,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou warm_solve",
+            "value": 0.00863872,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou moments",
+            "value": 0.010028536,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou final_only",
+            "value": 0.009313613,
+            "unit": "seconds"
+          },
+          {
+            "name": "inspection 1000_scalar_reads",
+            "value": 0.000001882,
             "unit": "seconds"
           }
         ]
