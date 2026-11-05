@@ -25,7 +25,9 @@ export MarkovChain, LogAR1, transition, DiscreteEvolution, simulate,
     Evolution, ContinuousEvolution, trajectory, advance, observe, stationary, Trajectory, Observations,
     at, final, plot_model, plot_diagnostics,
     CreditModel, CreditEquilibrium, capital_choice, credit_equilibrium, clearing_rate,
-    CreditTransition, credit_transition
+    CreditTransition, credit_transition,
+    DiscreteCreditModel, DiscreteCreditSolution, DiscreteCreditEquilibrium, credit_policy,
+    discrete_credit_equilibrium, leverage
 
 include("ReadOnly.jl")
 include("StochasticProcesses.jl")
@@ -55,6 +57,7 @@ include("CreditMarket.jl")
 include("CreditTransition.jl")
 include("DiscreteEvolution.jl")
 include("DiscreteSimulation.jl")
+include("DiscreteCredit.jl")
 
 """Plot a solution. Load Plots to activate the plotting extension."""
 function plot_model end

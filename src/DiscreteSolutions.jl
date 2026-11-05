@@ -29,7 +29,7 @@ function require_converged(fit::DiscreteGrowthSolution)
 end
 
 function discrete_initial(initial, g)
-    if initial isa Union{DiscreteGrowthSolution,ValueGuess}
+    if initial isa Union{DiscreteGrowthSolution,DiscreteCreditSolution,ValueGuess}
         compatible_grid(initial.grid,g) || throw(ArgumentError("Warm-start grid differs; use regrid explicitly"))
         raw = initial.value
     elseif initial isa AbstractArray

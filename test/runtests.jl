@@ -22,3 +22,4 @@ include("test-credit.jl")
 include("test-discrete.jl")
 
 include("test-discrete-risk.jl")
+include("test-discrete-credit.jl")

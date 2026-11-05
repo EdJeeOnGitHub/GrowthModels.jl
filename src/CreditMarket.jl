@@ -102,7 +102,8 @@ end
 `equilibria` holds each market-clearing rate with its `fit` and `distribution`.
 `discontinuities` lists brackets where excess demand changes sign without clearing: `reason`
 is `:jump` when narrowed to a jump, or the status of a midpoint that could not be computed."""
-struct CreditEquilibrium{M,E,D,S}
+abstract type AbstractCreditEquilibrium end
+struct CreditEquilibrium{M,E,D,S} <: AbstractCreditEquilibrium
     model::M
     λ::Float64
     scan::Vector{S}
@@ -130,7 +131,7 @@ end
 The market-clearing rate, if it is unique and wealth stays inside the grid. Otherwise
 throws, so that multiple or unreliable equilibria are not silently reduced to a number.
 """
-function clearing_rate(eq::CreditEquilibrium)
+function clearing_rate(eq::AbstractCreditEquilibrium)
     found = getfield(eq,:equilibria)
     length(found) == 1 || throw(ArgumentError("Expected one clearing rate, found $(length(found)); inspect equilibria, discontinuities, and scan"))
     only(found).boundary_ok || throw(ArgumentError("Wealth reaches the top of the grid (upper mass $(only(found).upper_mass)); raise the upper bound"))
@@ -193,6 +194,37 @@ function refine_crossing(evaluate,lower,upper,tolerances)
         end
     end
     return (best=best,lower=lower,upper=upper,failure=nothing)
+end
+
+# Scan the rates, then bisect every sign change of excess demand. `evaluate(r, warm)`
+# returns `(summary, fit, distribution)`, where the summary has `rate`, `status`,
+# `excess` and `relative_excess`. Shared by the continuous and discrete markets.
+function clear_credit_market(evaluate,scan_rates,tolerances)
+    scan = NamedTuple[]
+    warm = nothing
+    for r in scan_rates
+        state = evaluate(r,warm)
+        state.summary.status == :solved && (warm = state.fit)
+        push!(scan,state.summary)
+    end
+    scan = [point for point in scan]
+    equilibria,discontinuities = [],[]
+    for (lower,upper) in zip(scan[1:end-1],scan[2:end])
+        lower.status == upper.status == :solved && signbit(lower.excess) != signbit(upper.excess) || continue
+        bracket = refine_crossing(evaluate,lower,upper,tolerances)
+        if abs(bracket.best.relative_excess) <= tolerances.clearing
+            # Solving once more without a warm start keeps the reported fit independent
+            # of the search path that found this rate.
+            state = evaluate(bracket.best.rate,nothing)
+            state.summary.status == :solved && abs(state.summary.relative_excess) <= tolerances.clearing &&
+                (push!(equilibria,merge(state.summary,(fit=state.fit,distribution=state.distribution))); continue)
+        end
+        # A jump narrowed to the rate tolerance, or a bracket a failed midpoint left open.
+        push!(discontinuities,(lower_rate=bracket.lower.rate,upper_rate=bracket.upper.rate,
+            lower_excess=bracket.lower.excess,upper_excess=bracket.upper.excess,
+            reason=bracket.failure === nothing ? :jump : bracket.failure))
+    end
+    return scan,[e for e in equilibria],[d for d in discontinuities]
 end
 
 """
@@ -259,33 +291,9 @@ function credit_equilibrium(base::Model,grid::StateGrid; λ,rates=nothing,initia
 
     tolerances = (rate=rate_tolerance,clearing=clearing_tolerance,boundary=boundary_tolerance)
     evaluate(r,warm) = credit_market_state(base,grid,λ,r,initial,warm,tolerances,solve_options,long_run)
-    scan = NamedTuple[]
-    warm = nothing
-    for r in scan_rates
-        state = evaluate(r,warm)
-        state.summary.status == :solved && (warm = state.fit)
-        push!(scan,state.summary)
-    end
-    scan = [point for point in scan]
-
-    equilibria,discontinuities = [],[]
-    for (lower,upper) in zip(scan[1:end-1],scan[2:end])
-        lower.status == upper.status == :solved && signbit(lower.excess) != signbit(upper.excess) || continue
-        bracket = refine_crossing(evaluate,lower,upper,tolerances)
-        if abs(bracket.best.relative_excess) <= clearing_tolerance
-            # Solving once more without a warm start keeps the reported fit independent
-            # of the search path that found this rate.
-            state = evaluate(bracket.best.rate,nothing)
-            state.summary.status == :solved && abs(state.summary.relative_excess) <= clearing_tolerance &&
-                (push!(equilibria,merge(state.summary,(fit=state.fit,distribution=state.distribution))); continue)
-        end
-        # A jump narrowed to the rate tolerance, or a bracket a failed midpoint left open.
-        push!(discontinuities,(lower_rate=bracket.lower.rate,upper_rate=bracket.upper.rate,
-            lower_excess=bracket.lower.excess,upper_excess=bracket.upper.excess,
-            reason=bracket.failure === nothing ? :jump : bracket.failure))
-    end
+    scan,equilibria,discontinuities = clear_credit_market(evaluate,scan_rates,tolerances)
     settings = (rate_tolerance=rate_tolerance,clearing_tolerance=clearing_tolerance,
         boundary_tolerance=boundary_tolerance,rates=copy(scan_rates),
         long_run=horizon === nothing ? :stationary : :horizon,horizon=long_run.horizon,dt=long_run.dt)
-    return CreditEquilibrium(OWNED,deepcopy(base),Float64(λ),scan,[e for e in equilibria],[d for d in discontinuities],settings)
+    return CreditEquilibrium(OWNED,deepcopy(base),Float64(λ),scan,equilibria,discontinuities,settings)
 end

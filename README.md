@@ -286,6 +286,52 @@ it. This follows the numerical scheme of Achdou et al. and the update of Buera a
 
 See the [transition example](examples/credit_transition.jl).
 
+## Discrete-time credit market
+
+`DiscreteCreditModel` adds borrowing and lending to `DiscreteSkibaModel` or
+`DiscreteRamseyCassKoopmansModel`, with capital **committed before the next
+productivity draw**. Survey assets are therefore predetermined, as the base discrete
+models assume. Lenders can seize only the asset (Kiyotaki and Moore, 1997):
+`(1+r)b′ ≤ θ(1−δ)k′`, so repayment is always feasible and there is no default.
+**The `k` state axis is cash on hand after production and repayment**, not capital.
+
+```julia
+credit_base = DiscreteSkibaModel(productivity=LogAR1(persistence=0.9, innovation_std=0.1))
+discrete_credit = DiscreteCreditModel(credit_base; θ=0.5, r=0.02)
+cash_grid = StateGrid(discrete_credit; k=(n=120, bounds=(0.05, 25.0), spacing=:stretched), z=(n=5,))
+credit_fit = solve(discrete_credit, cash_grid)
+require_converged(credit_fit)
+choice = credit_policy(credit_fit, (k=2.0, z=cash_grid.z[3]))
+(choice.consumption, choice.savings, choice.capital, choice.debt, leverage(discrete_credit))
+credit_path = simulate(credit_fit, (k=2.0, z=cash_grid.z[3]), 50)
+discrete_market = discrete_credit_equilibrium(credit_base, cash_grid; θ=0.5)
+clearing_rate(discrete_market)
+```
+
+Each period the household chooses own funds `s` (consuming `x − s`), then capital
+`k′ ≤ λs` with `λ = (1+r)/(1+r−θ(1−δ))`, financed by debt `b′ = k′ − s`. With
+`θ = 0` and a rate low enough that investing beats lending, it reproduces the base
+model. Households can lend at `r` (`k′ < s`); unsecured borrowing is ruled out.
+
+- **Two stages.** Capital is risky, so its choice maximizes expected continuation value
+  for each level of own funds (grid search over the whole feasible interval, then
+  golden-section refinement). The saving choice then reuses the base solver's global
+  interval search. Grid policies, `Evolution` and `stationary` treat a saving choice
+  between grid points as a lottery over its neighbours, consistent with the Bellman
+  step; `credit_policy` and `simulate` re-optimize at the exact state.
+- **Simulation timing.** `simulate` returns `capital[t]`, bought in period `t` and used
+  in `t+1`, and `output[t]`, produced by it at the next productivity draw. Survey assets
+  in `t+1` are `capital[t]`.
+- **Boundaries.** Next-period cash outside the grid is clamped and counted in
+  `diagnostics.boundary`. Choosing zero own funds leaves zero cash, which is clamped up
+  to the grid's lowest point, so expect some lower counts near the bottom.
+- **Market clearing.** `discrete_credit_equilibrium` finds rates where debt nets to
+  zero, on the stationary distribution or, with `horizon` (periods) and `initial`, the
+  distribution after that many periods. It reports multiple clearing rates and
+  unresolved brackets like `credit_equilibrium`. Productivity risk is required.
+
+See the [design document](DISCRETE_CREDIT_DESIGN.md).
+
 ## Economics and grids
 
 Production, resource rules, processes, and population support belong to the
