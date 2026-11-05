@@ -51,7 +51,7 @@ end
     cache = getfield(fit,:continuation)
     ws = cache.workspace
     for s in (0.1,0.8,2.0,4.0), z in (1,3,5)
-        q = DCGM.allocate(m,ws,cache.V,s,z,1)
+        q = DCGM.allocate(m,ws,cache.V,s,z,1;refine=true)
         ks = range(0,ws.λ*s;length=50_001)
         best = maximum(DCGM.expected_value(m,ws,cache.V,s,k,z,1) for k in ks)
         @test q.value >= best-1e-10
@@ -125,4 +125,20 @@ end
     fit = solve(m,dc_grid(m;n=40);maxiters=0)
     @test !fit.converged
     @test_throws ArgumentError credit_policy(fit,(k=1.0,z=fit.grid.z[1]))
+end
+
+@testset "Discrete credit: converges where policy iteration once cycled" begin
+    # With golden-section refinement inside the iteration, modified policy iteration
+    # alternated between two policies here. On the fixed capital grid the Bellman operator
+    # is a contraction and this converges directly; the value-iteration fallback is a
+    # safeguard and is reported when used.
+    types = Population([0.8,1.2],[0.3,0.7])
+    base = DiscreteSkibaModel(productivity=LogAR1(persistence=0.9,innovation_std=0.1),population=types)
+    g = StateGrid(DiscreteCreditModel(base;θ=0.5,r=0.0);k=(n=150,bounds=(0.05,25.0),spacing=:stretched),z=(n=7,))
+    for r in (0.0265,0.027,0.0275)
+        fit = solve(DiscreteCreditModel(base;θ=0.5361065320741775,r=r),g)
+        @test fit.converged
+        @test fit.diagnostics.residual_norm < 1e-8
+        @test fit.diagnostics.switched_to_value_iteration >= 0
+    end
 end

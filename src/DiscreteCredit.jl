@@ -119,9 +119,12 @@ function expected_value(m,ws,V,s,k,z,a;output=nothing)
 end
 
 # Allocation stage: best capital for own funds s. Grid search over the whole feasible
-# interval finds the global maximum among grid points, including across the Skiba bend;
-# golden-section search then refines within the neighbouring cells. Ties keep lower capital.
-function allocate(m,ws,V,s,z,a)
+# interval finds the global maximum among grid points (and the limit λs), including across
+# the Skiba bend. Ties keep lower capital. The Bellman iteration uses this fixed candidate
+# set, so the operator is a contraction. With `refine`, golden-section search then improves
+# the choice within the neighbouring cells; its trial points depend on V, so it is used only
+# for reported off-grid choices, never inside the iteration.
+function allocate(m,ws,V,s,z,a;refine=false)
     top = ws.λ*s
     best,best_k,best_j = -Inf,0.0,1
     for j in eachindex(ws.capital)
@@ -137,6 +140,7 @@ function allocate(m,ws,V,s,z,a)
     q = expected_value(m,ws,V,s,top,z,a)
     q > best && ((best,best_k,best_j) = (q,top,feasible+1))
     # Refine within the neighbouring cells, never beyond the borrowing limit.
+    refine || return (value=best,capital=best_k)
     lo = best_j > 1 ? min(ws.capital[best_j-1],top) : 0.0
     hi = best_j < feasible ? min(ws.capital[best_j+1],top) : top
     f(k) = expected_value(m,ws,V,s,k,z,a)
@@ -258,11 +262,17 @@ Two-stage Bellman solve on the cash-on-hand grid `grid.k`. Own funds are chosen 
 grid of zero followed by the cash grid; a choice between grid points is a lottery over
 its neighbours, each with its own capital, which is what the transition matrix and
 `policy.next_capital` use. `credit_policy` and `simulate` re-optimize at the exact
-own funds instead. `capital_points` (default: the cash grid length) sets the capital grid
-for the allocation search, which is refined by golden-section search between grid
-points. Next-period cash outside the grid is clamped to its ends; check
+own funds instead. `capital_points` (default: twice the cash grid length) sets the fixed
+capital grid for the allocation search. The Bellman iteration chooses on that grid, so it
+is a contraction; reported off-grid choices are refined by golden-section search between
+grid points. Next-period cash outside the grid is clamped to its ends; check
 `diagnostics.boundary`, and widen the grid if either count is not small.
+
+Modified policy iteration can cycle between two policies when a policy jump is nearly
+tied. If its residual has not halved for 50 iterations, the solve continues with value
+iteration; `diagnostics.switched_to_value_iteration` records the iteration (zero if not).
 """
+const CREDIT_STALL_ITERATIONS = 50
 function solve(m::DiscreteCreditModel,g::StateGrid; initial=nothing,maxiters=2000,
         value_tolerance=1e-8,residual_tolerance=1e-8,algorithm=:modified_policy_iteration,
         policy_steps=20,capital_points=nothing,history=false)
@@ -272,7 +282,7 @@ function solve(m::DiscreteCreditModel,g::StateGrid; initial=nothing,maxiters=200
     policy_steps isa Integer && policy_steps >= 0 || throw(ArgumentError("policy_steps must be a nonnegative integer"))
     all(x -> isfinite(x) && x > 0,(value_tolerance,residual_tolerance)) || throw(ArgumentError("Tolerances must be finite and positive"))
     algorithm in (:value_iteration,:modified_policy_iteration) || throw(ArgumentError("Unknown Bellman algorithm"))
-    points = capital_points === nothing ? length(g.k) : capital_points
+    points = capital_points === nothing ? 2length(g.k) : capital_points
     points isa Integer && points >= 2 || throw(ArgumentError("capital_points must be an integer of at least two"))
     g = deepcopy(g)
     raw,strategy = discrete_initial(initial,g)
@@ -284,10 +294,15 @@ function solve(m::DiscreteCreditModel,g::StateGrid; initial=nothing,maxiters=200
     step = credit_step(m,ws,V,β,γ)
     trace = NamedTuple{(:iteration,:update,:residual),Tuple{Int,Float64,Float64}}[]
     update,residual,stop,iterations = Inf,maximum(abs,step.value.-V),:iteration_limit,0
+    # Modified policy iteration can cycle between two policies when a policy jump is
+    # nearly tied. If its residual stops improving, finish with value iteration, which is
+    # a contraction from wherever it starts; the switch is reported in the diagnostics.
+    mode = algorithm
+    best_residual,stalled,switched_at = Inf,0,0
     for n in 1:maxiters
         iterations = n
         candidate = step.value
-        if algorithm == :modified_policy_iteration
+        if mode == :modified_policy_iteration
             reward = discrete_utility.(step.consumption,γ)
             for _ in 1:policy_steps
                 candidate = policy_value(m,ws,candidate,step.savings,step.nodes,reward,β)
@@ -305,6 +320,14 @@ function solve(m::DiscreteCreditModel,g::StateGrid; initial=nothing,maxiters=200
         isfinite(residual) || (stop = :nonfinite; break)
         V,step = candidate,next
         history && push!(trace,(iteration=n,update=update,residual=residual))
+        if residual < 0.5*best_residual
+            best_residual,stalled = residual,0
+        else
+            stalled += 1
+        end
+        if mode == :modified_policy_iteration && stalled >= CREDIT_STALL_ITERATIONS
+            mode,switched_at = :value_iteration,n
+        end
         if update <= value_tolerance && residual <= residual_tolerance
             stop = :converged; break
         end
@@ -322,6 +345,7 @@ function solve(m::DiscreteCreditModel,g::StateGrid; initial=nothing,maxiters=200
         debt=shaped(debt),leverage=ws.λ)
     diagnostics = (stop_reason=stop,iterations=iterations,update_norm=update,residual_norm=residual,
         value_error_bound=residual/(1-β),budget_error=budget,collateral_slack=-collateral,
+        switched_to_value_iteration=switched_at,
         minimum_next_cash=minimum_cash,boundary=(lower_cash=clamps.lower,upper_cash=clamps.upper,
         zero_savings=shaped(step.savings .== 0)),history=copy(trace))
     settings = (;algorithm,policy_steps,maxiters,value_tolerance,residual_tolerance,
@@ -377,7 +401,7 @@ function credit_policy(fit::DiscreteCreditSolution,state::NamedTuple)
     p = preferences(m)
     g = view(cache.G,:,z,a)
     q = bellman_choice(state.k,ws.s,g,diff(g)./diff(ws.s),p.discount,p.γ)
-    capital = allocate(m,ws,cache.V,q.capital,z,a).capital
+    capital = allocate(m,ws,cache.V,q.capital,z,a;refine=true).capital
     return (consumption=q.consumption,savings=q.capital,capital=capital,debt=capital-q.capital,value=q.value)
 end
 next_capital(fit::DiscreteCreditSolution,state::NamedTuple) = credit_policy(fit,state).capital

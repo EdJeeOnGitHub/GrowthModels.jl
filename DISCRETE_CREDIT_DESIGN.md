@@ -174,12 +174,26 @@ Properties:
     therefore use a lottery over neighbouring grid points, each with its own capital, so
     they match the Bellman step. Evaluating capital exactly at the chosen own funds
     instead left modified policy iteration stuck away from the Bellman fixed point.
+  - **Fixed capital grid inside the iteration.** The capital choice is searched over a
+    fixed grid (twice the cash grid by default) plus the borrowing limit. Golden-section
+    refinement between grid points is used only for reported off-grid choices
+    (`credit_policy`, `simulate`): its trial points depend on the value function, so
+    inside the iteration the Bellman operator was not a contraction, and modified policy
+    iteration cycled between two policies near a technology switch. A stall now also
+    switches the solve to value iteration, recorded in the diagnostics.
 - **Audit (step 7): implemented for benchmark parameters** in
   `aggregate-transfers/sims/mainline/audit-discrete-credit-moments.jl`, documented in
   `DISCRETE-CREDIT-MOMENTS.md`, with θ ∈ {0, 0.5, 0.9}.
-- **Calibration (step 6): not done.** It needs the debt targets below.
+- **Calibration (step 6): done for θ** in `aggregate-transfers/sims/mainline/`
+  (`debt-asset-targets.py`, `calibrate-discrete-credit-theta.jl`). The target is
+  debt/assets of 0.202, the average across the nine estimation studies with an
+  outstanding debt stock and assets in the same household round. On the benchmark
+  economy θ = 0.504 matches it (rate 0.0262); the untargeted share borrowing is 0.63
+  against 0.51 in the data. The audit at the calibrated θ finds no violated production
+  moments at the stationary start, while consumption depends on debt given gross assets.
+  The other benchmark parameters are not recalibrated.
 
 ## Still open
 
-- **Debt targets:** which exact moments, and from which studies' debt measures.
-- **Start date:** after the 9 November seminar.
+- **Joint recalibration:** recalibrating the rest of the economy (for example productivity
+  risk) alongside θ, so that the share borrowing also matches the data.
