@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793839718161,
+  "lastUpdate": 1793839793164,
   "repoUrl": "https://github.com/EdJeeOnGitHub/GrowthModels.jl",
   "entries": {
     "Julia benchmark result": [
@@ -191,6 +191,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "inspection 1000_scalar_reads",
             "value": 0.000001882,
+            "unit": "seconds"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "34009555+EdJeeOnGitHub@users.noreply.github.com",
+            "name": "Ed Jee",
+            "username": "EdJeeOnGitHub"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1fc88413dbedff8e22f3e0989602e135daedc704",
+          "message": "Merge pull request #14 from EdJeeOnGitHub/feat/policy-jumps\n\nAdd policy_jumps to locate discontinuities in next-period capital",
+          "timestamp": "2026-11-04T17:48:20-07:00",
+          "tree_id": "5ebd02311a2841c59f8d0a59e5ac657e5ede86d1",
+          "url": "https://github.com/EdJeeOnGitHub/GrowthModels.jl/commit/1fc88413dbedff8e22f3e0989602e135daedc704"
+        },
+        "date": 1793839792412,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "skiba solve",
+            "value": 0.008848594,
+            "unit": "seconds"
+          },
+          {
+            "name": "skiba trajectory",
+            "value": 0.001726109,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou solve",
+            "value": 0.084518549,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou trajectory",
+            "value": 0.020109597,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou warm_solve",
+            "value": 0.012797958,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou moments",
+            "value": 0.019882547,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou final_only",
+            "value": 0.019171991,
+            "unit": "seconds"
+          },
+          {
+            "name": "inspection 1000_scalar_reads",
+            "value": 0.000005547,
             "unit": "seconds"
           }
         ]
