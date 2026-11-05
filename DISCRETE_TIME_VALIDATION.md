@@ -1,5 +1,8 @@
 # Discrete-time implementation and validation
 
+This document records the deterministic milestone. The subsequent ability and
+productivity-risk extension is documented in [its validation report](DISCRETE_RISK_VALIDATION.md).
+
 ## Implemented scope
 
 The deterministic milestones in [the design](DISCRETE_TIME_DESIGN.md) are
@@ -37,6 +40,10 @@ benchmark. They also compare value iteration with modified policy iteration and
 verify the converged value against a fixed-policy sparse linear solve. The
 transition matrix conserves constants and uses nonnegative interpolation weights.
 
+Deterministic paths are compared with the analytic steady states, which solve
+`1 = discount*(f′(k) + 1 - depreciation)`, to within one grid spacing: both Skiba
+branches, and the smooth Ramsey steady state from below and above.
+
 The suite checks budget feasibility, failed-fit behavior, numerical-bound errors,
 read-only ownership, warm starts, regridding, resource floors and nested wrappers,
 and explicit rejection of unsupported AD inputs. Plotting tests exercise both
@@ -48,6 +55,8 @@ Run:
 
 ```sh
 julia --project=. examples/discrete_refinement.jl
+julia --project=. examples/discrete_policy_jumps.jl
+julia --project=. examples/discrete_continuous_limit.jl
 ```
 
 The default calibration is discount 0.96, depreciation 0.08, risk aversion 2,
@@ -75,8 +84,8 @@ returns the same threshold to the displayed precision in this calibration.
 
 All runs have Bellman residuals below `1.8e-10` and no choices at numerical bounds.
 Nevertheless, the 250-point threshold is visibly inaccurate relative to finer
-grids. The roughly 0.09 jump between competing investment choices persists under
-refinement. Long-run path endpoints are more grid-sensitive than the threshold:
+grids. The roughly 0.09 jump between competing investment choices at the threshold
+persists under refinement, but it is not the only policy jump; see below. Long-run path endpoints are more grid-sensitive than the threshold:
 piecewise-linear continuation can pin deterministic steady states to nearby grid
 nodes. These results do not justify reporting all path endpoints at the same
 precision as the threshold.
@@ -84,6 +93,56 @@ precision as the threshold.
 A small Bellman residual bounds iteration error for the interpolated problem;
 it is not evidence by itself of small state-grid or threshold error. These
 experiments support this calibration, not universal error guarantees.
+
+## Policy jump cascade
+
+The escape threshold is the top of a sequence of jumps. Run
+`julia --project=. examples/discrete_policy_jumps.jl`. At 8,000 requested points,
+with jumps above five grid spacings listed:
+
+| Jump at k | Action before | Action after | Jump size |
+| ---: | ---: | ---: | ---: |
+| 2.8436 | 2.6799 | 2.7154 | 0.0354 |
+| 2.9581 | 2.8280 | 2.8580 | 0.0300 |
+| 3.0500 | 2.9452 | 2.9702 | 0.0250 |
+| 3.1243 | 3.0393 | 3.0601 | 0.0208 |
+| 3.1846 | 3.1155 | 3.1329 | 0.0174 |
+| 3.2016 | 3.1482 | 3.2400 | 0.0918 |
+
+Each jump's two actions straddle the previous jump point, and the first straddles
+the production crossing at 2.6985. The objective has a convex kink at a convex kink
+of the value function, so optimal choices skip it, and the state where the choice
+switches sides produces a further kink. Only the last jump changes the direction of
+capital; the others occur on the declining path.
+
+These locations agree to about 0.0001 between 4,000 and 8,000 points. At 2,000
+points the same script omits the 3.1846 jump only because its size falls below the
+listing cutoff. Generated grids place a knot at the production crossing but not at
+these induced kinks. `diagnostics.choice_gap` flags nearby grid states. Whether the
+cascade thins as the period shortens has not been measured.
+
+## Continuous-time limit
+
+Run `julia --project=. examples/discrete_continuous_limit.jl`. An economy with
+period Δ has budget `c + k′ = Δf(k) + (1-δΔ)k` and discount `exp(-ρΔ)`. CRRA
+homogeneity makes its policy independent of the constant scale between period
+consumption and flow reward, so `c/Δ` should approach the HJB policy. This mapping
+is a validation device; the package performs no such conversion.
+
+With ρ = δ = 0.05, the existing HJB solver on 4,000 points has its switch at
+2.2777. The flow-consumption error is the largest gap at capital 1.5, 2, 2.5, 4
+and 5.
+
+| Period Δ | Capital points | Threshold | Error against HJB | Largest flow-consumption error |
+| ---: | ---: | ---: | ---: | ---: |
+| 1.00 | 2000 | 2.3516 | 0.0739 | 0.0039 |
+| 0.50 | 3000 | 2.3167 | 0.0390 | 0.0021 |
+| 0.25 | 4000 | 2.2979 | 0.0202 | 0.0011 |
+| 0.10 | 5000 | 2.2863 | 0.0085 | 0.0003 |
+
+The threshold error falls roughly in proportion to Δ, and consumption agrees at the
+sampled states. This supports both solvers independently of the analytic benchmark.
+It covers this calibration only. `test/test-discrete.jl` checks a coarser version.
 
 ## Performance check
 
@@ -101,10 +160,12 @@ GKSwstype=100 julia --project=. -e 'using Pkg; Pkg.test()'
 julia --project=. test/check-readme.jl
 julia --project=. examples/discrete_time.jl
 julia --project=. examples/discrete_refinement.jl
+julia --project=. examples/discrete_policy_jumps.jl
+julia --project=. examples/discrete_continuous_limit.jl
 ```
 
 The full package suite passes on Julia 1.12.3, including all existing
-continuous-time tests and 1,080 discrete-time assertions. README examples, the
+continuous-time tests and 1,102 discrete-time assertions. README examples, the
 capital-path example, and the refinement experiment also execute successfully.
 Method-ambiguity detection reports no ambiguities in GrowthModels.
 

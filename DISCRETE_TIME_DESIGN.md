@@ -2,7 +2,9 @@
 
 Status: deterministic milestones implemented on the discrete-time feature branch.
 See [implementation and validation evidence](DISCRETE_TIME_VALIDATION.md).
-Future work remains deferred as specified below.
+Ability, individual productivity risk, and distribution evolution are implemented
+by [the follow-up design](DISCRETE_RISK_DESIGN.md). Other future work remains
+deferred as specified below.
 
 ## Purpose and agreed scope
 

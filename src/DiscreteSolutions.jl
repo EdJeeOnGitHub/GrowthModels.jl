@@ -1,7 +1,7 @@
 """Owned discrete-time value, policy, transition matrix, and Bellman diagnostics.
 Arrays are read-only views. Failed fits retain a finite value and its globally
 optimized policy; economic evaluators require convergence."""
-struct DiscreteGrowthSolution{M,G,V,P,D,S,A}
+struct DiscreteGrowthSolution{M,G,V,P,D,S,A,C}
     model::M
     grid::G
     value::V
@@ -11,12 +11,15 @@ struct DiscreteGrowthSolution{M,G,V,P,D,S,A}
     settings::S
     initial_value::V
     transition::A
-    function DiscreteGrowthSolution(::OwnedSnapshot,m,g,v,p,c,d,s,initial,a)
-        new{typeof(m),typeof(g),typeof(v),typeof(p),typeof(d),typeof(s),typeof(a)}(
-            m,g,v,p,c,d,s,initial,a)
+    continuation::C
+    function DiscreteGrowthSolution(::OwnedSnapshot,m,g,v,p,c,d,s,initial,a,continuation)
+        new{typeof(m),typeof(g),typeof(v),typeof(p),typeof(d),typeof(s),typeof(a),typeof(continuation)}(
+            m,g,v,p,c,d,s,initial,a,continuation)
     end
 end
+Base.propertynames(::DiscreteGrowthSolution) = (:model,:grid,:value,:policy,:converged,:diagnostics,:settings,:initial_value,:transition)
 function Base.getproperty(fit::DiscreteGrowthSolution,key::Symbol)
+    key == :continuation && throw(ArgumentError("Cached continuation values are private"))
     key == :model && return deepcopy(getfield(fit,key))
     return _readonly(getfield(fit,key))
 end
@@ -38,7 +41,7 @@ function discrete_initial(initial, g)
     end
     size(raw) == size(g) || throw(DimensionMismatch("Initial values must have the grid shape"))
     any(x -> x isa ForwardDiff.Dual,raw) && throw(ArgumentError("Discrete solver does not support AD"))
-    v = Float64.(raw)
+    v = vec(Float64.(raw))
     all(isfinite,v) || throw(ArgumentError("Initial values must be finite"))
     return v, :warm
 end
@@ -47,18 +50,20 @@ function discrete_result(m,g,v,ws,initial,settings,n,stop,update,residual,histor
     β, γ = preferences(m).discount, preferences(m).risk_aversion
     # Always return policy and residual for the retained value, including failure.
     residual = bellman_step!(ws,g.k,v,β,γ;alternatives=true)
-    policy = (consumption=copy(ws.consumption), next_capital=copy(ws.capital),
-        resources=[resources(m,(k=x,)) for x in g.k])
+    shaped(x)=reshape(copy(x),size(g))
+    policy=(consumption=shaped(ws.consumption),next_capital=shaped(ws.capital),
+        resources=[resources(m,grid_state(g,i)) for i in CartesianIndices(size(g))])
     budget_error = maximum(abs, ws.consumption .+ ws.capital .- ws.budget)
     admissible = all(ws.consumption .>= 0) && all(first(g.k) .<= ws.capital .<= last(g.k)) &&
         all(isfinite,discrete_utility.(ws.consumption,γ))
     diagnostics = (stop_reason=stop, iterations=n, update_norm=update,
         residual_norm=residual, value_error_bound=residual/(1-β), budget_error=budget_error,
         admissible=admissible, history=copy(history),
-        boundary=(lower_choice=ws.capital .== first(g.k),upper_choice=ws.capital .== last(g.k)),
-        alternative_capital=copy(ws.alternative_capital), choice_gap=copy(ws.choice_gap))
-    return DiscreteGrowthSolution(OWNED,deepcopy(m),deepcopy(g),copy(v),policy,
-        stop == :converged,diagnostics,settings,copy(initial),policy_transition(g.k,ws.capital))
+        boundary=(lower_choice=shaped(ws.capital .== first(g.k)),upper_choice=shaped(ws.capital .== last(g.k))),
+        alternative_capital=shaped(ws.alternative_capital), choice_gap=shaped(ws.choice_gap))
+    return DiscreteGrowthSolution(OWNED,deepcopy(m),deepcopy(g),shaped(v),policy,
+        stop == :converged,diagnostics,settings,shaped(initial),
+        policy_transition(g.k,ws.capital,ws.productivity,size(ws.expected,3)),copy(ws.expected))
 end
 
 function solve_discrete(m,g::StateGrid; initial=nothing,maxiters=2000,
@@ -75,7 +80,7 @@ function solve_discrete(m,g::StateGrid; initial=nothing,maxiters=2000,
     g = deepcopy(g)
     v, strategy = discrete_initial(initial,g)
     initial_snapshot = copy(v)
-    ws = BellmanWorkspace(m,g.k)
+    ws = BellmanWorkspace(m,g)
     β, γ = preferences(m).discount, preferences(m).risk_aversion
     residual = bellman_step!(ws,g.k,v,β,γ)
     isfinite(residual) || throw(ArgumentError("No finite initial Bellman residual"))
@@ -87,10 +92,9 @@ function solve_discrete(m,g::StateGrid; initial=nothing,maxiters=2000,
         iterations = n
         candidate = copy(ws.next_value)
         if algorithm == :modified_policy_iteration
-            P = policy_transition(g.k,ws.capital)
             reward = discrete_utility.(ws.consumption,γ)
             for _ in 1:policy_steps
-                candidate = reward + β*(P*candidate)
+                candidate = reward + β*policy_action(ws,g.k,candidate)
             end
         end
         if !all(isfinite,candidate)
@@ -119,23 +123,37 @@ function solve_discrete(m,g::StateGrid; initial=nothing,maxiters=2000,
     return discrete_result(m,g,v,ws,initial_snapshot,settings,iterations,stop,update,residual,trace)
 end
 
-function discrete_policy(fit::DiscreteGrowthSolution,state::NamedTuple)
+function discrete_state_indices(g,state)
+    ax=getfield(g,:axes)
+    Set(keys(state)) == Set(keys(ax)) || throw(ArgumentError("State keys must match $(keys(ax))"))
+    all(x -> x isa Real && !(x isa ForwardDiff.Dual) && isfinite(x),values(state)) ||
+        throw(ArgumentError("Discrete policy states must be finite and non-AD"))
+    first(g.k) <= state.k <= last(g.k) || throw(ArgumentError("State outside capital support"))
+    indices=map((:z,:ability)) do name
+        !haskey(ax,name) && return 1
+        index=findfirst(==(state[name]),ax[name])
+        index === nothing && throw(ArgumentError("$name must be a represented categorical state"))
+        return index
+    end
+    return indices
+end
+discrete_expectation(fit) = getfield(fit,:continuation)
+function discrete_policy(fit::DiscreteGrowthSolution,state::NamedTuple;expected=discrete_expectation(fit))
     require_converged(fit)
-    keys(state) == (:k,) || throw(ArgumentError("State must have exactly the k coordinate"))
-    state.k isa ForwardDiff.Dual && throw(ArgumentError("Discrete policy queries do not support AD"))
-    k = fit.grid.k
-    first(k) <= state.k <= last(k) || throw(ArgumentError("State outside capital support"))
-    m = getfield(fit,:model)
-    v = getfield(fit,:value)
-    p = preferences(m)
-    return bellman_choice(discrete_budget(m,state.k),k,v,diff(v)./diff(k),p.discount,p.risk_aversion)
+    z,a=discrete_state_indices(fit.grid,state)
+    m=getfield(fit,:model)
+    k=fit.grid.k
+    continuation=view(expected,:,z,a)
+    p=preferences(m)
+    return bellman_choice(discrete_budget(m,state),k,continuation,
+        diff(continuation)./diff(k),p.discount,p.risk_aversion)
 end
 """Optimal next-period capital, re-optimized against the fitted value at the query state."""
 next_capital(fit::DiscreteGrowthSolution,state::NamedTuple) = discrete_policy(fit,state).capital
 consumption(fit::DiscreteGrowthSolution,state::NamedTuple) = discrete_policy(fit,state).consumption
 function regrid(fit::DiscreteGrowthSolution,g::StateGrid;extrapolate=false)
     validate_regrid(fit.grid,g)
-    v = [interpolate_grid(fit.value,fit.grid,(k=x,);extrapolate) for x in g.k]
+    v = [interpolate_grid(fit.value,fit.grid,grid_state(g,i);extrapolate) for i in CartesianIndices(size(g))]
     return ValueGuess(OWNED,deepcopy(g),v)
 end
 

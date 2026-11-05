@@ -17,3 +17,5 @@ include("test-default-bounds.jl")
 include("test-residual-precision.jl")
 
 include("test-discrete.jl")
+
+include("test-discrete-risk.jl")
