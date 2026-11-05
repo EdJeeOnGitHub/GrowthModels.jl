@@ -20,6 +20,21 @@ function validate_probability(p)
     abs(primal(total)-1) <= PROBABILITY_TOLERANCE || throw(ArgumentError("Expected unit mass; measured mass=$total, tolerance=$PROBABILITY_TOLERANCE. Normalize explicitly before construction."))
     return total
 end
+# Direct solves meet nonnegativity only up to roundoff, which matters for tail
+# probabilities near machine precision. Remove that roundoff; a materially
+# negative entry means the solve failed and must not be hidden by clipping.
+# Mass without negative entries is returned exactly as solved.
+function clip_probability_roundoff!(p)
+    lowest=minimum(primal,p)
+    lowest >= -PROBABILITY_TOLERANCE ||
+        throw(ArgumentError("Stationary solve returned a negative probability of $lowest; tolerance=$PROBABILITY_TOLERANCE"))
+    lowest < 0 || return p
+    for i in eachindex(p)
+        primal(p[i]) < 0 && (p[i]=zero(p[i]))
+    end
+    p ./= sum(p)
+    return p
+end
 function distribution(g::StateGrid; masses=nothing, density=nothing)
     (masses === nothing) != (density === nothing) || throw(ArgumentError("Supply exactly one of masses or density"))
     data = masses === nothing ? density : masses
