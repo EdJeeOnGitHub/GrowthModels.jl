@@ -248,6 +248,25 @@ initial distribution is required. Zero-share types contribute no mass. Explicit
 initial distributions always override these population defaults.
 Stationary calculation has no timestep.
 
+## Threads and separate abilities
+
+Fixed abilities do not interact in the HJB, so `solve` handles them as separate
+blocks, with no option to set. It uses the threads Julia was started with, so
+`julia -t 4` is all that is needed. Julia defaults to one thread, where blocks run
+in turn and still benefit from warm starts. Results do not depend on the thread
+count. Calling `solve` inside your own threaded loop is safe.
+
+The solver reads blocks from the generator rather than from the model type, so a
+custom model whose generator links abilities is solved correctly as one block.
+Custom production runs only on the calling task and does not need to be thread safe.
+Each Julia process assumes its threads are its own, so divide threads between
+processes when running several.
+
+Without `initial`, each block after the first starts from a converged neighbour and
+stops when it converges. `fit.diagnostics.iterations` and `history` report the worst
+block, `fit.diagnostics.blocks` reports `iterations` and `stop_reason` per block, and
+`fit.initial_value` holds the values each block started from.
+
 ## Failure, warm starts, and differentiation
 
 `solve` returns a consistent result structure within each time formulation. Check `fit.converged`,

@@ -74,6 +74,11 @@ else
                     # Old/new snapshots agree exactly on the same runtime. Keep
                     # the strict gate and every other quantity at 1e-11.
                     tolerance = quantity == :rates && !strict ? 1e-10 : 1e-11
+                    # Abilities now stop separately and warm start from a neighbour,
+                    # so this case stops at a different iterate inside the solver's
+                    # 1e-6 tolerance (2.6e-9 in value when introduced). Other models
+                    # have one block and stay under the strict gate.
+                    name == :ability && (tolerance = 1e-8)
                     @test maximum(abs.(data .- reference)) <= tolerance
                 end
             end
