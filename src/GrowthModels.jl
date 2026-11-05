@@ -9,7 +9,10 @@ abstract type StochasticProcess end
 abstract type DeterministicModel{T<:Real} <: Model{T} end
 abstract type StochasticModel{T<:Real,S<:StochasticProcess} <: Model{T} end
 
-export Model, DeterministicModel, StochasticModel, StochasticProcess,
+export MarkovChain, LogAR1, transition, DiscreteEvolution, simulate,
+    DiscreteTimeModel, DiscreteRamseyCassKoopmansModel, DiscreteSkibaModel,
+    DiscreteGrowthSolution, next_capital, policy_jumps,
+    Model, DeterministicModel, StochasticModel, StochasticProcess,
     SkibaModel, SmoothSkibaModel, RamseyCassKoopmansModel,
     StochasticSkibaModel, StochasticRamseyCassKoopmansModel,
     StochasticSkibaAbilityModel, StochasticNPAbilityModel,
@@ -19,7 +22,7 @@ export Model, DeterministicModel, StochasticModel, StochasticProcess,
     StateGrid, cell_weights, coordinates, GrowthSolution, solve, regrid,
     require_converged, consumption, capital_drift, technology_crossing,
     StateDistribution, distribution, mass, density, expectation, boundary_mass,
-    Evolution, trajectory, advance, observe, stationary, Trajectory, Observations,
+    Evolution, ContinuousEvolution, trajectory, advance, observe, stationary, Trajectory, Observations,
     at, final, plot_model, plot_diagnostics
 
 include("ReadOnly.jl")
@@ -39,9 +42,15 @@ include("Grids.jl")
 include("HJBWorkspace.jl")
 include("BlockSolve.jl")
 include("Solutions.jl")
+include("DiscreteProcesses.jl")
+include("DiscreteModels.jl")
+include("Bellman.jl")
+include("DiscreteSolutions.jl")
 include("Distributions.jl")
 include("StateEvolution.jl")
 include("Evolution.jl")
+include("DiscreteEvolution.jl")
+include("DiscreteSimulation.jl")
 
 """Plot a solution. Load Plots to activate the plotting extension."""
 function plot_model end

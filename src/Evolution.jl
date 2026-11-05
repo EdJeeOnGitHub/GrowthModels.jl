@@ -1,18 +1,29 @@
-"""Private cached integration of a converged fit. `dt` is required.
-One Evolution object per concurrent simulation. Observation times never change
-its fixed integration lattice or implicit-Euler factorization.
 """
-struct Evolution{G,A,S,T}
+    Evolution(fit::GrowthSolution; dt)
+    Evolution(fit::DiscreteGrowthSolution)
+
+Cached distribution propagation for a converged fit, used with `trajectory`,
+`advance` and `observe`. Continuous-time fits require `dt` and return a
+`ContinuousEvolution`. Discrete-time fits advance by integer periods, take no `dt`,
+and return a `DiscreteEvolution`.
+"""
+abstract type Evolution end
+
+"""Private cached integration of a converged continuous-time fit.
+One object per concurrent simulation. Observation times never change its fixed
+integration lattice or implicit-Euler factorization.
+"""
+struct ContinuousEvolution{G,A,S,T} <: Evolution
     grid::G
     generator::A
     solver::S
     dt::T
-    function Evolution(::OwnedSnapshot,g,a,s,dt)
+    function ContinuousEvolution(::OwnedSnapshot,g,a,s,dt)
         new{typeof(g),typeof(a),typeof(s),typeof(dt)}(g,a,s,dt)
     end
 end
-Base.propertynames(::Evolution) = (:grid,:dt)
-function Base.getproperty(e::Evolution,key::Symbol)
+Base.propertynames(::ContinuousEvolution) = (:grid,:dt)
+function Base.getproperty(e::ContinuousEvolution,key::Symbol)
     key in (:grid,:dt) || throw(ArgumentError("Evolution exposes only grid and dt; numerical storage is private"))
     return getfield(e,key)
 end
@@ -24,7 +35,7 @@ function Evolution(fit::GrowthSolution; dt)
     system = sparse(I - dt*A)
     preferred = preferred_blocksize(fit.grid)
     solver = SparseBlockSolver(system; blocksize=independent_blocksize(system,preferred))
-    return Evolution(OWNED, deepcopy(fit.grid), copy(A), solver, float(dt))
+    return ContinuousEvolution(OWNED, deepcopy(fit.grid), copy(A), solver, float(dt))
 end
 
 struct Trajectory{G,T,M,S,D}
@@ -73,7 +84,7 @@ function observation_times(times,t0)
     return t
 end
 
-function walk_observations(emit, e::Evolution, initial::StateDistribution, times, t0)
+function walk_observations(emit, e::ContinuousEvolution, initial::StateDistribution, times, t0)
     compatible_grid(e.grid, initial.grid) || throw(ArgumentError("Initial distribution grid differs from evolution grid"))
     validate_probability(getfield(initial,:probabilities))
     T = promote_type(eltype(getfield(e,:generator)),eltype(getfield(initial,:probabilities)))
@@ -122,7 +133,7 @@ end
 integration_settings(e,t0) = (dt=e.dt,t0=float(t0),algorithm=:implicit_euler,interpolation=:linear_mass)
 
 """Store distributions at all requested times. Lookup is only at saved times."""
-function trajectory(e::Evolution, initial::StateDistribution, times; t0=0.0)
+function trajectory(e::ContinuousEvolution, initial::StateDistribution, times; t0=0.0)
     t = observation_times(times,t0)
     T = promote_type(eltype(getfield(e,:generator)),eltype(getfield(initial,:probabilities)))
     saved = Matrix{T}(undef,length(e.grid),length(t))
@@ -135,7 +146,7 @@ end
 """Return only the final distribution after a duration, without retaining history.
 This is a fresh one-shot integration, not incremental numerical continuation.
 """
-function advance(e::Evolution, initial::StateDistribution, duration; t0=0.0)
+function advance(e::ContinuousEvolution, initial::StateDistribution, duration; t0=0.0)
     isfinite(duration) && duration >= 0 || throw(ArgumentError("Duration must be finite and nonnegative"))
     times = observation_times([t0+duration],t0)
     T = promote_type(eltype(getfield(e,:generator)),eltype(getfield(initial,:probabilities)))
@@ -147,7 +158,7 @@ function advance(e::Evolution, initial::StateDistribution, duration; t0=0.0)
 end
 
 """Stream named expectations of named-state functions without storing distributions."""
-function observe(e::Evolution, initial::StateDistribution, times, observables::NamedTuple; t0=0.0)
+function observe(e::ContinuousEvolution, initial::StateDistribution, times, observables::NamedTuple; t0=0.0)
     isempty(observables) && throw(ArgumentError("Supply at least one named observable"))
     t = observation_times(times,t0)
     weights = map(f -> vec([f(grid_state(e.grid,i)) for i in CartesianIndices(size(e.grid))]),observables)

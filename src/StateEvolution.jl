@@ -104,7 +104,7 @@ function stationary_mass(A_t::SparseMatrixCSC; initial_mass=nothing)
         stationary_mass = solve_sparse_factor(factor_sparse(block), rhs)
         mass[states] .= weight .* stationary_mass ./ sum(stationary_mass)
     end
-    return mass
+    return clip_probability_roundoff!(mass)
 end
 
 # Ability is fixed: population defaults select block masses, not arbitrary
