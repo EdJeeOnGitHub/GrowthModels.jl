@@ -1,6 +1,6 @@
 """Integer-period propagation of individual-risk distributions. Construct with
 `Evolution(fit::DiscreteGrowthSolution)`; no integration timestep is needed."""
-struct DiscreteEvolution{G,P}
+struct DiscreteEvolution{G,P} <: Evolution
     grid::G
     transition::P
     function DiscreteEvolution(::OwnedSnapshot,g,p)

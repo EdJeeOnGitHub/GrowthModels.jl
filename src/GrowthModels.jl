@@ -22,7 +22,7 @@ export MarkovChain, LogAR1, transition, DiscreteEvolution, simulate,
     StateGrid, cell_weights, coordinates, GrowthSolution, solve, regrid,
     require_converged, consumption, capital_drift, technology_crossing,
     StateDistribution, distribution, mass, density, expectation, boundary_mass,
-    Evolution, trajectory, advance, observe, stationary, Trajectory, Observations,
+    Evolution, ContinuousEvolution, trajectory, advance, observe, stationary, Trajectory, Observations,
     at, final, plot_model, plot_diagnostics
 
 include("ReadOnly.jl")

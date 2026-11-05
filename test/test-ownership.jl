@@ -42,6 +42,7 @@ end
     mass(d)[1]=2
     @test expectation(d,s->1.) ≈ 1
     e=Evolution(f;dt=.1)
+    @test e isa Evolution && e isa ContinuousEvolution
     @test_throws ArgumentError e.solver
     @test_throws ArgumentError e.generator
     path=trajectory(e,d,[0.,.1,.25])
