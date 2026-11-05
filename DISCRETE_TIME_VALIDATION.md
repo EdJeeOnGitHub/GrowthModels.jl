@@ -94,6 +94,20 @@ A small Bellman residual bounds iteration error for the interpolated problem;
 it is not evidence by itself of small state-grid or threshold error. These
 experiments support this calibration, not universal error guarantees.
 
+## Absorbing nodes around a smooth steady state
+
+Piecewise-linear continuation can make neighbouring nodes absorbing around one true
+steady state. For default Ramsey parameters with bounds `0.05k*` and `1.5k*`, 1,000
+requested points give two absorbing nodes, 3.6275 and 3.6327, around `k*=3.6302`.
+Paths from below and above end at different nodes, and `stationary` reports multiple
+classes. At 500 points there is one. The error stays near half a grid spacing, but
+the class structure changes qualitatively with resolution.
+
+This is a correct solution of the interpolated problem. Removing it would need
+higher-order interpolation, which loses the interval concavity behind the global
+search. Merging nearby classes could hide a real trap, so `stationary` instead
+reports each class's capital range. Tests pin this behaviour.
+
 ## Policy jump cascade
 
 The escape threshold is the top of a sequence of jumps. Run
@@ -165,7 +179,7 @@ julia --project=. examples/discrete_continuous_limit.jl
 ```
 
 The full package suite passes on Julia 1.12.3, including all existing
-continuous-time tests and 1,108 discrete-time assertions. README examples, the
+continuous-time tests and 1,130 discrete-time assertions. README examples, the
 capital-path example, and the refinement experiment also execute successfully.
 Method-ambiguity detection reports no ambiguities in GrowthModels.
 

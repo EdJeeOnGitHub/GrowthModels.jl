@@ -59,7 +59,8 @@ function discrete_result(m,g,v,ws,initial,settings,n,stop,update,residual,histor
     diagnostics = (stop_reason=stop, iterations=n, update_norm=update,
         residual_norm=residual, value_error_bound=residual/(1-β), budget_error=budget_error,
         admissible=admissible, history=copy(history),
-        boundary=(lower_choice=shaped(ws.capital .== first(g.k)),upper_choice=shaped(ws.capital .== last(g.k))),
+        boundary=(lower_choice=shaped(ws.capital .== first(g.k)),upper_choice=shaped(ws.capital .== last(g.k)),
+            uncovered_steady_states=uncovered_steady_states(m,g)),
         alternative_capital=shaped(ws.alternative_capital), choice_gap=shaped(ws.choice_gap))
     return DiscreteGrowthSolution(OWNED,deepcopy(m),deepcopy(g),shaped(v),policy,
         stop == :converged,diagnostics,settings,shaped(initial),

@@ -299,3 +299,57 @@ end
     @test !haskey(preferences(native),:ρ)
     @test !haskey(preferences(SkibaModel()),:discount)
 end
+
+@testset "Numerical bounds that exclude a steady state" begin
+    uncovered(m,bounds)=solve(m,StateGrid(m;k=(n=100,bounds=bounds))).diagnostics.boundary.uncovered_steady_states
+    skiba=DiscreteSkibaModel()
+    cost=1/skiba.discount-1+skiba.depreciation
+    low=(skiba.α*skiba.A_L/cost)^(1/(1-skiba.α))
+    high=(skiba.α*skiba.A_H/cost)^(1/(1-skiba.α))+skiba.κ
+    # kmax is below the escape threshold: no choice reaches it and the fit converges.
+    truncated=StateGrid(skiba;k=(n=100,bounds=(0.01,3.0)))
+    fit=solve(skiba,truncated)
+    @test fit.converged
+    @test !any(fit.diagnostics.boundary.upper_choice)
+    @test collect(fit.diagnostics.boundary.uncovered_steady_states)≈[high]
+    @test collect(uncovered(skiba,(1.5,8.0)))≈[low]
+    @test isempty(uncovered(skiba,(0.01,8.0)))
+    @test isempty(solve(skiba,StateGrid(skiba)).diagnostics.boundary.uncovered_steady_states)
+    @test_throws ArgumentError (fit.diagnostics.boundary.uncovered_steady_states[1]=0.0)
+    ramsey=DiscreteRamseyCassKoopmansModel()
+    @test length(uncovered(ramsey,(0.01,2.0)))==1
+    @test isempty(uncovered(ResourceModel(ramsey;transfer=0.1),(0.01,8.0)))
+    @test length(uncovered(ResourceModel(ramsey;transfer=0.1),(0.01,2.0)))==1
+    # A low productivity technology has no steady state on its own branch here.
+    @test GrowthModels.capital_steady_states(DiscreteSkibaModel(κ=0.0),1.0)≈[(skiba.α*skiba.A_H/cost)^(1/(1-skiba.α))]
+    # Every represented shock and type contributes, including the highest.
+    types=DiscreteRamseyCassKoopmansModel(productivity=MarkovChain(values=[0.8,1.2],transition=[0.9 0.1;0.1 0.9]),
+        population=Population([0.9,1.1],[0.5,0.5]))
+    @test isempty(solve(types,StateGrid(types)).diagnostics.boundary.uncovered_steady_states)
+    @test length(uncovered(types,(0.01,3.2)))==2
+end
+
+@testset "Interpolation can split one steady state into absorbing nodes" begin
+    # The model has one steady state, but at this resolution two neighbouring nodes
+    # are absorbing. This pins the behaviour and its explanation, not a desired result.
+    m=DiscreteRamseyCassKoopmansModel()
+    state=(m.α*m.A/(1/m.discount-1+m.depreciation))^(1/(1-m.α))
+    g=StateGrid(m;k=(n=1000,bounds=(0.05*state,1.5*state)))
+    fit=solve(m,g)
+    @test fit.converged
+    message=try stationary(fit); "" catch err; sprint(showerror,err) end
+    @test occursin("Multiple stationary classes",message)
+    @test occursin("Capital ranges",message)
+    @test occursin("interpolation artefacts",message)
+    k=collect(g.k)
+    absorbing=[k[i] for i in eachindex(k) if fit.policy.next_capital[i]==k[i]]
+    @test length(absorbing)==2
+    @test absorbing[2]-absorbing[1]≈k[3]-k[2]
+    @test all(x->abs(x-state)<k[3]-k[2],absorbing)
+    # An initial distribution still selects the class weights.
+    initial=distribution(g;masses=fill(1/length(g),size(g)))
+    @test sum(mass(stationary(fit,initial)))≈1
+    # The neighbouring-node resolution returns one class.
+    single=solve(m,StateGrid(m;k=(n=500,bounds=(0.05*state,1.5*state))))
+    @test sum(mass(stationary(single)))≈1
+end
