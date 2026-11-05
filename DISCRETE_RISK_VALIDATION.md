@@ -163,7 +163,7 @@ julia --project=. examples/discrete_risk_refinement.jl 40000
 ```
 
 The full package suites pass on Julia 1.12.3, including the original
-continuous-time regressions, 1,102 deterministic discrete-time assertions, 345
+continuous-time regressions, 1,108 deterministic discrete-time assertions, 345
 stochastic/ability assertions, and the plotting extension. README examples,
 the population/individual-path example, and the refinement experiment execute
 successfully. The implementation adds no dependencies. See the PR for CI results, including the

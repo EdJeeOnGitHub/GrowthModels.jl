@@ -94,8 +94,10 @@ function state_schema(m::ResourceModel)
     base_model(m) isa DiscreteTimeModel && return state_schema(base_model(m))
     return invoke(state_schema,Tuple{Model},m)
 end
+# γ and δ share the continuous-time names. Discounting stays distinct: `discount` is
+# a per-period factor and ρ is a rate, and neither is converted to the other.
 preferences(m::DiscreteTimeModel) =
-    (discount=m.discount, depreciation=m.depreciation, risk_aversion=m.risk_aversion)
+    (γ=m.risk_aversion, discount=m.discount, δ=m.depreciation)
 function discrete_scale(m,s)
     process(m) !== nothing && !haskey(s,:z) && throw(ArgumentError("Productivity state requires z"))
     population(m) !== nothing && !haskey(s,:ability) && throw(ArgumentError("Ability state requires ability"))
@@ -105,7 +107,7 @@ production(m::DiscreteRamseyCassKoopmansModel, s::NamedTuple) = discrete_scale(m
 production(m::DiscreteSkibaModel, s::NamedTuple) =
     discrete_scale(m,s)*skiba_production_function(s.k,m.α,m.A_H,m.A_L,m.κ)
 technology_crossing(m::DiscreteSkibaModel) = k_star_Skiba(m.α,m.A_H,m.A_L,m.κ)
-discrete_budget(m,s::NamedTuple) = resources(m,s)+(1-preferences(m).depreciation)*s.k
+discrete_budget(m,s::NamedTuple) = resources(m,s)+(1-preferences(m).δ)*s.k
 discrete_budget(m,k::Real) = discrete_budget(m,(k=k,))
 
 function discrete_capital_spec(m,z,ability)
