@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793839793164,
+  "lastUpdate": 1793841106941,
   "repoUrl": "https://github.com/EdJeeOnGitHub/GrowthModels.jl",
   "entries": {
     "Julia benchmark result": [
@@ -255,6 +255,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "inspection 1000_scalar_reads",
             "value": 0.000005547,
+            "unit": "seconds"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "34009555+EdJeeOnGitHub@users.noreply.github.com",
+            "name": "Ed Jee",
+            "username": "EdJeeOnGitHub"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ffce75a7b12e7e96696b370cbd288e89a6caadbd",
+          "message": "Merge pull request #12 from EdJeeOnGitHub/feat/ability-block-solve\n\nfeat: solve independent HJB blocks with threads and warm starts",
+          "timestamp": "2026-11-04T18:10:41-07:00",
+          "tree_id": "f73cb53e8ed907b5fb62d124ea25dc6c5f1c865d",
+          "url": "https://github.com/EdJeeOnGitHub/GrowthModels.jl/commit/ffce75a7b12e7e96696b370cbd288e89a6caadbd"
+        },
+        "date": 1793841106528,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "skiba solve",
+            "value": 0.009022908,
+            "unit": "seconds"
+          },
+          {
+            "name": "skiba trajectory",
+            "value": 0.00162197,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou solve",
+            "value": 0.089449112,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou trajectory",
+            "value": 0.026264859,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou warm_solve",
+            "value": 0.012171298,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou moments",
+            "value": 0.025634718,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou final_only",
+            "value": 0.025636892,
+            "unit": "seconds"
+          },
+          {
+            "name": "inspection 1000_scalar_reads",
+            "value": 0.000004278,
             "unit": "seconds"
           }
         ]
