@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793852483208,
+  "lastUpdate": 1793913914056,
   "repoUrl": "https://github.com/EdJeeOnGitHub/GrowthModels.jl",
   "entries": {
     "Julia benchmark result": [
@@ -383,6 +383,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "inspection 1000_scalar_reads",
             "value": 0.000004466,
+            "unit": "seconds"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "34009555+EdJeeOnGitHub@users.noreply.github.com",
+            "name": "Ed Jee",
+            "username": "EdJeeOnGitHub"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5a47b4dde77cca3b3f181dd7e75d957b8d6d6e2e",
+          "message": "Merge pull request #16 from EdJeeOnGitHub/feat/credit-market\n\nAdd a collateralized credit market with stationary and transition equilibria",
+          "timestamp": "2026-11-05T14:24:16-07:00",
+          "tree_id": "d968f9d0baa2ac205c8ac002f6800092296ebb8a",
+          "url": "https://github.com/EdJeeOnGitHub/GrowthModels.jl/commit/5a47b4dde77cca3b3f181dd7e75d957b8d6d6e2e"
+        },
+        "date": 1793913913496,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "skiba solve",
+            "value": 0.008804199,
+            "unit": "seconds"
+          },
+          {
+            "name": "skiba trajectory",
+            "value": 0.001586886,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou solve",
+            "value": 0.100562294,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou trajectory",
+            "value": 0.025661448,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou warm_solve",
+            "value": 0.01304569,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou moments",
+            "value": 0.025569056,
+            "unit": "seconds"
+          },
+          {
+            "name": "ou final_only",
+            "value": 0.025562414,
+            "unit": "seconds"
+          },
+          {
+            "name": "inspection 1000_scalar_reads",
+            "value": 0.000002193,
             "unit": "seconds"
           }
         ]
