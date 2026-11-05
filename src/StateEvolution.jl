@@ -60,6 +60,8 @@ function closed_communicating_classes(A_t::SparseMatrixCSC)
     return components[closed], findall(v -> !closed[labels[v]], 1:n)
 end
 
+const ABSORPTION_TOLERANCE = 1e-8
+
 """
     stationary_mass(A_t; initial_mass=nothing)
 
@@ -104,6 +106,16 @@ function stationary_mass(A_t::SparseMatrixCSC; initial_mass=nothing)
         stationary_mass = solve_sparse_factor(factor_sparse(block), rhs)
         mass[states] .= weight .* stationary_mass ./ sum(stationary_mass)
     end
+    # Escape from a nearly closed set of transient states can be possible but take far
+    # longer than any relevant horizon (metastability). The transient solve is then
+    # singular to machine precision and the absorbed mass no longer sums to one. Only
+    # roundoff is rescaled; anything larger is reported, never hidden.
+    total = primal(sum(mass))
+    abs(total-1) <= ABSORPTION_TOLERANCE || throw(ArgumentError(
+        "Stationary absorption weights sum to $total (tolerance $ABSORPTION_TOLERANCE): some states are " *
+        "metastable, so escape is possible but too slow to compute reliably. Use a finite horizon, " *
+        "such as advance(Evolution(fit; dt), initial, horizon)"))
+    mass ./= sum(mass)
     return clip_probability_roundoff!(mass)
 end
 
