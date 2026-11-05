@@ -21,7 +21,6 @@ struct HJBWorkspace{T,D,C}
     diagonal::Vector{Int}
     backward::Vector{Int}
     forward::Vector{Int}
-    blocksize::Int
 end
 
 model_eltype(::Model{T}) where T = T
@@ -85,12 +84,11 @@ function HJBWorkspace(m::Model, grid::StateGrid; value_type=Float64)
             forward[row] = ptr
         end
     end
-    blocksize = preferred_blocksize(grid)
     return HJBWorkspace(coordinates, y, c0, dkf, dkb,
         zeros(T, dims), zeros(T, dims), max.(c0, eps()).^(-preferences(m).γ),
         zeros(T, dims), falses(dims), falses(dims), falses(dims),
         zeros(T, n), zeros(T, dims), A, copy(A), copy(nonzeros(A)),
-        diagonal, backward, forward, blocksize)
+        diagonal, backward, forward)
 end
 
 function prepare_hjb_step!(ws::HJBWorkspace, m, v, Delta)

@@ -25,7 +25,9 @@ from those earlier scientific corrections.
 6. Differentiation shares primal factors across tangent directions, including
    nested dual numbers.
 7. Deterministic HJB systems use tridiagonal elimination; fixed-ability models
-   use independent sparse blocks. Stable sparse patterns permit symbolic reuse.
+   use independent sparse blocks, solved on Julia's threads and warm started from
+   a neighbouring block (see `src/BlockSolve.jl`). Stable sparse patterns permit
+   symbolic reuse.
 
 The HJB implementations now share one iteration loop and policy-selection
 routine. `HJBWorkspace.jl`, `EvolutionWorkspace.jl`, and `LinearSolvers.jl`
