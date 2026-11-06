@@ -171,10 +171,14 @@ function credit_step(m,ws,V,β,γ)
     nx,nz,na = size(V)
     G = zeros(length(ws.s),nz,na)
     nodes = zeros(length(ws.s),nz,na)
-    for a in 1:na, z in 1:nz, j in eachindex(ws.s)
-        q = allocate(m,ws,V,ws.s[j],z,a)
-        G[j,z,a] = q.value
-        nodes[j,z,a] = q.capital
+    # Productivity and ability blocks are independent and write disjoint entries.
+    Threads.@threads for block in 1:nz*na
+        z,a = mod1(block,nz),cld(block,nz)
+        for j in eachindex(ws.s)
+            q = allocate(m,ws,V,ws.s[j],z,a)
+            G[j,z,a] = q.value
+            nodes[j,z,a] = q.capital
+        end
     end
     all(isfinite,G) || throw(ArgumentError("Nonfinite continuation values"))
     out = similar(V)
@@ -218,7 +222,14 @@ function lottery_capital(ws,savings,nodes)
 end
 function policy_value(m,ws,V,savings,nodes,reward,β)
     nx,nz,na = size(V)
-    return [reward[i,z,a]+β*lottery_value(m,ws,V,savings[i,z,a],nodes,z,a) for i in 1:nx,z in 1:nz,a in 1:na]
+    out = similar(V)
+    Threads.@threads for block in 1:nz*na
+        z,a = mod1(block,nz),cld(block,nz)
+        for i in 1:nx
+            out[i,z,a] = reward[i,z,a]+β*lottery_value(m,ws,V,savings[i,z,a],nodes,z,a)
+        end
+    end
+    return out
 end
 
 """Solution of a [`DiscreteCreditModel`](@ref): value and policies on the cash-on-hand
