@@ -19,7 +19,10 @@ static choice given by [`capital_choice`](@ref). Wealth follows
 chosen capital.
 
 Skiba and Ramsey production are supported, with Ornstein-Uhlenbeck productivity and
-fixed ability where present, including a `ResourceModel` that only changes the population. A fixed `r` is a small open economy; use
+fixed ability where present, as is a [`FunctionalModel`](@ref) whose production is a
+[`ScaledProduction`](@ref) (an arbitrary increasing technology, e.g. an estimated curve). A
+`ResourceModel` around any of these adds its transfer to income, `ȧ = profit + r*a + w - c`,
+with its income floor applied to `profit + r*a + w`. A fixed `r` is a small open economy; use
 [`credit_equilibrium`](@ref) to find the rate that clears the market. The Skiba offset
 `κ` is ordinary capital here: fully reversible and pledgeable like any other.
 """
@@ -48,12 +51,9 @@ credit_technologies(m::Model) = throw(ArgumentError(
     "CreditModel supports Skiba and Ramsey production with Ornstein-Uhlenbeck productivity, not $(nameof(typeof(m)))"))
 skiba_technologies(m) = ((A=m.A_L,κ=zero(m.κ)),(A=m.A_H,κ=m.κ))
 ramsey_technologies(m) = ((A=m.A,κ=zero(m.A)),)
-# A wrapper can change population, but transfers would need their own treatment here.
-function credit_technologies(m::ResourceModel)
-    iszero(m.transfer) && m.income_floor == -Inf ||
-        throw(ArgumentError("CreditModel does not yet support ResourceModel transfers or income floors"))
-    return credit_technologies(m.model)
-end
+# Transfers and income floors enter income in `resources` below; the technology is the wrapped one.
+credit_technologies(m::ResourceModel) = credit_technologies(m.model)
+credit_technologies(m::FunctionalModel{T,<:ScaledProduction,<:OrnsteinUhlenbeckProcess}) where T = m.f
 credit_technologies(m::SkibaModel) = skiba_technologies(m)
 credit_technologies(m::RamseyCassKoopmansModel) = ramsey_technologies(m)
 credit_technologies(m::StochasticSkibaModel{T,<:OrnsteinUhlenbeckProcess}) where T = skiba_technologies(m)
@@ -72,11 +72,15 @@ function capital_choice(m::CreditModel,s::NamedTuple)
     scale = (process(m) === nothing ? one(s.k) : s.z)*(population(m) === nothing ? one(s.k) : s.ability)
     cost = m.r+preferences(m).δ
     limit = m.λ*s.k
+    techs = credit_technologies(base)
+    if techs isa ScaledProduction
+        choice = scaled_capital_choice(techs,scale,cost,limit)
+        return (capital=choice.capital,profit=choice.profit,technology=1)
+    end
     technology_choice(tech,index) = begin
         k = min(limit,tech.κ+(base.α*tech.A*scale/cost)^(1/(1-base.α)))
         (capital=k,profit=scale*tech.A*(k-tech.κ)^base.α-cost*k,technology=index)
     end
-    techs = credit_technologies(base)
     best = technology_choice(techs[1],1)
     for index in 2:length(techs)
         techs[index].κ < limit || continue
@@ -86,8 +90,11 @@ function capital_choice(m::CreditModel,s::NamedTuple)
     return best
 end
 production(m::CreditModel,s::NamedTuple) = production(m.model,merge(s,(k=capital_choice(m,s).capital,)))
-# The solver subtracts δ*a to get drift, leaving profit + r*a before consumption.
-resources(m::CreditModel,s::NamedTuple) = capital_choice(m,s).profit+(m.r+preferences(m).δ)*s.k
+# The solver subtracts δ*a to get drift, leaving profit + r*a (+ transfer, floored) before consumption.
+credit_income(::Model,income) = income
+credit_income(w::ResourceModel,income) = max(credit_income(w.model,income)+w.transfer,w.income_floor)
+resources(m::CreditModel,s::NamedTuple) =
+    credit_income(m.model,capital_choice(m,s).profit+m.r*s.k)+preferences(m).δ*s.k
 marginal_product(m::CreditModel,s::NamedTuple) = marginal_product(m.model,merge(s,(k=capital_choice(m,s).capital,)))
 
 # Wealth outruns capital as r nears ρ, so the capital proposal is only a starting point.

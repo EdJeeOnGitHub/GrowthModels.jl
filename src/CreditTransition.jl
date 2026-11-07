@@ -125,7 +125,7 @@ end
 function set_income!(ws,base,λ,r,states)
     m = credit_model_at(base,λ,r)
     δ,γ = preferences(base).δ,preferences(base).γ
-    for i in eachindex(states)
+    Threads.@threads for i in eachindex(states)
         s = states[i]
         y = resources(m,s)
         ws.y[i] = y
@@ -220,7 +220,7 @@ end
 """
     credit_transition(model, grid, initial; λ, T=100.0, dt=0.25, terminal=nothing,
         initial_rates=nothing, damping=0.3, rate_tolerance=1e-5, maxiters=300,
-        boundary_tolerance=1e-4)
+        boundary_tolerance=1e-4, progress=false)
 
 The perfect-foresight path after an unanticipated change to collateral limit `λ` at
 `t=0`, from the distribution `initial` to the stationary equilibrium at `λ`. `terminal`
@@ -240,7 +240,7 @@ the trap are rare. Non-convergence returns the last iterate; use `require_conver
 Automatic differentiation is not supported.
 """
 function credit_transition(base::Model,grid::StateGrid,initial::StateDistribution; λ,T=100.0,dt=0.25,
-        terminal=nothing,initial_rates=nothing,damping=0.3,rate_tolerance=1e-5,maxiters=300,boundary_tolerance=1e-4)
+        terminal=nothing,initial_rates=nothing,damping=0.3,rate_tolerance=1e-5,maxiters=300,boundary_tolerance=1e-4,progress=false)
     credit_technologies(base)
     model_eltype(base) === Float64 || throw(ArgumentError("credit_transition requires Float64 model parameters; automatic differentiation is not supported"))
     compatible_grid(grid,initial.grid) || throw(ArgumentError("Initial distribution grid differs from grid"))
@@ -276,15 +276,18 @@ function credit_transition(base::Model,grid::StateGrid,initial::StateDistributio
         iterations = iteration
         value = backward_pass!(cache,rates)
         forward_pass!(cache)
-        largest_excess = 0.0
-        for n in 1:N
+        # Each date clears on its own distribution, so dates are independent.
+        excesses = zeros(N)
+        Threads.@threads for n in 1:N
             p = view(cache.masses,:,n)
             wealth = sum(p[i]*cache.states[i].k for i in eachindex(p))
-            largest_excess = max(largest_excess,abs(capital_demand(base,λ,rates[n],cache.states,p)-wealth)/wealth)
+            excesses[n] = abs(capital_demand(base,λ,rates[n],cache.states,p)-wealth)/wealth
             targets[n] = static_clearing_rate(base,λ,cache.states,p,wealth,rates[n])
         end
+        largest_excess = maximum(excesses)
         rate_change = maximum(abs,targets.-rates)
         push!(history,(iteration=iteration,rate_change=rate_change,relative_excess=largest_excess))
+        progress && (println("credit_transition iteration=$iteration rate_change=$(round(rate_change;sigdigits=3)) excess=$(round(largest_excess;sigdigits=3))"); flush(stdout))
         if rate_change <= rate_tolerance
             converged = true
             break
